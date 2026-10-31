@@ -27,6 +27,8 @@ struct ModelInput
     int think_min_tokens_ = 0;
     int think_max_tokens_ = 0;
     int think_ctx_reserve_ = 0;
+
+    bool think_force_min_floor_ = false;
 };
 
 struct PromptType : public BaseEnum
@@ -52,7 +54,6 @@ struct PromptType : public BaseEnum
         }
     }
 };
-
 
 struct ModelType : public BaseEnum
 {
@@ -202,4 +203,4 @@ struct QNNEmbedding
     void Clean();
 };
 
-#endif //MODEL_TYPE_H
+#endif

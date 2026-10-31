@@ -99,4 +99,4 @@ private:
     std::string last_used_endpoint_;
 };
 
-#endif // CLOUD_MODEL_CLIENT_H
+#endif

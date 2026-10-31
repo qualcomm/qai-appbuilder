@@ -16,7 +16,10 @@
 #include "log.h"
 #include "utils.h"
 #include "llama_speculative_config.h"
+#include "degenerate_repeat_guard.h"
+#include "think_budget_floor.h"
 #include "watermark_provider_host.h"
+#include "llama_watermark_sampler.h"
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -26,6 +29,8 @@
 #include <thread>
 #include <chrono>
 #include <atomic>
+#include <cstddef>
+#include <utility>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -33,6 +38,10 @@ namespace fs = std::filesystem;
 static std::atomic<bool> g_llama_prefix_cache_enabled{true};
 static std::atomic<int> g_llama_prefix_head_checkpoints{2};
 static std::atomic<bool> g_llama_prefix_head_checkpoints_explicit{false};
+static std::atomic<bool> g_degenerate_repeat_guard_enabled{true};
+static std::atomic<int> g_degenerate_repeat_guard_max_period{48};
+static std::mutex g_llama_backend_mutex;
+static std::atomic<int> g_llama_backend_refs{0};
 
 static inline int64_t now_ms()
 {
@@ -40,100 +49,44 @@ static inline int64_t now_ms()
         std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-namespace {
+class LlamaBackendRef
+{
+public:
+    LlamaBackendRef() = default;
 
-struct WatermarkSamplerData {
-    const GenieWatermarkProviderVTable* vtable;
-    GenieWatermarkTokenHook*             hook;
-    uint32_t                             n_vocab;
-    uint64_t                             seed;
+    LlamaBackendRef(const LlamaBackendRef &) = delete;
+
+    LlamaBackendRef &operator=(const LlamaBackendRef &) = delete;
+
+    void Acquire()
+    {
+        std::lock_guard<std::mutex> lk(g_llama_backend_mutex);
+        if (!acquired_)
+        {
+            if (g_llama_backend_refs.fetch_add(1) == 0)
+            {
+                llama_backend_init();
+            }
+            acquired_ = true;
+        }
+    }
+
+    ~LlamaBackendRef()
+    {
+        if (!acquired_)
+        {
+            return;
+        }
+        std::lock_guard<std::mutex> lk(g_llama_backend_mutex);
+        if (g_llama_backend_refs.fetch_sub(1) == 1)
+        {
+            llama_backend_free();
+        }
+    }
+
+private:
+    bool acquired_{false};
 };
-
-static const char* wm_name(const llama_sampler * /*smpl*/)
-{
-    return "genie_watermark";
-}
-
-static void wm_accept(llama_sampler * smpl, llama_token token)
-{
-    auto* d = static_cast<WatermarkSamplerData*>(smpl->ctx);
-    d->vtable->token_hook_accept(d->hook, static_cast<int32_t>(token));
-}
-
-static void wm_apply(llama_sampler * smpl, llama_token_data_array * cur_p)
-{
-    if (cur_p->size == 0) { return; }
-    auto* d = static_cast<WatermarkSamplerData*>(smpl->ctx);
-    const size_t n = cur_p->size;
-    std::vector<int32_t> ids(n);
-    std::vector<float>   logits(n);
-    for (size_t i = 0; i < n; ++i) {
-        ids[i]    = static_cast<int32_t>(cur_p->data[i].id);
-        logits[i] = cur_p->data[i].logit;
-    }
-    d->vtable->token_hook_apply(d->hook, logits.data(), ids.data(), static_cast<int32_t>(n));
-    for (size_t i = 0; i < n; ++i) {
-        cur_p->data[i].logit = logits[i];
-    }
-    cur_p->sorted = false;
-}
-
-static llama_sampler * wm_clone(const llama_sampler * smpl);
-static void wm_reset(llama_sampler * smpl);
-static void wm_free(llama_sampler * smpl);
-
-static llama_sampler_i kWatermarkSamplerIface = {
-    wm_name,   // name
-    wm_accept, // accept
-    wm_apply,  // apply
-    wm_reset,  // reset
-    wm_clone,  // clone
-    wm_free,   // free
-    nullptr,   // backend_init
-    nullptr,   // backend_accept
-    nullptr,   // backend_apply
-    nullptr,   // backend_set_input
-};
-
-static llama_sampler * wm_clone(const llama_sampler * smpl)
-{
-    // Speculative-decoding: create a fresh hook from stored n_vocab/seed rather
-    // than copying live watermark state, so each "what-if" branch starts clean.
-    const auto* d = static_cast<const WatermarkSamplerData*>(smpl->ctx);
-    auto* new_data = new WatermarkSamplerData{
-        d->vtable,
-        d->vtable->token_hook_create(d->n_vocab, d->seed),
-        d->n_vocab,
-        d->seed
-    };
-    return llama_sampler_init(&kWatermarkSamplerIface, static_cast<llama_sampler_context_t>(new_data));
-}
-
-static void wm_reset(llama_sampler * smpl)
-{
-    auto* d = static_cast<WatermarkSamplerData*>(smpl->ctx);
-    d->vtable->token_hook_reset(d->hook);
-}
-
-static void wm_free(llama_sampler * smpl)
-{
-    auto* d = static_cast<WatermarkSamplerData*>(smpl->ctx);
-    if (d) {
-        d->vtable->token_hook_free(d->hook);
-        delete d;
-    }
-}
-
-static llama_sampler* create_watermark_sampler(const GenieWatermarkProviderVTable* vtable,
-                                               GenieWatermarkTokenHook*             hook,
-                                               uint32_t                             n_vocab,
-                                               uint64_t                             seed)
-{
-    auto* d = new WatermarkSamplerData{vtable, hook, n_vocab, seed};
-    return llama_sampler_init(&kWatermarkSamplerIface, static_cast<llama_sampler_context_t>(d));
-}
-
-} // namespace
 
 class LLAMACppBuilder::Impl
 {
@@ -157,10 +110,14 @@ public:
 
         RegisterLogAdapter();
 
-        llama_backend_init();
+        backend_ref_.Acquire();
         llama_numa_init(params_.numa);
 
+        const auto main_init_start = std::chrono::steady_clock::now();
         llama_init = common_init_from_params(params_);
+        My_Log{} << "[LLAMACpp][timing] stage=main_model_init ms="
+                 << std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - main_init_start).count() << "\n";
         llama_model *model = llama_init->model();
         llama_context *ctx = llama_init->context();
 
@@ -182,8 +139,6 @@ public:
             throw std::runtime_error("failed to initialize sampling subsystem");
         }
 
-        // Insert watermark adapter at the absolute front of the sampling chain (once, at construction).
-        // When GENIE_WATERMARK_ENABLE is unset / plugin absent, HasTokenHook() is false → zero overhead.
         if (WatermarkProviderHost::Instance().HasTokenHook())
         {
             const GenieWatermarkProviderVTable* vt = WatermarkProviderHost::Instance().GetVTable();
@@ -213,7 +168,6 @@ public:
             }
         }
 
-        // 线程池创建与绑定，对齐 completion.cpp:163-202
         auto *cpu_dev = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_CPU);
         if (!cpu_dev)
         {
@@ -248,7 +202,6 @@ public:
 
         llama_attach_threadpool(ctx, threadpool, threadpool_batch);
 
-        // 重置性能计数器，从这里开始测量（对齐 completion.cpp:161）
         llama_perf_context_reset(ctx);
 
         if (!llama_model_has_encoder(model))
@@ -256,19 +209,20 @@ public:
             GGML_ASSERT(!llama_vocab_get_add_eos(vocab));
         }
 
-        // 仅当模型声明了 draft_model 字段（params_.speculative.draft.mparams.path 非空，由外层
-        // LLAMACppBuilder 构造函数注入）时才激活投机解码；未声明的模型完全跳过本块。
         is_speculative_ = !params_.speculative.draft.mparams.path.empty();
         if (is_speculative_)
         {
             common_params params_dft = common_base_params_to_speculative(params_);
-            // common_base_params_to_speculative() 整份复制主模型 params（含 flash_attn_type），
-            // 草稿 context 由本服务自己创建，故在此单独覆盖，使主模型/草稿的 FA 可以分别取值。
+
             params_dft.flash_attn_type = draft_flash_attn_;
             My_Log{} << "[LLAMACpp] draft flash_attn: "
                      << llama_flash_attn_type_name(params_dft.flash_attn_type)
                      << " (target: " << llama_flash_attn_type_name(params_.flash_attn_type) << ")\n";
+            const auto draft_init_start = std::chrono::steady_clock::now();
             draft_init_ = common_speculative_init_from_params(params_dft, model, ctx);
+            My_Log{} << "[LLAMACpp][timing] stage=draft_model_init ms="
+                     << std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - draft_init_start).count() << "\n";
             if (!draft_init_ || !draft_init_->model() || !draft_init_->context())
             {
                 throw std::runtime_error("unable to load draft model for speculative decoding");
@@ -277,7 +231,11 @@ public:
             params_.speculative.draft.ctx_tgt = ctx;
             params_.speculative.draft.ctx_dft = draft_init_->context();
 
+            const auto speculative_state_start = std::chrono::steady_clock::now();
             spec_.reset(common_speculative_init(params_.speculative, /*n_seq=*/1));
+            My_Log{} << "[LLAMACpp][timing] stage=speculative_state_init ms="
+                     << std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - speculative_state_start).count() << "\n";
             if (!spec_)
             {
                 throw std::runtime_error("failed to initialize speculative decoding state");
@@ -289,12 +247,31 @@ public:
                      << ", p_min=" << params_.speculative.draft.p_min
                      << ", n_gpu_layers=" << params_.speculative.draft.n_gpu_layers << "\n";
 
+            const auto reserve_start = std::chrono::steady_clock::now();
             ReserveWorstCaseGraph(ctx);
+            My_Log{} << "[LLAMACpp][timing] stage=reserve_worst_case_graph ms="
+                     << std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - reserve_start).count() << "\n";
         }
     }
 
     void ReserveWorstCaseGraph(llama_context *ctx)
     {
+        auto log_gpu_memory = [](const char *phase)
+        {
+            ggml_backend_dev_t gpu = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
+            if (!gpu)
+            {
+                My_Log{} << "[LLAMACpp][memory] phase=" << phase << " gpu=unavailable\n";
+                return;
+            }
+            size_t free = 0;
+            size_t total = 0;
+            ggml_backend_dev_memory(gpu, &free, &total);
+            My_Log{} << "[LLAMACpp][memory] phase=" << phase
+                     << " free_bytes=" << free << " total_bytes=" << total << "\n";
+        };
+        log_gpu_memory("reserve_before");
         llama_token warmup_tok = llama_vocab_bos(vocab);
         if (warmup_tok == LLAMA_TOKEN_NULL)
         {
@@ -317,12 +294,14 @@ public:
                                      std::to_string(rc));
         }
         My_Log{} << "[LLAMACpp] worst-case graph reserve: done\n";
+        log_gpu_memory("reserve_after");
     }
 
     bool Query(const std::string &prompt,
                const std::function<bool(std::string &)> &callback,
                const std::function<bool()> &prefill_heartbeat,
-               const char *query_type, bool is_aux_inference)
+               const char *query_type, bool is_aux_inference,
+               const std::atomic<uint64_t> &stop_epoch, uint64_t entry_epoch)
     {
         auto t_query_start = std::chrono::steady_clock::now();
 
@@ -338,10 +317,15 @@ public:
             std::lock_guard<std::mutex> lk(m);
             done = false;
         }
+        const auto is_stop_requested = [&stop_epoch, entry_epoch]()
+        {
+            return stop_epoch.load() != entry_epoch;
+        };
 
         stopped_by_output_limit_ = false;
         if (!is_aux_inference)
         {
+            std::lock_guard<std::mutex> metrics_lock(trace_metrics_mutex_);
             last_trace_metrics_ = nullptr;
         }
         int n_generated = 0;
@@ -366,13 +350,12 @@ public:
 
         const int n_ctx = llama_n_ctx(ctx);
 
-        // tokenize prompt，对齐 completion.cpp:318-320
         const bool add_bos = llama_vocab_get_add_bos(vocab) && !params_.use_jinja;
         embd_inp = common_tokenize(ctx, prompt, true, true);
 
         if (embd_inp.empty())
         {
-            // 对齐 completion.cpp:330-339：空 prompt 时退化为仅一个 BOS token，否则报错。
+
             if (add_bos)
             {
                 embd_inp.push_back(llama_vocab_bos(vocab));
@@ -390,7 +373,6 @@ public:
         My_Log{} << "[LLAMACpp] " << query_type
                  << " Tokenization done: " << embd_inp.size() << " tokens (add_bos=" << add_bos << ")\n";
 
-        // n_keep 是本次调用范围内的局部值，不写回 params_，对齐 completion.cpp:399-404
         int n_keep;
         if (params_.n_keep < 0 || params_.n_keep > (int) embd_inp.size())
         {
@@ -409,7 +391,7 @@ public:
         int total_prefill_tokens = 0;
         int total_decode_batches = 0;
         int64_t t_gen_start_ms = 0;
-        std::string generated_text_buf;  // 累积生成文本（用于日志）
+        std::string generated_text_buf;
         int64_t n_draft_proposed_total = 0;
         int64_t n_draft_accepted_total = 0;
         std::vector<int64_t> draft_accept_hist;
@@ -420,12 +402,8 @@ public:
         int64_t spec_rounds = 0;
 
         auto t_last_prefill_heartbeat = std::chrono::steady_clock::now();
-        constexpr int64_t kPrefillHeartbeatIntervalMs = 5000; // 每 5 秒发一次心跳
+        constexpr int64_t kPrefillHeartbeatIntervalMs = 5000;
 
-        // common_token_to_piece() emits text one token at a time, and a multi-byte UTF-8
-        // character can legitimately be split across two tokens. Buffer until the character is
-        // complete before forwarding to callback, otherwise a truncated tail reaches the SSE
-        // JSON encoder as invalid UTF-8 (garbled output, or an assertion in a debug-enabled build).
         Utf8StreamProcessor token_utf8_processor([&](std::string &complete_chars)
                                                   {
                                                       if (!callback(complete_chars))
@@ -434,8 +412,6 @@ public:
                                                       }
                                                   });
 
-        // 投机解码时 embd_inp 的最后一个 token 保留不预先 decode（作为首轮 id_last、略后一同与
-        // draft 批量一并验证），与现有单模型路径完全一致。
         const int effective_prompt_len = is_speculative_
                 ? std::max(0, (int) embd_inp.size() - 1)
                 : (int) embd_inp.size();
@@ -508,8 +484,10 @@ public:
                 budget = std::min<int64_t>(budget, think_max_tokens_);
             }
             budget = std::max<int64_t>(budget, think_min_tokens_);
-            budget = std::max<int64_t>(0, std::min(budget, ctx_left));
-            think_budget_tokens = (int32_t) budget;
+
+            const int64_t pre_floor_budget = std::max<int64_t>(0, std::min(budget, ctx_left));
+            think_budget_tokens = think_budget_floor::ApplyThinkBudgetFloor(
+                budget, ctx_left, think_min_tokens_, think_force_min_floor_);
             think_in_progress = true;
             think_token_start = 0;
             static const std::string kOpenThink = "<think>\n";
@@ -518,20 +496,20 @@ public:
             My_Log{} << "[LLAMACpp] " << query_type << " adaptive think budget=" << think_budget_tokens
                      << " (tg_rate=" << tg_rate << ", time_budget_s=" << think_time_budget_s_
                      << ", ctx_left=" << ctx_left << ")\n";
+            if (think_force_min_floor_ && think_budget_tokens > pre_floor_budget)
+            {
+                My_Log{My_Log::Level::kInfo}
+                    << "[LLAMACpp] " << query_type
+                    << " forced-unblock think budget floor applied: would be clamped to "
+                    << pre_floor_budget << ", floored to " << think_budget_tokens
+                    << " (本轮由限流死锁兜底强制放行，给予最小保底思考预算)\n";
+            }
         }
 
-        // 共享的逐 token 输出管线：回调/停止序列检测/输出长度限制，单模型解码与投机
-        // 解码验证轮次产出的 token 共用同一套逻辑（D5）。返回 false 表示应停止生成
-        // （should_stop/eog_hit/输出长度限制均已通过外层捕获的引用置位）。
         auto emit_generated_token = [&](llama_token id) -> bool
         {
             std::string token_str = common_token_to_piece(ctx, id, params_.special);
 
-            // Qwen ChatML 对话轮次结束标记 <|im_end|>：部分 GGUF 量化转换未在词表元数据里把它标记
-            // 为 EOG token（llama_vocab_is_eog 判定为 false），导致它作为普通文本被生成并残留在
-            // 最终 content 字段里。在推入输出管线之前拦截该字面值，复用与 EOG 命中完全相同的
-            // eog_hit 分支结束生成，不新增并行输出路径（D5）。其它模型（gemma4/gpt-oss-20b 等）
-            // 词表不会产出恰好等于该字面值的 token，零影响。
             if (token_str == "<|im_end|>")
             {
                 eog_hit = true;
@@ -596,9 +574,74 @@ public:
             return true;
         };
 
-        // 线性推理主循环，对齐 completion.cpp 非交互（-no-cnv）分支：溢出平移 → 分批 decode → 采样 → 回显 → EOG/n_predict 退出
+        degenerate_repeat_guard::StreamGuard repeat_guard(
+                g_degenerate_repeat_guard_enabled.load(),
+                std::max(0, g_degenerate_repeat_guard_max_period.load()));
+        std::vector<std::pair<llama_token, int>> guard_pending;
+        bool degenerate_loop_hit = false;
+
+        auto flush_guard_pending = [&]() -> bool
+        {
+            for (const auto &pending : guard_pending)
+            {
+                if (!emit_generated_token(pending.first))
+                {
+                    guard_pending.clear();
+                    return false;
+                }
+            }
+            guard_pending.clear();
+            return true;
+        };
+
+        auto guarded_emit = [&](llama_token id, int kv_pos) -> bool
+        {
+
+            const bool terminal = (params_.n_predict > 0 && n_remain <= 0)
+                                  || llama_vocab_is_eog(vocab, id);
+            const auto decision = repeat_guard.Observe(static_cast<int32_t>(id), terminal);
+            switch (decision.action)
+            {
+                case degenerate_repeat_guard::Action::kEmit:
+                    return emit_generated_token(id);
+                case degenerate_repeat_guard::Action::kHold:
+                    guard_pending.emplace_back(id, kv_pos);
+                    return true;
+                case degenerate_repeat_guard::Action::kFlush:
+                    guard_pending.emplace_back(id, kv_pos);
+                    return flush_guard_pending();
+                case degenerate_repeat_guard::Action::kAbort:
+                {
+                    guard_pending.emplace_back(id, kv_pos);
+                    const int rollback_pos = guard_pending.front().second;
+                    guard_pending.clear();
+                    n_past = rollback_pos;
+                    if (!is_speculative_)
+                    {
+                        llama_memory_seq_rm(mem, 0, rollback_pos, -1);
+                    }
+                    degenerate_loop_hit = true;
+                    should_stop = true;
+                    My_Log{My_Log::Level::kWarning}
+                        << "[LLAMACpp] " << query_type
+                        << " Degenerate repeat guard stopped period=" << decision.period
+                        << " rollback_pos=" << rollback_pos << "\n";
+                    return false;
+                }
+            }
+            return true;
+        };
+
         while (n_remain != 0)
         {
+            if (is_stop_requested())
+            {
+                should_stop = true;
+                My_Log{My_Log::Level::kWarning}
+                    << "[LLAMACpp] " << query_type << " Query interrupted by Stop() after "
+                    << n_generated << " tokens\n";
+                break;
+            }
             if (!embd.empty())
             {
                 int max_embd_size = n_ctx - 4;
@@ -607,7 +650,6 @@ public:
                     embd.resize(max_embd_size);
                 }
 
-                // 上下文溢出时的 n_keep 平移（对齐 completion.cpp:609-637）
                 if (n_past + (int) embd.size() >= n_ctx)
                 {
                     const int n_left = n_past - n_keep;
@@ -623,7 +665,6 @@ public:
                         << " Context overflow: discarded " << n_discard << " tokens, n_past=" << n_past << "\n";
                 }
 
-                // 按 n_batch（非 n_ubatch）分批 decode，对齐 completion.cpp:684-703
                 if (!prefill_done && t_prefill_start_ms == 0)
                 {
                     t_prefill_start_ms = now_ms();
@@ -633,18 +674,22 @@ public:
                 {
                     My_Log{My_Log::Level::kError} << "[LLAMACpp] " << query_type << " llama_decode FAILED\n";
                     prefix_cache_valid_ = false;
+                    {
+                        std::lock_guard<std::mutex> lk(m);
+                        done = true;
+                    }
+                    cv.notify_all();
                     return false;
                 }
 
                 if (is_speculative_)
                 {
-                    llama_batch batch_chunk = llama_batch_init((int) embd.size(), 0, 1);
+                    common_batch batch_chunk(ctx);
                     for (size_t i = 0; i < embd.size(); ++i)
                     {
-                        common_batch_add(batch_chunk, embd[i], (llama_pos) (n_past + (int) i), {0}, false);
+                        batch_chunk.add(embd[i], (llama_pos) (n_past + (int) i), {0}, false);
                     }
                     common_speculative_process(spec_.get(), batch_chunk);
-                    llama_batch_free(batch_chunk);
                 }
 
                 n_past += (int) embd.size();
@@ -660,8 +705,6 @@ public:
                 {
                     total_prefill_tokens += (int) embd.size();
 
-                    // Prefill 阶段心跳：每隔 kPrefillHeartbeatIntervalMs 毫秒向客户端发送一次保活消息，
-                    // 防止中间代理因长时间无数据而超时断开；heartbeat 返回 false 表示客户端已断开，立即中止 prefill。
                     if (prefill_heartbeat)
                     {
                         auto t_now_hb = std::chrono::steady_clock::now();
@@ -683,8 +726,7 @@ public:
                                 {
                                     std::lock_guard<std::mutex> lk(m);
                                     done = true;
-                                    // 必须 notify，否则若外部调用 Stop() 等待 done==true，
-                                    // 将因无通知而永久阻塞（cv.wait 不会自动唤醒）。
+
                                     cv.notify_one();
                                 }
                                 return false;
@@ -746,12 +788,11 @@ public:
                 }
             }
 
-            // 仅回显生成出的 token，绝不回显 prompt 本身（与 completion.cpp 作为 CLI 会打印 prompt 不同）
             if (is_generated_token)
             {
                 for (auto id: embd)
                 {
-                    if (!emit_generated_token(id))
+                    if (!guarded_emit(id, n_past))
                     {
                         break;
                     }
@@ -766,7 +807,6 @@ public:
                 break;
             }
 
-            // 结束生成判断：非交互模式下的单一退出点，对齐 completion.cpp:970
             if (eog_hit)
             {
                 My_Log{}.original(true) << "\n";
@@ -787,10 +827,28 @@ public:
             common_speculative_begin(spec_.get(), kSpecSeqId, spec_prompt);
 
             llama_batch batch_tgt = llama_batch_init(params_.n_batch, 0, 1);
+            common_batch spec_batch_tgt(ctx);
+            auto add_batch_token = [](llama_batch &batch, llama_token id, llama_pos pos, llama_seq_id seq_id, bool logits)
+            {
+                const int32_t index = batch.n_tokens++;
+                batch.token[index] = id;
+                batch.pos[index] = pos;
+                batch.n_seq_id[index] = 1;
+                batch.seq_id[index][0] = seq_id;
+                batch.logits[index] = logits;
+            };
             bool decode_failed = false;
 
             while (n_remain != 0)
             {
+                if (is_stop_requested())
+                {
+                    should_stop = true;
+                    My_Log{My_Log::Level::kWarning}
+                        << "[LLAMACpp] " << query_type << " Speculative query interrupted by Stop() after "
+                        << n_generated << " tokens\n";
+                    break;
+                }
                 if (n_past + 1 + n_draft_max >= n_ctx)
                 {
                     My_Log{My_Log::Level::kWarning}
@@ -811,8 +869,10 @@ public:
                         think_force_closing = false;
                     }
 
-                    common_batch_clear(batch_tgt);
-                    common_batch_add(batch_tgt, id_last, n_past++, {kSpecSeqId}, true);
+                    batch_tgt.n_tokens = 0;
+                    spec_batch_tgt.clear();
+                    add_batch_token(batch_tgt, id_last, n_past++, kSpecSeqId, true);
+                    spec_batch_tgt.add(id_last, n_past - 1, kSpecSeqId, true);
                     if (llama_decode(ctx, batch_tgt))
                     {
                         My_Log{My_Log::Level::kError}
@@ -820,7 +880,7 @@ public:
                         decode_failed = true;
                         break;
                     }
-                    common_speculative_process(spec_.get(), batch_tgt);
+                    common_speculative_process(spec_.get(), spec_batch_tgt);
                     common_sampler_accept(smpl, forced_id, true);
                     spec_prompt.push_back(id_last);
                     id_last = forced_id;
@@ -835,30 +895,32 @@ public:
                 if (draft.empty())
                 {
                     common_speculative_get_draft_params(spec_.get(), kSpecSeqId) = {
-                            /*.drafting =*/ true,
-                            /*.n_max    =*/ n_draft_max,
-                            /*.pos0     =*/ n_past,
-                            /*.id_last  =*/ id_last,
-                            /*.prompt   =*/ &spec_prompt,
-                            /*.result   =*/ &draft,
+                                            true,
+                                            n_draft_max,
+                                            n_past,
+                                            id_last,
+                                            &spec_prompt,
+                                            &draft,
                     };
                     const int64_t t_draft0 = now_ms();
                     common_speculative_draft(spec_.get());
                     spec_draft_ms += now_ms() - t_draft0;
                     n_draft_proposed_total += (int64_t) draft.size();
 
-                    // dflash drafter 草稿块必须立即回滚到 pos0，依据见 llama_cpp.cpp.notes.md
                     if (params_.speculative.draft.ctx_dft)
                     {
                         llama_memory_seq_rm(llama_get_memory(params_.speculative.draft.ctx_dft), kSpecSeqId, n_past, -1);
                     }
                 }
 
-                common_batch_clear(batch_tgt);
-                common_batch_add(batch_tgt, id_last, n_past++, {kSpecSeqId}, true);
+                batch_tgt.n_tokens = 0;
+                spec_batch_tgt.clear();
+                add_batch_token(batch_tgt, id_last, n_past++, kSpecSeqId, true);
+                spec_batch_tgt.add(id_last, n_past - 1, kSpecSeqId, true);
                 for (size_t i = 0; i < draft.size(); ++i)
                 {
-                    common_batch_add(batch_tgt, draft[i], n_past + (int) i, {kSpecSeqId}, true);
+                    add_batch_token(batch_tgt, draft[i], n_past + (int) i, kSpecSeqId, true);
+                    spec_batch_tgt.add(draft[i], n_past + (int) i, kSpecSeqId, true);
                 }
 
                 const int64_t t_verify0 = now_ms();
@@ -873,7 +935,7 @@ public:
                 spec_verify_ms += t_verify1 - t_verify0;
                 ++spec_rounds;
 
-                common_speculative_process(spec_.get(), batch_tgt);
+                common_speculative_process(spec_.get(), spec_batch_tgt);
                 const int64_t t_readback1 = now_ms();
                 spec_readback_ms += t_readback1 - t_verify1;
 
@@ -886,15 +948,17 @@ public:
                     draft_accept_hist.resize(ids.size(), 0);
                 }
                 draft_accept_hist[ids.size() - 1]++;
+                const int round_base = n_past;
                 n_past += (int) ids.size() - 1;
 
                 bool stop_now = false;
-                for (auto next_id: ids)
+                for (size_t j = 0; j < ids.size(); ++j)
                 {
+                    const llama_token next_id = ids[j];
                     spec_prompt.push_back(id_last);
                     id_last = next_id;
                     --n_remain;
-                    if (!emit_generated_token(id_last))
+                    if (!guarded_emit(id_last, round_base + static_cast<int>(j)))
                     {
                         stop_now = true;
                         break;
@@ -944,6 +1008,12 @@ public:
             }
         }
 
+        for (const auto &pending : guard_pending)
+        {
+            emit_generated_token(pending.first);
+        }
+        guard_pending.clear();
+
         auto t_query_end = std::chrono::steady_clock::now();
         int64_t total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             t_query_end - t_query_start).count();
@@ -957,7 +1027,6 @@ public:
         double gen_rate_llama = (perf_ctx.t_eval_ms > 0) ?
             (perf_ctx.n_eval * 1000.0) / perf_ctx.t_eval_ms : 0.0;
 
-        // 投机模式下 llama.cpp 内部 perf 计数器口径失真（见 llama_cpp.md「HandleProfile()」一节），用 n/a 标注
         std::ostringstream llama_perf_oss;
         if (spec_)
         {
@@ -982,6 +1051,7 @@ public:
                               " | verify_ms=" + std::to_string(spec_verify_ms) +
                               " | readback_ms=" + std::to_string(spec_readback_ms) +
                               " | post_ms=" + std::to_string(spec_post_ms)) : std::string())
+                 << (degenerate_loop_hit ? " | degenerate_repeat_guard=1" : "")
                  << "\n";
 
         if (is_aux_inference && !generated_text_buf.empty()) {
@@ -1036,7 +1106,10 @@ public:
                 metrics["draft_accepted"] = nullptr;
                 metrics["draft_acceptance_rate"] = nullptr;
             }
-            last_trace_metrics_ = metrics;
+            {
+                std::lock_guard<std::mutex> metrics_lock(trace_metrics_mutex_);
+                last_trace_metrics_ = metrics;
+            }
             if (gen_rate > 0.0 && n_generated >= 16)
             {
                 last_decode_tok_s_ = gen_rate;
@@ -1057,9 +1130,6 @@ public:
         }
         cv.notify_all();
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-        // 先分离 threadpool，再释放（顺序必须）
         llama_context *ctx = llama_init ? llama_init->context() : nullptr;
         if (ctx)
         {
@@ -1077,26 +1147,21 @@ public:
             threadpool_batch = nullptr;
         }
 
-        // 投机解码双 context 析构顺序契约见同名文档 llama_cpp.md：draft 必须先于 target 释放。
         spec_.reset();
         draft_init_.reset();
 
-        // llama_init 释放时会自动释放 model/context/sampler，sampler 的所有权属于 llama_init，
-        // 不要手动释放。
         if (llama_init)
         {
             llama_init.reset();
             smpl = nullptr;
         }
-
-        llama_backend_free();
     }
 
+    LlamaBackendRef backend_ref_;
     common_params params_;
     llama_flash_attn_type draft_flash_attn_ = LLAMA_FLASH_ATTN_TYPE_AUTO;
     common_init_result_ptr llama_init;
 
-    // 投机解码双 context 生命周期契约见同名文档 llama_cpp.md（draft 必须先于 target 析构）
     common_speculative_init_result_ptr draft_init_;
     common_speculative_ptr spec_;
     bool is_speculative_ = false;
@@ -1118,17 +1183,20 @@ public:
 
     std::mutex m;
     std::condition_variable cv;
-    bool done{false};
+    bool done{true};
 
     int max_length_ = 0;
     bool stopped_by_output_limit_ = false;
 
+    mutable std::mutex trace_metrics_mutex_;
     json last_trace_metrics_ = nullptr;
     double last_decode_tok_s_ = 0.0;
     int think_time_budget_s_ = 0;
     int think_min_tokens_ = 0;
     int think_max_tokens_ = 0;
     int think_ctx_reserve_ = 0;
+
+    bool think_force_min_floor_ = false;
     int64_t aux_ms_accum_ = 0;
     int64_t aux_calls_accum_ = 0;
 
@@ -1163,6 +1231,7 @@ public:
 
     json GetLastQueryTraceMetrics() const
     {
+        std::lock_guard<std::mutex> metrics_lock(trace_metrics_mutex_);
         return last_trace_metrics_;
     }
 
@@ -1282,7 +1351,7 @@ public:
                  << " | tgt_bytes=" << ck.tgt.size() << " | dft_bytes=" << ck.dft.size() << "\n";
         prefix_ckpts_.push_back(std::move(ck));
         const size_t n_keep_head = (size_t) std::max(0, g_llama_prefix_head_checkpoints.load());
-        if (prefix_ckpts_.size() > n_keep_head + 2)
+        if (prefix_ckpts_.size() > n_keep_head + 3)
         {
             prefix_ckpts_.erase(prefix_ckpts_.begin() + (long long) n_keep_head);
         }
@@ -1355,6 +1424,25 @@ public:
         if (n < n_cached)
         {
             My_Log{} << "[LLAMACpp] Prefix cache fallback hit: pos=" << n << " (latest=" << n_cached << ")\n";
+            const int n_cmp = std::min(n_cached, limit);
+            int common = 0;
+            while (common < n_cmp && prefix_cache_tokens_[common] == embd_inp[common])
+            {
+                ++common;
+            }
+            std::string detail;
+            for (const auto &ck : prefix_ckpts_)
+            {
+                const char *state = ck.pos > limit      ? "over_limit"
+                                    : ck.pos > n_cached ? "over_cached"
+                                    : std::equal(prefix_cache_tokens_.begin(), prefix_cache_tokens_.begin() + ck.pos,
+                                                 embd_inp.begin())
+                                        ? "match"
+                                        : "mismatch";
+                detail += std::to_string(ck.pos) + ":" + state + " ";
+            }
+            My_Log{} << "[LLAMACpp] Prefix cache fallback detail: limit=" << limit << ", common_prefix=" << common
+                     << ", checkpoints=" << detail << "\n";
         }
         prefix_ckpts_.erase(std::remove_if(prefix_ckpts_.begin(), prefix_ckpts_.end(),
                                            [n](const PrefixCheckpoint &ck) { return ck.pos > n; }),
@@ -1409,7 +1497,6 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
         }
     }
 
-    // 投机检测必须在构造 argv 之前完成；LLAMA_EXAMPLE_SERVER 切换的完整依据见 llama_cpp.cpp.notes.md。
     llama_speculative::DraftModelConfig draft_config;
     int configured_n_batch = 0;
     int configured_n_ubatch = 0;
@@ -1454,7 +1541,6 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
     }
     const bool speculative_requested = draft_config.present && !draft_config.path.empty();
 
-    // 该后端只看变量是否存在、不看取值；在本机实际未生效的原因见 llama_cpp.cpp.notes.md。
 #if defined(_WIN32)
     _putenv_s("GGML_OPENCL_ADRENO_USE_LARGE_BUFFER", "1");
 #else
@@ -1466,7 +1552,8 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
     int n_ctx;
     if (speculative_requested)
     {
-        n_ctx = configured_context_size > 0 ? static_cast<int>(configured_context_size) : 32768;
+
+        n_ctx = static_cast<int>(llama_speculative::ResolveContextSizeByPhysicalMemory());
     }
     else
     {
@@ -1540,10 +1627,7 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
 
         fs::path draft_path = fs::path(model_config_.get_model_path()) / draft_config.path;
         arg_strings.insert(arg_strings.end(), {"-md", draft_path.string()});
-        // ngram-mod 是 draftless 的 n-gram 查表 drafter，优先于 dflash 出手、约 16 MB 纯 CPU 哈希池、
-        // 不占显存。32G/X2-90 实测（同一热稳态、背靠背五格、生成逐字相同）：接受率 0.6455 -> 0.6816
-        // 且提案数 959 -> 917，即分子升、分母降（真提升而非压分母），gen_rate 16.2 -> 17.0 tok/s。
-        // 故默认追加，而不是要求每个模型 config.json 自己写全；写 "ngram_mod": false 可关闭。
+
         std::string spec_type = draft_config.spec_type;
         if (draft_config.ngram_mod && !spec_type.empty() &&
             spec_type.find("ngram-mod") == std::string::npos)
@@ -1571,11 +1655,7 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
             arg_strings.insert(arg_strings.end(), {"-ngld", std::to_string(draft_n_gpu_layers)});
         }
         int fit_target_mib = draft_config.fit_target_mib;
-        // -fitt 在两条路径上都是空操作，所以规划器接管后不再自动拼它（D6）：
-        //   - 拆分路径有内置 -ot ⇒ common_fit_params 报 "tensor_buft_overrides already set by
-        //     user, abort"，显存拟合直接放弃（exp3 实测）；
-        //   - 全 GPU 路径显式给 -ngl 99 ⇒ fork 的 fit.cpp 放弃拟合。
-        // 继续拼只会让 ARGV 产生「它在起作用」的误导。显式配置 fit_target_mib 仍然照拼。
+
         if (plan && fit_target_mib < 0)
         {
             My_Log{My_Log::Level::kWarning}
@@ -1632,9 +1712,7 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
 
     constexpr int kDefaultBatch = 2048;
     constexpr int kDefaultUbatch = 512;
-    // 优先级：llama 块里显式配置的 n_batch/n_ubatch > 规划器推导值 > 历史默认值。
-    // 规划器目前对这两项给的就是 2048/512（与历史默认一致），留这条通路是为了让以后按档位调
-    // ubatch（例如长上下文用 -ub 256 把 kq 压回设备单次分配上限内）只改规划器一处。
+
     int n_batch = configured_n_batch > 0 ? configured_n_batch
                   : (plan ? static_cast<int>(plan->n_batch) : kDefaultBatch);
     int n_ubatch = configured_n_ubatch > 0 ? configured_n_ubatch
@@ -1671,16 +1749,16 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
                                   << std::endl;
     if (device == "cpu")
     {
-        // CPU 路径：保持 mmap/repack/no-host 的 llama.cpp 官方默认值（已实测验证比强制关闭更快）。
+
         arg_strings.insert(arg_strings.end(), {"-ngl", "0"});
     }
     else if (!speculative_requested)
     {
-        // 非投机（现有全部单模型 GGUF）路径：保持历史 A/B 实测出的最快组合，本轮不改动。
+
         arg_strings.insert(arg_strings.end(), {
             "--device", "GPUOpenCL",
             "-ngl", "99",
-            "--no-mmap",
+            "--load-mode", "none",
             "--no-repack",
             "--no-host",
         });
@@ -1695,9 +1773,7 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
         }
         else if (speculative_requested && !user_ot && draft_config.spec_type.find("dflash") != std::string::npos)
         {
-            // 层数只有两个来源：配置显式给的 ffn_cpu_layers，或内置默认值。不要在这里按显存余量反算
-            // ——该路径已被真机实测判死（28 层能加载、前 4 个请求正常，第 5 个请求存前缀检查点时
-            // clCreateBuffer err=-5 直接 GGML_ASSERT 崩溃），依据见 llama_cpp.cpp.notes.md 对应章节。
+
             const uint32_t block_count = llama_speculative::ReadGgufBlockCount(gguf_path);
             const uint32_t cpu_layers = draft_config.ffn_cpu_layers >= 0
                                             ? static_cast<uint32_t>(draft_config.ffn_cpu_layers)
@@ -1713,14 +1789,8 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
                 arg_strings.insert(arg_strings.end(), {"-ot", ot});
             }
         }
-        arg_strings.insert(arg_strings.end(), configured_extra_args.begin(), configured_extra_args.end());
     }
-    // 投机解码分支（非 CPU）不显式传 -ngl：llama-completion.exe 实测确认，一旦显式给出 -ngl（含
-    // 99），fork 的 common/fit.cpp 会直接放弃显存拟合、强行按请求值全量分配，而本机 OpenCL 设备
-    // 可用显存（约15078MiB）不足以装下 Qwen3.8-27B 全部66层（需约15234MiB），导致最后几批 q6_K
-    // 张量上传阶段崩溃。不给 -ngl 时 --fit 自动决定 offload 层数（实测58-61/66），加载与推理均
-    // 成功，且 prefill 速度最快；--fit 同样会把 common_fit_extra_model（草稿模型）计入显存预算，
-    // -ngld 99 不受影响。不带 --device 的原因同上：裁剪掉 CPU 设备后超设备上限的 buffer 无处 fallback。
+    arg_strings.insert(arg_strings.end(), configured_extra_args.begin(), configured_extra_args.end());
 
     {
         std::string argv_dump;
@@ -1745,7 +1815,7 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
         throw std::runtime_error("common param parse failed");
     }
 
-    params.verbosity = 0;           // 禁用详细日志
+    params.verbosity = 0;
 
     if (params.n_parallel < 0)
     {
@@ -1774,11 +1844,8 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
                                                : params.cpuparams.n_threads;
     }
 
-    // 生成配置：不设固定上限，交由 SetParams("size", ...) 驱动的 max_length_ 来控制输出长度上限。
     params.n_predict = -1;
 
-    // Harmony 格式使用 <|return|>/<|call|> 等特殊 token 作为解码时停止标记；special=false（默认值）
-    // 会让 common_token_to_piece() 对特殊 token 返回空串，导致 HarmonyProcessor 无法识别结束标记。
     params.special = true;
 
     if (speculative_requested)
@@ -1821,13 +1888,13 @@ int LLAMACppBuilder::SetParams(const std::string &key, const std::string &value)
 bool LLAMACppBuilder::Query(const ModelInput &model_input, const Callback& callback,
                              PrefillHeartbeatCallback prefill_heartbeat)
 {
-    // 序列化所有 Query() 调用：llama_context 不是线程安全的，同一时刻只能有一个
-    // 推理在执行。安全检查（ContentSecurityInspector）、复杂度评估
-    // （TaskComplexityEvaluator）和正常推理都通过同一个模型句柄调用 Query()，
-    // 必须通过此锁保证互斥，防止并发调用 llama_decode 导致 KV cache 损坏崩溃。
 
-    // 检测锁竞争：等待超过 10ms 视为异常，记录警告
     auto t_lock_wait_start = std::chrono::steady_clock::now();
+    QueryScope query_scope{*this};
+    if (!query_scope.admitted())
+    {
+        return false;
+    }
     std::lock_guard<std::mutex> lock(query_mutex_);
     int64_t lock_wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::steady_clock::now() - t_lock_wait_start).count();
@@ -1836,10 +1903,31 @@ bool LLAMACppBuilder::Query(const ModelInput &model_input, const Callback& callb
         My_Log{My_Log::Level::kWarning}
             << "[LLAMACpp] query_mutex_ wait time: " << lock_wait_ms << "ms (lock contention detected)\n";
     }
+    if (query_scope.stopped())
+    {
+        My_Log{My_Log::Level::kWarning}
+            << "[LLAMACpp] Query cancelled: Stop() was issued while it was waiting for query_mutex_\n";
+        return false;
+    }
+    if (prefill_heartbeat && !prefill_heartbeat())
+        return false;
+
+    struct DoneGuard
+    {
+        Impl *impl;
+
+        ~DoneGuard()
+        {
+            {
+                std::lock_guard<std::mutex> lk(impl->m);
+                impl->done = true;
+            }
+            impl->cv.notify_all();
+        }
+    } done_guard{impl_};
 
     auto &prompt = model_input.text_;
 
-    // 检测查询类型（同时供本函数日志与 Impl::Query 内部日志复用，避免对同一个 prompt 重复扫描）
     const char *query_type_label;
     bool is_aux_inference;
     if (prompt.find("You are a security classifier") != std::string::npos)
@@ -1862,7 +1950,7 @@ bool LLAMACppBuilder::Query(const ModelInput &model_input, const Callback& callb
         query_type_label = "SUMMARIZATION";
         is_aux_inference = true;
     }
-    // 使用 ModelInput 中由 ModelInputBuilder 预先检测并设置的 agent_type_ 字段
+
     else if (model_input.agent_type_ == "main")
     {
         query_type_label = "MAINAGENT_INFERENCE";
@@ -1892,14 +1980,28 @@ bool LLAMACppBuilder::Query(const ModelInput &model_input, const Callback& callb
     impl_->think_min_tokens_ = model_input.think_min_tokens_;
     impl_->think_max_tokens_ = model_input.think_max_tokens_;
     impl_->think_ctx_reserve_ = model_input.think_ctx_reserve_;
+    impl_->think_force_min_floor_ = model_input.think_force_min_floor_;
     bool result = impl_->Query(prompt, callback, prefill_heartbeat,
-                                query_type_bracketed.c_str(), is_aux_inference);
+                                query_type_bracketed.c_str(), is_aux_inference,
+                                stop_epoch_, query_scope.epoch());
     stopped_by_output_limit_ = impl_->stopped_by_output_limit_;
     return result;
 }
 
 LLAMACppBuilder::~LLAMACppBuilder()
 {
+    MarkDestroying();
+    if (impl_)
+    {
+        std::unique_lock<std::mutex> lk(impl_->m);
+        if (!impl_->cv.wait_for(lk, std::chrono::seconds(6), [this]
+        { return impl_->done; }))
+        {
+            My_Log{My_Log::Level::kWarning}
+                << "[LLAMACpp] ~LLAMACppBuilder(): query did not finish within 6s after stop request" << std::endl;
+        }
+    }
+    WaitForIdle(8000);
     delete impl_;
     impl_ = nullptr;
 }
@@ -1907,6 +2009,16 @@ LLAMACppBuilder::~LLAMACppBuilder()
 void LLAMACppBuilder::SetPrefixCacheEnabled(bool enabled)
 {
     g_llama_prefix_cache_enabled.store(enabled);
+}
+
+void LLAMACppBuilder::SetDegenerateRepeatGuardEnabled(bool enabled)
+{
+    g_degenerate_repeat_guard_enabled.store(enabled);
+}
+
+void LLAMACppBuilder::SetDegenerateRepeatGuardMaxPeriod(int max_period)
+{
+    g_degenerate_repeat_guard_max_period.store(max_period);
 }
 
 void LLAMACppBuilder::SetPrefixHeadCheckpoints(int n, bool from_config)
@@ -1920,9 +2032,7 @@ void LLAMACppBuilder::SetPrefixHeadCheckpoints(int n, bool from_config)
 
 bool LLAMACppBuilder::ApplyPlannedHeadCheckpoints(int n)
 {
-    // 显式配置永远胜出。检查点常驻在 host 侧（prefix_ckpts_ 是 std::vector<uint8_t>，常驻上限
-    // head_checkpoints + 2 份），所以它的份数由主机可用内存推导、而不是显存；r23 实测
-    // head_checkpoints=2 的 prefill 收益测不出（1310 vs 1311 s），即 host 紧张时降档是零代价的。
+
     if (g_llama_prefix_head_checkpoints_explicit.load())
     {
         return false;
@@ -1952,30 +2062,34 @@ json LLAMACppBuilder::GetLastQueryTraceMetrics() const
 
 bool LLAMACppBuilder::Stop()
 {
+    StopScope stop_scope{*this};
+    if (!stop_scope.admitted() || !impl_)
+    {
+        return true;
+    }
+    stop_epoch_.fetch_add(1);
     std::unique_lock<std::mutex> lk(impl_->m);
-    impl_->cv.wait(lk, [this]
-    { return impl_->done; });
+    if (!impl_->cv.wait_for(lk, std::chrono::seconds(6), [this]
+    { return impl_->done; }))
+    {
+        My_Log{My_Log::Level::kWarning}
+            << "[LLAMACpp] Stop(): query did not finish within 6s after stop request" << std::endl;
+    }
     return true;
 }
 
 json LLAMACppBuilder::HandleProfile()
 {
     json result;
-    
-    if (impl_ && impl_->last_trace_metrics_.is_object())
+
+    const json m = impl_ ? impl_->GetLastQueryTraceMetrics() : json(nullptr);
+    if (m.is_object())
     {
-        const json &m = impl_->last_trace_metrics_;
-        auto fmt = [](double v)
-        {
-            std::ostringstream o;
-            o << std::fixed << std::setprecision(2) << v;
-            return o.str();
-        };
         int64_t ttft_ms = m.value("ttft_ms", (int64_t) 0);
-        result["time_to_first_token"] = fmt(ttft_ms > 0 ? ttft_ms / 1000.0 : 0.0);
-        result["token_generation_time"] = fmt(m.value("decode_ms", (int64_t) 0) / 1000.0);
-        result["prompt_processing_rate"] = fmt(m.value("prefill_tok_s", 0.0));
-        result["token_generation_rate"] = fmt(m.value("decode_tok_s", 0.0));
+        result["time_to_first_token"] = FormatFixed2(ttft_ms > 0 ? ttft_ms / 1000.0 : 0.0);
+        result["token_generation_time"] = FormatFixed2(m.value("decode_ms", (int64_t) 0) / 1000.0);
+        result["prompt_processing_rate"] = FormatFixed2(m.value("prefill_tok_s", 0.0));
+        result["token_generation_rate"] = FormatFixed2(m.value("decode_tok_s", 0.0));
         result["num_prompt_tokens"] = m.value("prompt_tokens", 0);
         result["num_generated_tokens"] = m.value("gen_tokens", 0);
         return result;
@@ -1983,59 +2097,39 @@ json LLAMACppBuilder::HandleProfile()
 
     if (impl_)
     {
+        std::unique_lock<std::mutex> query_lock(query_mutex_, std::try_to_lock);
+        if (!query_lock.owns_lock())
+        {
+            return result;
+        }
         llama_context *ctx = impl_->llama_init->context();
         if (!ctx)
         {
             return result;
         }
-        
+
         llama_perf_context_data perf_ctx = llama_perf_context(ctx);
-        
-        std::ostringstream oss;
-        
-        oss << std::fixed << std::setprecision(2)
-            << perf_ctx.t_p_eval_ms / 1000.0;
-        result["time_to_first_token"] = oss.str();
-        
-        oss.str("");
-        oss << std::fixed << std::setprecision(2)
-            << perf_ctx.t_eval_ms / 1000.0;
-        result["token_generation_time"] = oss.str();
-        
-        oss.str("");
-        oss << std::fixed << std::setprecision(2);
-        if (perf_ctx.t_p_eval_ms > 0)
-        {
-            oss << (perf_ctx.n_p_eval * 1000.0) / perf_ctx.t_p_eval_ms;
-        }
-        else
-        {
-            oss << 0.0;
-        }
-        result["prompt_processing_rate"] = oss.str();
-        
-        oss.str("");
-        oss << std::fixed << std::setprecision(2);
-        if (perf_ctx.t_eval_ms > 0)
-        {
-            oss << (perf_ctx.n_eval * 1000.0) / perf_ctx.t_eval_ms;
-        }
-        else
-        {
-            oss << 0.0;
-        }
-        result["token_generation_rate"] = oss.str();
-        
-        // integer values
+
+        result["time_to_first_token"] = FormatFixed2(perf_ctx.t_p_eval_ms / 1000.0);
+
+        result["token_generation_time"] = FormatFixed2(perf_ctx.t_eval_ms / 1000.0);
+
+        result["prompt_processing_rate"] = FormatFixed2(
+                perf_ctx.t_p_eval_ms > 0 ? (perf_ctx.n_p_eval * 1000.0) / perf_ctx.t_p_eval_ms : 0.0);
+
+        result["token_generation_rate"] = FormatFixed2(
+                perf_ctx.t_eval_ms > 0 ? (perf_ctx.n_eval * 1000.0) / perf_ctx.t_eval_ms : 0.0);
+
         result["num_prompt_tokens"] = perf_ctx.n_p_eval;
         result["num_generated_tokens"] = perf_ctx.n_eval;
     }
-    
+
     return result;
 }
 
 size_t LLAMACppBuilder::TokenLength(const std::string &text)
 {
+    std::lock_guard<std::mutex> lock(query_mutex_);
     llama_context *ctx = impl_->llama_init->context();
     if (ctx == nullptr)
     {

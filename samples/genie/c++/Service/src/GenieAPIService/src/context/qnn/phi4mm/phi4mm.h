@@ -160,4 +160,4 @@ private:
     IEmbeddingProcessBase *ep_{};
 };
 
-#endif //PHI_4_EMBEDDING_H
+#endif

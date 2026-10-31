@@ -12,6 +12,8 @@
 #include <httplib.h>
 #include <memory>
 #include <atomic>
+#include <mutex>
+#include <vector>
 
 class ModelManager;
 class ChatRequestHandler;
@@ -19,7 +21,7 @@ class ChatRequestHandler;
 class GenieService
 {
 public:
-    void run(int argc, char *argv[]);
+    int run(int argc, char *argv[]);
 
     void ServiceStop();
 
@@ -32,9 +34,13 @@ private:
     std::atomic<bool> shutdown_requested_{false};
     std::atomic<bool> shutdown_completed_{false};
     std::atomic<bool> stop_in_progress_{false};
+    std::atomic<bool> listening_{false};
+    std::atomic<int> exit_code_{0};
+    std::atomic<unsigned> stop_epoch_{0};
     std::unique_ptr<ModelManager> modelManager;
     httplib::Server svr;
-    std::unique_ptr<ChatRequestHandler> requestHandler;
+    std::mutex request_handler_mtx_;
+    std::shared_ptr<ChatRequestHandler> requestHandler;
     static inline GenieService *self_;
 
     void setupSignalHandlers();
@@ -45,4 +51,4 @@ private:
     std::vector<std::shared_ptr<Route> > routes_{};
 };
 
-#endif //GENIEAPISERVICE_H
+#endif

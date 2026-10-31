@@ -10,8 +10,7 @@
 #define DEF_H
 
 #if defined(__linux__) && !defined(__ANDROID__)
-    // gcc on Linux requires explicit includes for these standard headers; MSVC
-    // and the Android NDK pull them in transitively.
+
     #include <algorithm>
     #include <cmath>
     #include <cstdint>
@@ -121,7 +120,7 @@ int Sum(const T &x, bool round_result = true)
     {
         sum += static_cast<double>(data[i]);
     }
-    return static_cast<int>(sum); // truncates toward zero
+    return static_cast<int>(sum);
 }
 
 template<typename T>
@@ -134,7 +133,6 @@ Shape_1D<T> Arange(T start, T end, T step)
         return out;
     }
 
-    // Use a small epsilon to avoid floating-point accumulation issues
     const T eps = std::numeric_limits<T>::epsilon() * std::fabs(start + end + step) * T(10);
 
     std::vector<T> buf;
@@ -162,16 +160,14 @@ Shape_1D<T> Arange(T start, T end, T step)
     return out;
 }
 
-// Bucketize: returns indices as Shape_1D<int>
-// Semantics: right = true -> boundaries[i-1] < x <= boundaries[i]
 template<typename T>
 Shape_1D<int64_t> Bucketize(const Shape_1D<T> &in1, const Shape_1D<T> &in2)
 {
     Shape_1D<int64_t> out;
-    // quick checks
+
     if (in2.d0 == 0)
     {
-        // no boundaries -> all indices are 0
+
         out.d0 = in1.d0;
         out.buf.assign(in1.d0, 0);
         return out;
@@ -185,17 +181,13 @@ Shape_1D<int64_t> Bucketize(const Shape_1D<T> &in1, const Shape_1D<T> &in2)
         throw std::runtime_error("input.d0 mismatch with buffer size");
     }
 
-    // Ensure boundaries are sorted ascending. If not, you can sort a copy or throw.
-    // Here we assume they are sorted; uncomment to enforce:
-    // if (!std::is_sorted(in2.buf.begin(), in2.buf.end())) throw std::runtime_error("boundaries must be sorted ascending");
-
     out.d0 = in1.d0;
     out.buf.resize(out.d0);
 
     for (int i = 0; i < in1.d0; ++i)
     {
         const T x = in1.buf[i];
-        // For right = true use upper_bound: first element > x
+
         auto it = std::upper_bound(in2.buf.begin(), in2.buf.end(), x);
         int idx = static_cast<int64_t>(std::distance(in2.buf.begin(), it));
         out.buf[i] = idx;
@@ -214,4 +206,4 @@ inline std::size_t idx5(const Shape_5D<float> &s, int n, int a, int b, int c, in
     return (((static_cast<std::size_t>(n) * s.d1 + static_cast<std::size_t>(a)) * s.d2 + static_cast<std::size_t>(b)) * s.d3 + static_cast<std::size_t>(c)) * s.d4 + static_cast<std::size_t>(d);
 }
 
-#endif //DEF_H
+#endif

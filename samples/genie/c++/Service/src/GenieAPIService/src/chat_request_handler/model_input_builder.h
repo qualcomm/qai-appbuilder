@@ -19,17 +19,94 @@
 #include "long_text_summarizer.h"
 #include "summary_cache.h"
 #include "task_memo_builder.h"
+#include "task_memo_doc_scan.h"
 #include "prompt_ledger.h"
 #include "tool_call_circuit_breaker_store.h"
 #include "tool_call_repetition_store.h"
 #include <chrono>
+#include <deque>
+#include <functional>
+#include <iosfwd>
 #include <mutex>
 #include <regex>
+#include <set>
 #include <unordered_map>
 #include <unordered_set>
 
-
 using json = nlohmann::ordered_json;
+
+inline bool ShouldForceAllowAfterConsecutiveBlocks(int consecutive_block_count, int max_consecutive_block)
+{
+    return max_consecutive_block > 0 && consecutive_block_count >= max_consecutive_block;
+}
+
+inline bool ComputeForcedUnblockFromStreak(int &block_streak, int max_consecutive_block)
+{
+    ++block_streak;
+    if (ShouldForceAllowAfterConsecutiveBlocks(block_streak, max_consecutive_block))
+    {
+        block_streak = 0;
+        return true;
+    }
+    return false;
+}
+
+inline std::string BuildCycleRepeatSignature(const std::vector<std::string> &keys, size_t window)
+{
+    if (window == 0 || keys.empty())
+        return "";
+    const size_t begin = keys.size() > window ? keys.size() - window : 0;
+    std::unordered_set<std::string> seen(keys.begin(), keys.begin() + begin);
+    std::set<std::string> repeated;
+    for (size_t i = begin; i < keys.size(); ++i)
+    {
+        if (keys[i].empty())
+            continue;
+        if (!seen.insert(keys[i]).second)
+            repeated.insert(keys[i]);
+    }
+    if (repeated.empty())
+        return "";
+    std::string joined;
+    for (const auto &key : repeated)
+    {
+        joined += key;
+        joined += '\x1e';
+    }
+    return "cycle:" + std::to_string(std::hash<std::string>{}(joined));
+}
+
+inline bool IsReserveEligibleThinkReason(const std::string &reason)
+{
+    return reason == "new_failure" || reason == "changed_failure" || reason == "error_repeated" ||
+           reason == "near_repeat" || reason.rfind("repeat_count", 0) == 0;
+}
+
+inline bool TryConsumeFailureThinkReserve(int &reserve_used, int reserve_limit)
+{
+    if (reserve_limit <= 0 || reserve_used >= reserve_limit)
+        return false;
+    ++reserve_used;
+    return true;
+}
+
+inline std::string ComposeTaskMemoNotes(bool memo_body_embedded, const std::string &standalone_redundant,
+                                        const std::string &consecutive_failure)
+{
+    return (memo_body_embedded ? std::string() : standalone_redundant) + consecutive_failure;
+}
+
+inline std::string ExtractLatestAssistantReadRef(const json &messages)
+{
+    if (!messages.is_array())
+        return "";
+    for (auto it = messages.rbegin(); it != messages.rend(); ++it) {
+        if (!it->is_object() || it->value("role", "") != "assistant")
+            continue;
+        return TaskMemoBuilder::ExtractReadToolPath(get_json_value<std::string>(*it, "content", ""));
+    }
+    return "";
+}
 
 class ModelInputBuilder
 {
@@ -38,7 +115,7 @@ public:
         : chat_history_{chat_history},
           instance_config_{instance_config},
           context_{instance_config_->i_model_config_.get_genie_model_handle().lock()},
-          optimizer_{instance_config_->i_model_config_, context_.get()},
+          optimizer_{instance_config_->i_model_config_, context_.get(), instance_config_->get_context_size()},
           pre_filter_{instance_config_->i_model_config_, context_.get()},
           task_memo_builder_{instance_config_->i_model_config_.GetPromptOptimizationConfig().task_memo,
                               *instance_config_,
@@ -48,15 +125,11 @@ public:
         request_data_ = request_data;
     }
 
-    // is_alive_fn：可选的连接存活检测回调，用于 Phase -1 摘要推理期间检测客户端是否断开。
-    // stream 路径传入 [&sink]() { return sink.is_writable(); }，非 stream 路径传入 nullptr。
     ModelInput &Build(json &data, bool &is_tool,
                       std::function<bool()> is_alive_fn = nullptr)
     {
         Reset();
 
-        // Sanitize incoming message contents to prevent null bytes (\0)
-        // and other control characters from causing truncation or memory issues
         if (data.contains("messages") && data["messages"].is_array()) {
             for (auto& e : data["messages"]) {
                 if (e.contains("content") && e["content"].is_string()) {
@@ -67,10 +140,6 @@ public:
             }
         }
 
-        // 修复：检查 messages 字段是否存在且为 array，避免对 null/非 array 类型迭代触发异常
-        // 注意：第50行的 sanitize 循环已经检查了 data.contains("messages") && data["messages"].is_array()，
-        // 但如果 messages 不存在，第50行的检查会跳过 sanitize，而此处的迭代仍会执行，
-        // 对 null 类型的 json 迭代会触发 type_error.302
         if (!data.contains("messages") || !data["messages"].is_array()) {
             throw ReportError{std::string{"messages field is missing or not an array in request"}};
         }
@@ -79,6 +148,8 @@ public:
         {
             if (e["role"] == "user")
             {
+                model_input_.image_.clear();
+                model_input_.audio_.clear();
                 json &user_content = e["content"];
                 if (user_content.is_string())
                 {
@@ -139,25 +210,32 @@ public:
             model_input_.text_ = "What is this img or audio describe?";
         }
 
-        if (!model_input_.image_.empty() || !model_input_.audio_.empty())
+        const bool has_media = !model_input_.image_.empty() || !model_input_.audio_.empty();
+        const bool last_message_is_user = !data["messages"].empty()
+                                          && get_json_value(data["messages"].back(), "role", BLANK_STRING) == "user";
+        if (has_media && last_message_is_user && context_ && context_->SupportsMultimodalInput())
         {
             return model_input_;
         }
+        if (has_media)
+        {
+            const std::string reason = last_message_is_user
+                ? "active model does not support multimodal input"
+                : "last message is not a user message";
+            My_Log{My_Log::Level::kWarning}
+                << "[Multimodal] Dropping image/audio input because " << reason
+                << "; continuing with the text prompt" << std::endl;
+            model_input_.image_.clear();
+            model_input_.audio_.clear();
+        }
 
-        // 修复：使用 instance_config_（per-model 的 ModelInstanceConfig）而非 model_config_（全局 IModelConfig）
-        // 在多模型场景下，model_config_ 的 get_prompt_type()/context_size() 等方法读取的是
-        // 全局 IModelConfig 的状态（即最后加载的单模型），会导致所有请求使用同一个模型的配置，
-        // 破坏多模型路由的正确性。
         bool is_harmony = (instance_config_->get_prompt_type() == PromptType::Harmony);
 
-        // 为输出预留空间：取 minOutputNum 和 output_reserve_ratio 中的较大值
-        // output_reserve_ratio 从 service_config.json 的 prompt_optimization 节加载（默认 0.20）
         const auto& po_cfg = instance_config_->i_model_config_.GetPromptOptimizationConfig();
         int min_output = instance_config_->getminOutputNum();
         int reserved_output = std::max(min_output,
                                        (int)(instance_config_->get_context_size() * po_cfg.output_reserve_ratio));
         int contextSize = instance_config_->get_context_size() - reserved_output;
-
 
         My_Log{}.original(true) << "\n";
         if(instance_config_)
@@ -165,9 +243,6 @@ public:
                                       << " tokens, Reserved: " << reserved_output
                                       << " tokens, Available: " << contextSize << " tokens" << std::endl;
 
-        // ── 长文本摘要化 ──────────────────────────────────────────
-        // 在 prompt 构建前，对超长 user 消息和末尾 tool 消息链执行 Map-Reduce 摘要，
-        // 以减少本地输入溢出概率。摘要失败时静默降级，保留原文继续走现有流程。
         {
             auto sum_cfg = po_cfg.long_text_summarization;
             if (context_ && context_->UsesCrossRequestPrefixCache())
@@ -180,9 +255,7 @@ public:
                     && data["messages"].is_array())
             {
                 auto infer_fn = [this, &is_alive_fn](const std::string& prompt) -> std::string {
-                    // 将 is_alive_fn 作为 prefill heartbeat 传入：
-                    // 在摘要推理的 prefill 阶段（处理 prompt token 期间）定期调用，
-                    // 向客户端发送保活帧，防止 httpx read 超时（默认 300s）。
+
                     ContextBase::PrefillHeartbeatCallback heartbeat = nullptr;
                     if (is_alive_fn) {
                         heartbeat = [&is_alive_fn]() -> bool {
@@ -198,21 +271,13 @@ public:
                     &SummaryCache::GetInstance(),
                     infer_fn,
                     static_cast<size_t>(contextSize),
-                    is_alive_fn  // 连接存活检测：stream 路径传入 sink.is_writable()，非 stream 为 nullptr
+                    is_alive_fn
                 );
 
                 last_ledger_.summarized = summarizer.ProcessMessages(data["messages"]);
             }
         }
 
-        // ── Layer3 熔断降级：会话+模型维度连续多次真正触发 Layer3 终态（Layer0/1/2 均
-        // 未能恢复出合法工具调用）后，判定该会话+模型系统性不具备工具调用能力，动态
-        // 降级本次请求的 system prompt——跳过工具声明注入，而不是继续让模型徒劳尝试。
-        // 实现方式：请求本身声明了 tools 时，若命中熔断，直接把 data["tools"] 清空为
-        // 空数组；下方 BuildHarmonyPrompt/BuildPrompt 内部都是读取 data["tools"] 决定
-        // is_tool 与是否注入工具提示词，清空后两条路径自然表现为"未声明工具"，无需
-        // 改动 PrepareOptimizedSystemAndToolPrompt 内部逻辑。仅在请求确实声明了非空
-        // tools 时才有查询熔断状态的必要，未声明 tools 的请求不受影响、零额外开销。
         if (data.contains("tools") && data["tools"].is_array() && !data["tools"].empty())
         {
             const auto &repair_cfg = instance_config_->i_model_config_.GetToolCallRepairConfig();
@@ -228,6 +293,8 @@ public:
                            "skipping tool declaration injection (model will not be told it can call tools)."
                         << std::endl;
                     data["tools"] = json::array();
+
+                    ToolCallCircuitBreakerStore::GetInstance().RecordSuccess(cb_key);
                 }
             }
         }
@@ -245,9 +312,9 @@ public:
         return model_input_;
     }
 
-    // 本轮压缩账本（只读）：调用方（chat_request_handler.cpp）在 Build() 之后读取，
-    // 非流式写入 X-Genie-Prompt-* 响应头，流式通过 status="prompt_optimized" 帧回报。
     const PromptLedger &GetLedger() const { return last_ledger_; }
+
+    SkillMappings GetRuntimeSkillMappings() const { return optimizer_.GetLastStats().runtime_skill_mappings; }
 
 private:
     void ProcessArray(const json &user_content)
@@ -355,17 +422,15 @@ private:
         model_input_.audio_ = get_value(user_content, "audio");
     }
 
-    // 系统提示词与工具定义压缩优化：stateless/stateful 两种模式统一生效，不再受 -n 门控。
-    // raw_tools_str 输出未经优化的原始 tools JSON 字符串，供调用方后续调试统计使用。
     void PrepareOptimizedSystemAndToolPrompt(const json &tools, int contextSize, bool &is_tool,
                                               std::string &systemDefaultPrompt, std::string &raw_tools_str)
     {
-        // 优化系统提示词（在 PreFilterMessages 之前）
+
         {
             My_Log{My_Log::Level::kDebug} << "[Optimization] Enabled" << std::endl;
 
             AgentType agentType = DetectAgentTypeAndLog(systemDefaultPrompt, "Optimization");
-            // 将 agent 类型写入 ModelInput，供底层推理日志标记使用
+
             model_input_.agent_type_ = (agentType == AgentType::MAIN_AGENT) ? "main" : "sub";
 
             if (agentType == AgentType::SUBAGENT) {
@@ -381,7 +446,6 @@ private:
                                          << -stats.savings_percent << "%" << std::endl;
         }
 
-        // 必须在 PreFilterMessages 之前处理工具定义，确保 token 预算计算包含工具定义的 tokens
         std::string userToolsPrompt = "";
         if (tools.is_array() && !tools.empty())
         {
@@ -390,14 +454,10 @@ private:
             userToolsPrompt = raw_tools_str;
         }
 
-        // 处理工具定义（如果存在），提前优化并追加到 systemDefaultPrompt，
-        // 用于 PreFilterMessages 的 token 计算
         if (is_tool && !userToolsPrompt.empty()) {
-            // [Refactor] 从 instance_config 获取工具提示词模板
+
             std::string tool_tmpl = instance_config_->get_tool_prompt_template();
 
-            // 用剩余预算（contextSize 减去 identity/system 部分已占用的 token 数）
-            // 作为工具部分压缩的硬上限，确保 systemDefaultPrompt 组合后始终 < contextSize
             size_t identity_tokens = context_->TokenLength(systemDefaultPrompt);
             size_t tools_budget = (static_cast<size_t>(std::max(contextSize, 0)) > identity_tokens)
                                  ? static_cast<size_t>(contextSize) - identity_tokens : 0;
@@ -407,18 +467,15 @@ private:
         }
     }
 
-    // 消息预过滤 + FitMessagesToContext 适配：stateless/stateful 两种模式统一生效，不再受 -n 门控。
-    // msg 会被就地更新为过滤后的消息列表。
     OptimizedMessages PrepareFilteredMessages(json &msg, const std::string &systemDefaultPrompt, int contextSize)
     {
-        // ========== 消息预过滤 ==========
+
         msg = pre_filter_.PreFilterMessages(msg, contextSize, systemDefaultPrompt, /*is_harmony=*/false, &tool_call_id_to_name_);
+
+        task_memo_builder_.RecordRepeatDetections(pre_filter_.GetRepeatDetections());
 
         std::vector<GenieChatMessage> all_messages;
 
-        // 找到 msg 中最后一条 role=="user" 的下标：当前轮用户消息的完整内容（含多模态/
-        // 默认提示词回退逻辑）已在 Build() 阶段解析进 model_input_.text_，这里复用它，
-        // 而不是重新从 element["content"] 提取，避免丢失图片/音频场景下的特殊处理。
         int last_user_msg_index = -1;
         for (size_t i = 0; i < msg.size(); ++i) {
             if (get_json_value(msg[i], "role", BLANK_STRING) == "user") {
@@ -426,7 +483,29 @@ private:
             }
         }
 
-        // 第一遍：收集所有消息
+        auto compute_tool_call_signature = [](const json& element) {
+            if (!element.contains("tool_calls") || !element["tool_calls"].is_array()
+                || element["tool_calls"].empty() || !element["tool_calls"][0].contains("function"))
+                return std::string();
+            const auto& fn = element["tool_calls"][0]["function"];
+            std::string args = "{}";
+            try {
+                if (fn.contains("arguments") && fn["arguments"].is_string())
+                    args = json::parse(fn["arguments"].get<std::string>()).dump();
+                else if (fn.contains("arguments") && fn["arguments"].is_object())
+                    args = fn["arguments"].dump();
+            } catch (...) {}
+            return fn.value("name", "") + "|" + args;
+        };
+        std::unordered_map<std::string, int> last_pin_element;
+        for (size_t i = 0; i < msg.size(); ++i) {
+            if (get_json_value(msg[i], "role", BLANK_STRING) == "assistant") {
+                const std::string signature = compute_tool_call_signature(msg[i]);
+                if (!signature.empty())
+                    last_pin_element[signature] = static_cast<int>(i);
+            }
+        }
+
         int element_index = -1;
         for (auto &element: msg)
         {
@@ -438,12 +517,12 @@ private:
             {
                 if (element_index == last_user_msg_index)
                 {
-                    // 当前轮用户消息：复用 model_input_.text_，保持在 chronological 顺序里的正确位置
+
                     all_messages.push_back({role, model_input_.text_});
                 }
                 else
                 {
-                    // 修复：历史 user 消息此前从未被处理，导致多轮无状态对话中历史用户消息被静默丢弃
+
                     content = get_json_value(element, "content", BLANK_STRING);
                     if (!content.empty()) {
                         all_messages.push_back({role, content});
@@ -452,24 +531,19 @@ private:
             }
             else if (role == "assistant")
             {
-                // 检查是否有 tool_calls 字段（OpenAI 标准格式）
+
                 if (element.contains("tool_calls") && !element["tool_calls"].is_null() &&
                     element["tool_calls"].is_array())
                 {
                     auto converted_calls = optimizer_.ConvertOpenAIToolCalls(element["tool_calls"]);
                     std::string pin;
-                    if (!element["tool_calls"].empty() && element["tool_calls"][0].contains("function")) {
-                        const auto &fn = element["tool_calls"][0]["function"];
-                        std::string args = "{}";
-                        try {
-                            if (fn.contains("arguments") && fn["arguments"].is_string())
-                                args = json::parse(fn["arguments"].get<std::string>()).dump();
-                            else if (fn.contains("arguments") && fn["arguments"].is_object())
-                                args = fn["arguments"].dump();
-                        } catch (...) {}
+                    const std::string signature = compute_tool_call_signature(element);
+                    auto last_pin = last_pin_element.find(signature);
+                    if (last_pin != last_pin_element.end() && last_pin->second == element_index)
                         pin = TaskMemoBuilder::LookupPinnedConclusion(
-                            TaskMemoBuilder::ComputeFirstMsgKey(msg), fn.value("name", "") + "|" + args);
-                    }
+                            TaskMemoBuilder::ComputeFirstMsgKey(
+                                (request_data_.is_object() && request_data_.contains("messages")) ? request_data_["messages"] : msg),
+                            signature);
                     for (const auto& converted_content : converted_calls)
                     {
                         all_messages.push_back({role, pin + converted_content});
@@ -490,11 +564,9 @@ private:
                 content = optimizer_.OptimizeToolResponse(tool_response);
                 all_messages.push_back({role, content});
             }
-            // system 消息已在前面处理，这里跳过
+
         }
 
-        // 兜底：msg 中不存在任何 role=="user" 条目（异常场景），仍保留 model_input_.text_，
-        // 与改动前的无条件行为一致，避免引入新的边界回归。
         if (last_user_msg_index < 0) {
             all_messages.push_back({"user", model_input_.text_});
         }
@@ -525,17 +597,15 @@ private:
     std::string BuildPrompt(json &data, bool &is_tool, int contextSize)
     {
         is_tool = false;
-        // 修复：检查 messages 字段是否存在且为 array
+
         if (!data.contains("messages") || !data["messages"].is_array()) {
             throw ReportError{std::string{"messages field is missing or not an array in BuildPrompt"}};
         }
         json msg = data["messages"];
-        // 使用 contains 检查避免 nlohmann::json 在键不存在时静默插入 null 值
+
         json tools = (data.contains("tools") && data["tools"].is_array())
                      ? data["tools"] : json::array();
 
-        // PromptLedger 快照：在任何压缩发生之前记录原始规模，不依赖 getenablePromptDebug()（
-        // 因为响应头/流式账本需要在每一次请求上都回报，而不是只在开启调试时才有）。
         size_t ledger_messages_in = msg.size();
         std::string ledger_raw_content_concat;
         for (const auto& ledger_m : msg) {
@@ -552,14 +622,8 @@ private:
 
         systemDefaultPrompt = model_input_.system_;
 
-        // PromptLedger 快照：此时 systemDefaultPrompt 仍是优化前的原始系统提示词（下方
-        // PrepareOptimizedSystemAndToolPrompt 会就地重写它），在重写之前先留一份快照。
         std::string ledger_system_snapshot = systemDefaultPrompt;
 
-        // 收集优化前统计信息（延迟打印，避免被 PreFilterMessages 日志打断）
-        // 修复：使用注入的 context_（多模型并发安全），而非 model_config_.get_genie_model_handle()
-        // 在多模型场景下，get_genie_model_handle() 返回的是全局单模型句柄，会导致所有请求
-        // 使用同一个模型句柄进行 TokenLength 计算，破坏多模型路由的正确性。
         struct BeforeOptStats {
             bool valid = false;
             json messages_snapshot;
@@ -571,8 +635,7 @@ private:
             size_t full_context_size_val = 0;
         } before_opt_stats;
         if (instance_config_->getenablePromptDebug()) {
-            // 使用注入的 context_ 引用，包装为 shared_ptr（不拥有所有权）
-            // 注意：context_ 的生命周期由 ChatRequestHandler::ChatCompletions 中的 handle（shared_ptr）保证
+
             before_opt_stats.valid = true;
             before_opt_stats.messages_snapshot = msg;
             before_opt_stats.system_prompt_snapshot = systemDefaultPrompt;
@@ -585,40 +648,37 @@ private:
             }
         }
 
-        // 优化系统提示词与工具定义（在 PreFilterMessages 之前，stateless/stateful 两种模式统一压缩优化）
-        std::string raw_tools_str;  // 原始 tools JSON 字符串（未经 OptimizeToolsPrompt 处理）
+        std::string raw_tools_str;
         PrepareOptimizedSystemAndToolPrompt(tools, contextSize, is_tool, systemDefaultPrompt, raw_tools_str);
 
-        // PromptLedger 快照：此时 raw_tools_str 已由 PrepareOptimizedSystemAndToolPrompt 内部在优化工具
-        // 定义之前赋值（不依赖 debug 开关），可直接复用。一次 TokenLength 调用估算优化前
-        // 系统提示词 + 原始消息内容 + 原始 tools 字符串的总 token 数，避免逐条多次 tokenize。
         size_t ledger_tokens_in = context_->TokenLength(
             ledger_system_snapshot + "\n" + ledger_raw_content_concat + raw_tools_str);
 
-        // 必须在 PreFilterMessages 之前追加 /think 或 /no_think，
-        // 确保两阶段（PreFilterMessages 和 FitMessagesToContext）使用相同的 system prompt 进行 token 计算。
-        // 按需求：只要当前模型是 instance_config_->is_thinking_model()，无论主推理还是其它场景，
-        // 都必须统一追加 /think 或 /no_think。
-        // 注意：关闭 thinking 时不再注入 FILL_THINK 预填空 think 块——真机实测确认该预填内容会导致
-        // qwen3 系列模型在极短用户提问下退化（原样复述上一轮对话后立即结束），/no_think 单独即可正确抑制思考。
         bool force_empty_think_prefill = false;
         bool force_open_think_prefill = false;
+        std::string think_goal_reminder;
         model_input_.think_time_budget_s_ = 0;
+        model_input_.think_force_min_floor_ = false;
         if (instance_config_->is_thinking_model())
         {
+            bool failure_trigger = false;
+            bool forced_unblock_trigger = false;
             if (instance_config_->getenableThinking())
             {
                 systemDefaultPrompt += "/think";
             }
-            else if (ShouldThinkThisTurn())
+            else if (ShouldThinkThisTurn(&failure_trigger, &forced_unblock_trigger))
             {
                 const auto &at_cfg = instance_config_->i_model_config_.GetAdaptiveThinkingConfig();
                 systemDefaultPrompt += "/no_think";
                 force_open_think_prefill = true;
+                if (failure_trigger && at_cfg.goal_reminder_chars > 0)
+                    think_goal_reminder = BuildGoalReminder(at_cfg.goal_reminder_chars);
                 model_input_.think_time_budget_s_ = at_cfg.time_budget_s;
                 model_input_.think_min_tokens_ = at_cfg.min_tokens;
                 model_input_.think_max_tokens_ = at_cfg.max_tokens;
                 model_input_.think_ctx_reserve_ = at_cfg.ctx_reserve_tokens;
+                model_input_.think_force_min_floor_ = forced_unblock_trigger;
             }
             else
             {
@@ -627,10 +687,6 @@ private:
             }
         }
 
-        // Windows shell 使用提示（通用、与具体技能无关的基础设施，与 /think、/no_think 一样
-        // 必须在 PreFilterMessages 之前追加，确保两阶段使用相同的 system prompt 计算 token）：
-        // 若本次请求 tools 声明里存在 shell/命令执行类工具（按 name/description 关键词匹配），
-        // 提示模型该命令可能被路由到 cmd.exe 或 PowerShell 之一，两者链式执行/变量/引号语法不同。
 #if defined(_WIN32) || defined(__WIN32__) || defined(WIN32)
         {
             const auto &shell_hint_cfg = instance_config_->i_model_config_.GetWindowsShellHintConfig();
@@ -667,17 +723,10 @@ private:
         }
 #endif
 
-        // 消息预过滤 + FitMessagesToContext 适配（stateless/stateful 两种模式统一执行压缩）
         OptimizedMessages optimized = PrepareFilteredMessages(msg, systemDefaultPrompt, contextSize);
 
-        // build model input
-        // 修复：使用 instance_config_（per-model）的 prompt template，而非 model_config_（全局 IModelConfig）
         auto &j = instance_config_->get_prompt_template();
 
-        // 修复：检查 prompt_template 是否有效（非 null 且为 object 类型）
-        // 若 prompt.json 读取失败（文件不存在、格式错误、file.good()=false 等），
-        // prompt_template 会保持 null，对 null 类型的 const json 使用字符串键会抛出 type_error.305。
-        // 此处提前检查并抛出明确的错误信息，便于诊断。
         if (!j.is_object()) {
             My_Log{My_Log::Level::kError}
                 << "[BuildPrompt] prompt_template is invalid (type=" << j.type_name()
@@ -698,7 +747,7 @@ private:
         }
         else if (force_open_think_prefill)
         {
-            start_prompt_str += "<think>\n";
+            start_prompt_str += "<think>\n" + think_goal_reminder;
         }
         const bool stable_empty_think_history = force_empty_think_prefill
             || (force_open_think_prefill && instance_config_->is_speculative_draft_configured());
@@ -708,42 +757,10 @@ private:
                                                           stable_empty_think_history ? empty_think_start : std::string(),
                                                           BuildTaskMemoNotes());
 
-        // 计算最终提示词的真实 token 数
-        // 修复：使用注入的 context_（多模型并发安全），而非 model_config_.get_genie_model_handle()
-        // 直接使用 context_ 引用调用 TokenLength，无需通过 weak_ptr 获取 shared_ptr
-
         {
             size_t final_tokens = context_->TokenLength(modelInputContent);
 
-            // PromptLedger 最终写入：数据源均取自既有统计（MessagePreFilter::GetStats()/
-            // PromptOptimizer::GetLastStats()/optimized 返回值），不引入第二套统计。
-            {
-                const auto& pf_stats = pre_filter_.GetStats();
-                const auto& opt_stats = optimizer_.GetLastStats();
-                last_ledger_.context_size = instance_config_->get_context_size();
-                last_ledger_.tokens_in = ledger_tokens_in;
-                last_ledger_.tokens_out = final_tokens;
-                last_ledger_.messages_in = ledger_messages_in;
-                last_ledger_.messages_kept = optimized.messages.size();
-                last_ledger_.messages_dropped = pf_stats.total_dropped + optimized.dropped_count;
-                last_ledger_.messages_truncated = pf_stats.truncated_count;
-                last_ledger_.tools_tier = opt_stats.tools_tier;
-                last_ledger_.tools_total = opt_stats.tools_total;
-                last_ledger_.tools_kept = opt_stats.tools_kept;
-                last_ledger_.skills_total = opt_stats.skills_total;
-                last_ledger_.skills_kept = opt_stats.skills_kept;
-                last_ledger_.skills_budget_tokens = opt_stats.skills_budget_tokens;
-                last_ledger_.skills_l2 = opt_stats.skills_l2;
-                last_ledger_.skills_l1 = opt_stats.skills_l1;
-                last_ledger_.skills_l0 = opt_stats.skills_l0;
-                last_ledger_.emergency_truncated = optimized.emergency_truncated;
-                last_ledger_.memo_active = optimized.memo_active;
-                last_ledger_.memo_confidence = optimized.memo_confidence;
-                last_ledger_.memo_refresh_count = optimized.memo_refresh_count;
-                last_ledger_.memo_pages_total = optimized.memo_pages_total;
-                last_ledger_.messages_dropped_prefix_len = pf_stats.messages_dropped_prefix_len;
-                last_ledger_.prefix_reset_reason = pf_stats.prefix_reset_reason;
-            }
+            FillLedger(ledger_tokens_in, final_tokens, ledger_messages_in, optimized);
 
             std::ostringstream log_stream;
             log_stream << "[Normal] Final prompt - Tokens: " << final_tokens;
@@ -760,7 +777,7 @@ private:
             My_Log{My_Log::Level::kInfo} << log_stream.str() << std::endl;
 
             if (instance_config_->getenablePromptDebug()) {
-                // 打印详细的消息列表（PreFilter 后的原始 JSON 消息，与 Harmony 路径对齐）
+
                 My_Log{My_Log::Level::kInfo} << "\n========== 详细过程日志 ==========" << std::endl;
                 My_Log{My_Log::Level::kInfo} << "[PreFilter] Output message details (raw JSON, before prompt conversion, oldest to newest):" << std::endl;
                 size_t total_message_tokens_dbg = 0;
@@ -783,7 +800,6 @@ private:
                             << "Role: " << dbg_role << ", "
                             << "Tokens: " << dbg_msg_tokens;
 
-                    // 打印 tool_calls（assistant 消息）
                     if (dbg_role == "assistant" && dbg_element.contains("tool_calls") &&
                         !dbg_element["tool_calls"].is_null() && dbg_element["tool_calls"].is_array()) {
                         const auto& tcs = dbg_element["tool_calls"];
@@ -809,7 +825,6 @@ private:
                 }
                 My_Log{My_Log::Level::kInfo} << "[PreFilter] Total messages tokens: " << total_message_tokens_dbg << std::endl;
 
-                // 1. 打印优化前统计信息
                 if (before_opt_stats.valid) {
                     PromptStatsHelper::PrintBeforeOptimizationStats(
                         before_opt_stats.messages_snapshot,
@@ -820,7 +835,6 @@ private:
                         before_opt_stats.full_context_size_val);
                 }
 
-                // 2. 打印 PreFilter 优化后统计信息
                 size_t system_tokens = context_->TokenLength(systemDefaultPrompt);
                 size_t tools_tokens = 0;
                 if (!raw_tools_str.empty()) {
@@ -829,10 +843,8 @@ private:
                 PromptStatsHelper::PrintAfterPreFilterStats(msg, context_, system_tokens, contextSize, tools_tokens, &pre_filter_.GetStats(),
                                                             instance_config_->get_context_size());
 
-                // 3. 打印 FitMessagesToContext 优化后统计信息
                 ComputeAndPrintFitStats(optimized, context_, system_tokens, tools_tokens, contextSize);
 
-                // 4. 打印最终提示词统计信息
                 PromptStatsHelper::PrintFinalStats(final_tokens, modelInputContent.length(), contextSize, is_tool,
                                                    instance_config_->get_context_size());
             }
@@ -842,9 +854,6 @@ private:
         return modelInputContent;
     }
 
-    // ========== Harmony 格式构建方法 ==========
-
-    // Harmony system/developer 消息压缩优化（含 agent 类型检测）：stateless/stateful 两种模式统一生效。
     void PrepareOptimizedHarmonySystemMessages(const std::string &instructions, bool has_tools,
                                                 const json &tools, const std::string &knowledge_cutoff, const std::string &current_date,
                                                 const std::string &reasoning_level, const IModelConfig &model_config,
@@ -853,18 +862,11 @@ private:
         My_Log{My_Log::Level::kDebug} << "[Harmony] System prompt optimization enabled" << std::endl;
 
         AgentType agentType = DetectAgentTypeAndLog(instructions, "Harmony");
-        // 将 agent 类型写入 ModelInput，供底层推理日志标记使用
+
         model_input_.agent_type_ = (agentType == AgentType::MAIN_AGENT) ? "main" : "sub";
 
         if (agentType == AgentType::SUBAGENT) {
-            // 子 agent：与 General 格式的 SubAgent 处理逻辑保持一致：
-            //   Step 1: OptimizeSubagentSystemPrompt 重建 Skill Catalog + Few-shot，
-            //           并通过 subagent_prompt_sections 保留原始 system prompt 中的
-            //           SubAgent 特有段落（## Workspace / ## Subagent Context / ## Runtime 等）
-            //   Step 2: 追加 Tools（TypeScript namespace 格式，与 MainAgent 相同）
-            // 注意：OptimizeHarmonyDeveloperMessage 使用 prompt_sections（MainAgent 配置），
-            //       而 OptimizeSubagentSystemPrompt 使用 subagent_prompt_sections（SubAgent 专用配置），
-            //       两者的段落过滤规则不同，不能混用。
+
             system_msg = "<|start|>system<|message|>";
             system_msg += optimizer_.OptimizeHarmonySystemMessage(
                 knowledge_cutoff,
@@ -879,7 +881,7 @@ private:
                 developer_msg += "# System Context\n\n";
                 developer_msg += optimizer_.OptimizeSubagentSystemPrompt(instructions, request_data_);
                 if (has_tools) {
-                    // Tool Usage Guidelines（与 OptimizeHarmonyDeveloperMessage 保持一致）
+
                     const SystemContextConfig& ctx_cfg = model_config.GetSystemContextConfig();
                     for (const auto& sec : ctx_cfg.sections) {
                         if (!sec.enabled) continue;
@@ -899,7 +901,7 @@ private:
                 developer_msg += "<|end|>";
             }
         } else {
-            // 主 agent 或未知类型：使用完整优化逻辑
+
             system_msg = "<|start|>system<|message|>";
             system_msg += optimizer_.OptimizeHarmonySystemMessage(
                 knowledge_cutoff,
@@ -923,20 +925,16 @@ private:
         My_Log{My_Log::Level::kDebug} << "[Harmony] Optimization completed" << std::endl;
     }
 
-    // FitMessagesToContext 压缩：stateless/stateful 两种模式统一生效，不再受 -n 门控。
-    // 包装 user 消息为 Harmony 格式再压缩，并把还原后的原始文本写入 chat_history_。
-    // processed_messages 会被就地修改，messages 会被追加最终提示词片段。
     OptimizedMessages PrepareHarmonyMessages(std::vector<GenieChatMessage> &processed_messages,
                                               const std::string &system_msg, const std::string &developer_msg,
                                               int contextSize, std::vector<std::string> &messages)
     {
-        // 应用 FitMessagesToContext 进行 Token 控制
+
         std::string full_system_prompt = system_msg + developer_msg;
 
         OptimizedMessages optimized;
         chat_history_.Clear();
-        // 包装 user 消息为 Harmony 格式（用于 FitMessagesToContext 的 token 计算）
-        // 保存原始内容，避免写入 chat_history_ 时依赖字符串解包
+
         std::unordered_map<size_t, std::string> user_original_content;
         for (size_t pm_idx = 0; pm_idx < processed_messages.size(); pm_idx++) {
             if (processed_messages[pm_idx].role == "user") {
@@ -952,9 +950,6 @@ private:
             "Harmony"
         );
 
-        // 写入 chat_history_ 时使用原始文本（非 Harmony 格式），
-        // 避免 export_to_json 等外部接口读取到 Harmony 格式内容
-        // 使用索引顺序匹配，不依赖内容相等性
         std::vector<std::string> user_original_ordered;
         {
             std::vector<size_t> sorted_indices;
@@ -989,15 +984,11 @@ private:
             }
         }
 
-        // 5. 构建当前请求的提示词（使用优化后的消息）
         for (const auto &msg_info : optimized.messages)
         {
             messages.push_back(msg_info.content);
         }
 
-        // Task Memo 尾部提示（连续失败/重复调用提醒等）作为独立的一条 Harmony user
-        // 消息追加在全部历史之后、assistant 生成标记之前：不写入 chat_history_，
-        // 不会被下一轮带进历史，避免作废其后已缓存的全部检查点。
         if (!optimized.messages.empty()) {
             std::string memo_section = BuildTaskMemoSection();
             if (!memo_section.empty()) {
@@ -1013,17 +1004,14 @@ private:
         const IModelConfig & model_config{instance_config_->i_model_config_};
         is_tool = false;
 
-        // 修复：检查 messages 字段是否存在且为 array
         if (!data.contains("messages") || !data["messages"].is_array()) {
             throw ReportError{std::string{"messages field is missing or not an array in BuildHarmonyPrompt"}};
         }
         json msg = data["messages"];
-        // 使用 contains 检查避免 nlohmann::json 在键不存在时静默插入 null 值
+
         json tools = (data.contains("tools") && data["tools"].is_array())
                      ? data["tools"] : json::array();
 
-        // PromptLedger 快照（Harmony 路径）：在任何压缩发生之前记录原始规模，
-        // 与 BuildPrompt() 同样不依赖 getenablePromptDebug()。
         size_t ledger_messages_in = msg.size();
         std::string ledger_raw_content_concat;
         for (const auto& ledger_m : msg) {
@@ -1045,7 +1033,6 @@ private:
         std::string reasoning_level = j.value("reasoning_level", "medium");
         std::string knowledge_cutoff = j.value("knowledge_cutoff", "2024-06");
 
-        // 从消息中提取 system 指令
         std::string instructions = "You are a helpful assistant.";
         for (const auto &element: msg)
         {
@@ -1058,9 +1045,6 @@ private:
             }
         }
 
-        // PromptLedger 快照（Harmony 路径）：instructions 是优化前的原始 system 指令
-        // （传给 PrepareOptimizedHarmonySystemMessages 的是 const 引用，函数内部不会修改它），
-        // 一次 TokenLength 调用估算优化前 instructions + 原始消息内容 + 原始 tools 的总 token 数。
         std::string ledger_raw_tools_str = has_tools ? tools.dump() : "";
         size_t ledger_tokens_in = context_->TokenLength(
             instructions + "\n" + ledger_raw_content_concat + ledger_raw_tools_str);
@@ -1068,14 +1052,10 @@ private:
         std::string system_msg;
         std::string developer_msg;
 
-        // 优化 Harmony system/developer 消息（stateless/stateful 两种模式统一压缩优化）
         PrepareOptimizedHarmonySystemMessages(instructions, has_tools, tools,
                                                knowledge_cutoff, current_date, reasoning_level, model_config,
                                                system_msg, developer_msg);
 
-        // ========== 预扫描：建立完整的 tool_call_id → 函数名映射 ==========
-        // 必须在 PreFilterMessages 之前对原始 msg 进行扫描，确保即使后续过滤
-        // 丢弃了某些 assistant 消息，tool 消息仍能通过映射找到对应的函数名
         for (const auto &pre_element : msg)
         {
             auto pre_role = get_json_value(pre_element, "role", BLANK_STRING);
@@ -1112,10 +1092,11 @@ private:
             << "[PreScan] Total tool_call_id mappings: "
             << tool_call_id_to_name_.size() << std::endl;
 
-        // 保存优化前统计所需的数据快照（msg 在 PreFilterMessages 后会被修改）
         json before_opt_msg_snapshot = msg;
-        // ========== 消息预过滤 ==========
+
         msg = pre_filter_.PreFilterMessages(msg, contextSize, system_msg + developer_msg, /*is_harmony=*/true, &tool_call_id_to_name_);
+
+        task_memo_builder_.RecordRepeatDetections(pre_filter_.GetRepeatDetections());
 
         std::vector<std::string> messages;
         messages.push_back(system_msg);
@@ -1123,7 +1104,6 @@ private:
             messages.push_back(developer_msg);
         }
 
-        // 添加历史消息
         std::vector<GenieChatMessage> all_messages;
 
         all_messages.push_back({"user", model_input_.text_});
@@ -1134,14 +1114,13 @@ private:
 
             if (role == "assistant")
             {
-                // 检查是否有 tool_calls 字段（OpenAI 标准格式）
+
                 if (element.contains("tool_calls") && !element["tool_calls"].is_null() &&
                     element["tool_calls"].is_array())
                 {
                     const auto& tool_calls = element["tool_calls"];
                     size_t num_tool_calls = tool_calls.size();
 
-                    // 多工具调用：生成前言（preamble）
                     if (num_tool_calls > 1) {
                         My_Log{My_Log::Level::kDebug} << "[Tool Call] Multiple tool calls detected: " << num_tool_calls << std::endl;
 
@@ -1161,7 +1140,6 @@ private:
                         My_Log{My_Log::Level::kDebug} << "[Tool Call] Added preamble for multiple tool calls" << std::endl;
                     }
 
-                    // 转换 OpenAI 格式的工具调用为 Harmony 格式
                     for (const auto& tool_call : tool_calls)
                     {
                         std::string call_id = tool_call.value("id", "");
@@ -1178,13 +1156,12 @@ private:
                             continue;
                         }
 
-                        // ========== JSON 参数验证 ==========
                         try {
                             if (!func_args.empty()) {
                                 json args_json = json::parse(func_args);
                                 My_Log{My_Log::Level::kDebug} << "[Tool Call] ✓ JSON validation passed for: " << func_name << std::endl;
                             } else {
-                                // 空参数视为有效（无参数函数）
+
                                 func_args = "{}";
                                 My_Log{My_Log::Level::kDebug} << "[Tool Call] ✓ Empty arguments, using {} for: " << func_name << std::endl;
                             }
@@ -1196,7 +1173,6 @@ private:
                             My_Log{My_Log::Level::kError}
                                 << "[Tool Call] Raw arguments: " << func_args << std::endl;
 
-                            // 尝试修复：如果参数不是 JSON，包装为字符串
                             try {
                                 json fixed_args;
                                 fixed_args["raw_input"] = func_args;
@@ -1215,19 +1191,12 @@ private:
                                 << "[Tool Call] ⚠ Tool call without ID for: " << func_name << std::endl;
                         }
 
-                        // 工具调用格式（Harmony 规范）：
-                        // 1. Analysis 通道：CoT 思考
-                        // 2. Commentary 通道：实际的工具调用
-
-                        // 1. Analysis 通道
                         std::string analysis_msg = "<|start|>assistant<|channel|>analysis<|message|>";
                         analysis_msg += "Need to use function " + func_name + ".<|end|>";
                         all_messages.push_back({role, analysis_msg});
 
                         My_Log{My_Log::Level::kDebug} << "[Tool Call] ✓ Added analysis message for: " << func_name << std::endl;
 
-                        // 2. Commentary 通道（工具调用）
-                        // 格式要求："to=functions.xxx" 后面必须有空格，"<|constrain|>" 后紧跟 "json"
                         std::string commentary_msg = "<|start|>assistant<|channel|>commentary to=functions.";
                         commentary_msg += func_name;
                         commentary_msg += " <|constrain|>json";
@@ -1244,7 +1213,7 @@ private:
                     content = get_json_value(element, "content", BLANK_STRING);
                     if (!content.empty())
                     {
-                        // 检测是否已经是有效的 Harmony 格式
+
                         bool is_valid_harmony = false;
 
                         if (content.find("<|start|>assistant") != std::string::npos &&
@@ -1264,7 +1233,7 @@ private:
                         }
                         else
                         {
-                            // 转换为 Harmony 格式（final 通道）
+
                             std::string harmony_msg = HarmonyProcessor::BuildAssistantMessage(
                                 "final", content
                             );
@@ -1281,13 +1250,12 @@ private:
                 {
                     std::string tool_name;
 
-                    // 策略 1：优先从 name 字段获取（OpenAI 标准字段）
                     if (element.contains("name") && element["name"].is_string())
                     {
                         tool_name = element["name"].get<std::string>();
                         My_Log{My_Log::Level::kDebug} << "[Tool Response] Using tool name from 'name' field: " << tool_name << std::endl;
                     }
-                    // 策略 2：从 tool_call_id 映射获取（备用方案）
+
                     else if (element.contains("tool_call_id") && element["tool_call_id"].is_string())
                     {
                         std::string call_id = element["tool_call_id"].get<std::string>();
@@ -1305,7 +1273,6 @@ private:
                         }
                     }
 
-                    // 两种策略都失败时，使用默认工具名称（容错处理）
                     if (tool_name.empty())
                     {
                         tool_name = "unknown_tool";
@@ -1340,7 +1307,6 @@ private:
                         }
                     }
 
-                    // 检查是否已经是 Harmony 格式
                     if (content.find("<|start|>functions.") != std::string::npos)
                     {
                         all_messages.push_back({role, content});
@@ -1348,11 +1314,9 @@ private:
                     }
                     else
                     {
-                        // [SpawnGuard] 检测 sessions_spawn 异步响应，注入强制等待指令（Harmony 路径）
-                        // 复用 PromptOptimizer::InjectSpawnGuard，与 General 格式路径共享同一实现
+
                         std::string content_for_harmony = optimizer_.InjectSpawnGuard(content);
 
-                        // 转换为 Harmony 格式
                         std::string harmony_msg = HarmonyProcessor::BuildToolMessage(
                             tool_name,
                             content_for_harmony
@@ -1362,15 +1326,8 @@ private:
                     }
                 }
             }
-            // system 消息已经在 developer 中处理，跳过
-        }
 
-        // ========== CoT 管理逻辑 ==========
-        // 根据 Harmony 规范：
-        // 1. 工具调用场景：保留 analysis 通道（CoT）
-        // 2. 一般对话场景：丢弃 analysis 通道，只保留 final 通道
-        //
-        // 单次正向扫描状态机（O(n)）识别所有工具调用序列的范围
+        }
 
         std::vector<GenieChatMessage> processed_messages;
 
@@ -1386,12 +1343,10 @@ private:
         size_t range_start = 0;
         size_t range_end   = 0;
 
-        // 判断 assistant 消息是否是 analysis 消息
         auto is_analysis_msg = [](const std::string& content) -> bool {
             return content.find("<|channel|>analysis") != std::string::npos;
         };
-        // 判断 assistant 消息是否是 preamble 消息
-        // preamble：commentary 通道但不含 to=functions.（多工具调用前言）
+
         auto is_preamble_msg = [](const std::string& content) -> bool {
             return content.find("<|channel|>commentary") != std::string::npos &&
                    content.find("to=functions.") == std::string::npos;
@@ -1523,8 +1478,6 @@ private:
             }
         }
 
-        // 第二遍：根据范围应用 CoT 规则
-        // 预构建 in_range / is_endpoint 标志数组（O(n)）
         std::vector<bool> msg_in_range(all_messages.size(), false);
         std::vector<bool> msg_is_endpoint(all_messages.size(), false);
         for (const auto& range : tool_call_ranges) {
@@ -1541,15 +1494,13 @@ private:
             bool is_range_endpoint  = msg_is_endpoint[i];
 
             if (msg_info.role == "tool") {
-                // 工具响应：始终保留完整消息
+
                 processed_messages.push_back(msg_info);
                 My_Log{My_Log::Level::kDebug} << "[CoT] Tool response at index " << i << ": keeping full message" << std::endl;
             }
             else if (msg_info.role == "assistant") {
                 if (in_tool_call_range) {
-                    // 工具调用范围内的 assistant 消息：
-                    // 1. 工具调用相关消息（analysis/commentary/preamble）：保留完整消息
-                    // 2. 范围终点的处理工具结果消息（final 通道回复）：只保留 final 通道
+
                     bool is_tool_related = IsToolCallMessage(msg_info.content) ||
                                           msg_info.content.find("<|channel|>analysis") != std::string::npos ||
                                           (msg_info.content.find("<|channel|>commentary") != std::string::npos &&
@@ -1566,26 +1517,26 @@ private:
                             My_Log{My_Log::Level::kDebug} << "[CoT] Tool-result assistant at range endpoint " << i
                                     << ": keeping only final channel" << std::endl;
                         } else {
-                            // 如果没有 final 通道，保留原始消息（向后兼容）
+
                             processed_messages.push_back(msg_info);
                             My_Log{My_Log::Level::kDebug} << "[CoT] Tool-result assistant at range endpoint " << i
                                     << ": no final channel found, keeping original" << std::endl;
                         }
                     } else {
-                        // 范围内的其他 assistant 消息（保留完整消息作为兜底）
+
                         processed_messages.push_back(msg_info);
                         My_Log{My_Log::Level::kDebug} << "[CoT] In-range assistant at index " << i
                                 << ": keeping full message (fallback)" << std::endl;
                     }
                 } else {
-                    // 一般 assistant 响应：只保留 final 通道
+
                     std::string final_only = ExtractFinalChannel(msg_info.content);
                     if (!final_only.empty()) {
                         processed_messages.push_back({msg_info.role, final_only});
                         My_Log{My_Log::Level::kDebug} << "[CoT] Regular assistant at index " << i
                                 << ": keeping only final channel" << std::endl;
                     } else {
-                        // 如果没有 final 通道，保留原始消息（向后兼容）
+
                         processed_messages.push_back(msg_info);
                         My_Log{My_Log::Level::kDebug}
                             << "[CoT] Regular assistant at index " << i
@@ -1594,35 +1545,24 @@ private:
                 }
             }
             else {
-                // user 消息：直接添加
+
                 processed_messages.push_back(msg_info);
             }
         }
 
-        // 应用 FitMessagesToContext 进行 Token 控制（stateless/stateful 两种模式统一压缩）
         OptimizedMessages optimized = PrepareHarmonyMessages(processed_messages,
                                                               system_msg, developer_msg, contextSize, messages);
 
-        // 6. 添加 assistant 起始标记
         messages.push_back("<|start|>assistant");
 
-        // 7. 合并所有消息
         std::string result;
         for (const auto &harmony_part : messages) {
             result += harmony_part;
         }
 
-        // 8. 计算最终提示词的真实 token 数
-        // 修复：使用注入的 context_（多模型并发安全），而非 model_config_.get_genie_model_handle()
-        // 在多模型场景下，get_genie_model_handle() 返回的是全局单模型句柄，会导致所有请求
-        // 使用同一个模型句柄进行 TokenLength 计算，破坏多模型路由的正确性。
-        // PromptLedger 只需要一次 tokenize：不依赖 getenablePromptDebug()，无论调试块是否执行
-        // 都要素化计算，debug 块内直接复用这个结果，避免重复调用 TokenLength(result)。
         size_t ledger_final_tokens = context_->TokenLength(result);
         if (instance_config_->getenablePromptDebug()) {
-            // 包装 context_ 为非拥有 shared_ptr，传给需要 shared_ptr 参数的统计辅助函数
 
-            // 打印详细的消息列表（PreFilter 后的原始 JSON 消息）
             My_Log{My_Log::Level::kInfo} << "\n========== 详细过程日志 ==========" << std::endl;
             My_Log{My_Log::Level::kInfo} << "[PreFilter] Output message details (raw JSON, before Harmony conversion, oldest to newest):" << std::endl;
             size_t total_message_tokens = 0;
@@ -1673,8 +1613,6 @@ private:
             }
             My_Log{My_Log::Level::kInfo} << "[PreFilter] Total messages tokens: " << total_message_tokens << std::endl;
 
-            // 统一打印所有统计信息
-            // 1. 打印优化前统计信息
             if (context_) {
                 PromptStatsHelper::PrintBeforeOptimizationStatsForHarmony(
                     before_opt_msg_snapshot, optimizer_, context_, contextSize,
@@ -1682,7 +1620,6 @@ private:
                     instructions, tools, instance_config_->get_context_size());
             }
 
-            // 2. 打印 PreFilter 优化后统计信息
             size_t system_tokens = context_->TokenLength(system_msg + developer_msg);
             size_t tools_tokens = 0;
             if (tools.is_array() && !tools.empty()) {
@@ -1692,49 +1629,46 @@ private:
             PromptStatsHelper::PrintAfterPreFilterStats(msg, context_, system_tokens, contextSize, tools_tokens, &pre_filter_.GetStats(),
                                                         instance_config_->get_context_size(), /*is_harmony=*/true);
 
-            // 3. 打印 FitMessagesToContext 优化后统计信息
             ComputeAndPrintFitStats(optimized, context_, system_tokens, tools_tokens, contextSize);
 
-            // 4. 打印最终提示词统计信息
             PromptStatsHelper::PrintFinalStats(ledger_final_tokens, result.length(), contextSize, has_tools,
                                                instance_config_->get_context_size());
         }
 
-        // PromptLedger 最终写入（Harmony 路径）：不依赖 getenablePromptDebug()，确保每一次请求都回报。
-        // 数据源与 BuildPrompt() 完全一致（MessagePreFilter::GetStats()/PromptOptimizer::GetLastStats()/
-        // optimized 返回值），不引入第二套统计。
-        {
-            const auto& pf_stats = pre_filter_.GetStats();
-            const auto& opt_stats = optimizer_.GetLastStats();
-            last_ledger_.context_size = instance_config_->get_context_size();
-            last_ledger_.tokens_in = ledger_tokens_in;
-            last_ledger_.tokens_out = ledger_final_tokens;
-            last_ledger_.messages_in = ledger_messages_in;
-            last_ledger_.messages_kept = optimized.messages.size();
-            last_ledger_.messages_dropped = pf_stats.total_dropped + optimized.dropped_count;
-            last_ledger_.messages_truncated = pf_stats.truncated_count;
-            last_ledger_.tools_tier = opt_stats.tools_tier;
-            last_ledger_.tools_total = opt_stats.tools_total;
-            last_ledger_.tools_kept = opt_stats.tools_kept;
-            last_ledger_.skills_total = opt_stats.skills_total;
-            last_ledger_.skills_kept = opt_stats.skills_kept;
-            last_ledger_.skills_budget_tokens = opt_stats.skills_budget_tokens;
-            last_ledger_.skills_l2 = opt_stats.skills_l2;
-            last_ledger_.skills_l1 = opt_stats.skills_l1;
-            last_ledger_.skills_l0 = opt_stats.skills_l0;
-            last_ledger_.emergency_truncated = optimized.emergency_truncated;
-            last_ledger_.memo_active = optimized.memo_active;
-            last_ledger_.memo_confidence = optimized.memo_confidence;
-            last_ledger_.memo_refresh_count = optimized.memo_refresh_count;
-            last_ledger_.memo_pages_total = optimized.memo_pages_total;
-            last_ledger_.messages_dropped_prefix_len = pf_stats.messages_dropped_prefix_len;
-            last_ledger_.prefix_reset_reason = pf_stats.prefix_reset_reason;
-        }
+        FillLedger(ledger_tokens_in, ledger_final_tokens, ledger_messages_in, optimized);
 
         return result;
     }
 
-    // ========== 辅助函数：记录 Agent 类型检测结果日志 ==========
+    void FillLedger(size_t tokens_in, size_t tokens_out, size_t messages_in, const OptimizedMessages& optimized)
+    {
+        const auto& pf_stats = pre_filter_.GetStats();
+        const auto& opt_stats = optimizer_.GetLastStats();
+        last_ledger_.context_size = instance_config_->get_context_size();
+        last_ledger_.tokens_in = tokens_in;
+        last_ledger_.tokens_out = tokens_out;
+        last_ledger_.messages_in = messages_in;
+        last_ledger_.messages_kept = optimized.messages.size();
+        last_ledger_.messages_dropped = pf_stats.total_dropped + optimized.dropped_count;
+        last_ledger_.messages_truncated = pf_stats.truncated_count;
+        last_ledger_.tools_tier = opt_stats.tools_tier;
+        last_ledger_.tools_total = opt_stats.tools_total;
+        last_ledger_.tools_kept = opt_stats.tools_kept;
+        last_ledger_.skills_total = opt_stats.skills_total;
+        last_ledger_.skills_kept = opt_stats.skills_kept;
+        last_ledger_.skills_budget_tokens = opt_stats.skills_budget_tokens;
+        last_ledger_.skills_l2 = opt_stats.skills_l2;
+        last_ledger_.skills_l1 = opt_stats.skills_l1;
+        last_ledger_.skills_l0 = opt_stats.skills_l0;
+        last_ledger_.emergency_truncated = optimized.emergency_truncated;
+        last_ledger_.memo_active = optimized.memo_active;
+        last_ledger_.memo_confidence = optimized.memo_confidence;
+        last_ledger_.memo_refresh_count = optimized.memo_refresh_count;
+        last_ledger_.memo_pages_total = optimized.memo_pages_total;
+        last_ledger_.messages_dropped_prefix_len = pf_stats.messages_dropped_prefix_len;
+        last_ledger_.prefix_reset_reason = pf_stats.prefix_reset_reason;
+    }
+
     void LogAgentType(AgentType agentType, const std::string& context_prefix)
     {
         if (agentType == AgentType::SUBAGENT) {
@@ -1746,7 +1680,6 @@ private:
         }
     }
 
-    // ========== 辅助函数：检测 Agent 类型并记录日志 ==========
     AgentType DetectAgentTypeAndLog(const std::string& system_prompt, const std::string& context_prefix)
     {
         AgentType agentType = optimizer_.DetectAgentType(system_prompt);
@@ -1754,21 +1687,77 @@ private:
         return agentType;
     }
 
-    std::string BuildStandaloneRedundantToolCallNote() const
+    std::string BuildRepeatNotesForTail() const
     {
         if (!request_data_.is_object() || !request_data_.contains("messages") || !request_data_["messages"].is_array())
             return "";
         const auto &cfg = instance_config_->i_model_config_.GetToolCallRepairConfig().redundant_call_guard;
         if (!cfg.enabled)
             return "";
-        const std::string session_key = TaskMemoBuilder::ComputeFirstMsgKey(request_data_["messages"]);
+        const auto& messages = request_data_["messages"];
+        const std::string session_key = TaskMemoBuilder::ComputeFirstMsgKey(messages);
         const std::string key = ToolCallRepetitionStore::MakeKey(session_key, instance_config_->get_model_name());
-        int count = ToolCallRepetitionStore::GetInstance().GetRepeatCount(key);
-        if (count >= cfg.repeat_threshold)
-            return "\n\n## Task Memo\n" + TaskMemoBuilder::RenderRedundantToolCallNote(count);
-        int non_contiguous_count = ToolCallRepetitionStore::GetInstance().GetNonContiguousRepeatCount(key);
-        if (non_contiguous_count >= cfg.non_contiguous_repeat_threshold)
-            return "\n\n## Task Memo\n" + TaskMemoBuilder::RenderNonContiguousRepeatNote(non_contiguous_count);
+        if (key.empty())
+            return "";
+
+        auto& store = ToolCallRepetitionStore::GetInstance();
+        const std::string last_signature = store.GetLastSignature(key);
+        std::string preview;
+        int ledger_total = 0;
+        bool digest_stable = true;
+        if (!last_signature.empty())
+            store.GetOutcomeSummary(key, last_signature, preview, ledger_total, digest_stable);
+
+        std::vector<std::pair<std::string, std::string>> candidates;
+
+        const int repeat_count = store.GetRepeatCount(key);
+        if (cfg.repeat_threshold > 0 && repeat_count >= cfg.repeat_threshold) {
+            candidates.emplace_back("sig:" + last_signature,
+                                    TaskMemoBuilder::RenderRedundantToolCallNote(repeat_count, preview, digest_stable,
+                                                                                  cfg.hard_block_threshold));
+        }
+        const int non_contiguous_count = store.GetNonContiguousRepeatCount(key);
+        const int non_contiguous_threshold = ToolCallRepetitionStore::EffectiveNonContiguousNoticeThreshold(
+            cfg.non_contiguous_repeat_threshold, cfg.hard_block_threshold);
+        if (non_contiguous_threshold > 0 && non_contiguous_count >= non_contiguous_threshold) {
+
+            candidates.emplace_back("sig:" + last_signature,
+                                    TaskMemoBuilder::RenderNonContiguousRepeatNote(non_contiguous_count, preview,
+                                                                                    digest_stable,
+                                                                                    cfg.hard_block_threshold));
+        }
+
+        const auto entry = task_memo_builder_.Lookup(messages);
+        if (entry && entry->contains("read_files") && (*entry)["read_files"].is_object()) {
+            const std::string last_read_ref = ExtractLatestAssistantReadRef(messages);
+            std::string reread_path;
+            std::string note = TaskMemoBuilder::BuildRereadFromTopNote(last_read_ref, (*entry)["read_files"],
+                                                                       reread_path);
+            if (!note.empty())
+                candidates.emplace_back("reread:" + reread_path, note);
+        }
+        if (entry) {
+            const std::string overlap_path = entry->value("_overlap_reread_path", std::string(""));
+            size_t next_offset = 0;
+            if (!overlap_path.empty() && entry->contains("read_files") && (*entry)["read_files"].is_object()
+                    && (*entry)["read_files"].contains(overlap_path)) {
+                next_offset = task_memo_scan::NextUnreadOffset((*entry)["read_files"][overlap_path]);
+            }
+            std::string note = TaskMemoBuilder::BuildOverlapRereadNote(
+                entry->value("overlap_reread_count", 0), entry->value("overlap_reread_threshold", 0),
+                overlap_path, entry->value("_overlap_reread_range", std::string("")), next_offset);
+            if (!note.empty())
+                candidates.emplace_back("overlap:" + overlap_path, note);
+        }
+
+        for (const auto& candidate : candidates) {
+            if (candidate.second.empty())
+                continue;
+
+            const uint64_t content_digest = static_cast<uint64_t>(std::hash<std::string>{}(candidate.second));
+            if (store.TryMarkNoteSlot(key, candidate.first, content_digest))
+                return "\n\n## Task Memo\n" + candidate.second;
+        }
         return "";
     }
 
@@ -1779,11 +1768,6 @@ private:
         const auto &cfg = instance_config_->i_model_config_.GetToolCallRepairConfig().redundant_call_guard;
         if (!cfg.enabled || cfg.consecutive_failure_threshold <= 0)
             return "";
-        static const char* kFailureSignals[] = {
-            "Error:", "ERROR:", "Exception:", "Traceback (most recent call last)",
-            "No such file or directory", "Permission denied",
-            "command not found", "is not recognized as", "Failed to", "failed to", "Failed:",
-        };
         const auto& messages = request_data_["messages"];
         int streak = 0;
         std::string tool_name;
@@ -1797,12 +1781,8 @@ private:
             if (role != "tool")
                 break;
             std::string content = get_json_value<std::string>(msg, "content", "");
-            bool bad = content.find_first_not_of(" \t\r\n") == std::string::npos;
-            if (!bad) {
-                for (const char* sig : kFailureSignals) {
-                    if (content.find(sig) != std::string::npos) { bad = true; break; }
-                }
-            }
+            const bool bad = content.find_first_not_of(" \t\r\n") == std::string::npos ||
+                             TaskMemoBuilder::LooksLikeToolFailure(content);
             if (!bad)
                 break;
             ++streak;
@@ -1819,7 +1799,65 @@ private:
         return "\n\n## Task Memo\n" + oss.str();
     }
 
-    bool ShouldThinkThisTurn() const
+    std::string BuildGoalReminder(int max_chars) const
+    {
+        if (!request_data_.is_object() || !request_data_.contains("messages") || !request_data_["messages"].is_array())
+            return "";
+        const auto entry = task_memo_builder_.Lookup(request_data_["messages"]);
+        if (!entry || !entry->contains("original_goal_raw") || !(*entry)["original_goal_raw"].is_string())
+            return "";
+        std::string goal = safe_utf8_truncate((*entry)["original_goal_raw"].get<std::string>(), (size_t) max_chars, "...");
+        for (char &c : goal)
+            if (c == '\n' || c == '\r')
+                c = ' ';
+        if (goal.empty())
+            return "";
+        return "Original request: " + goal +
+               "\nKeep satisfying it, or say why it can no longer be met and ask the user before changing it.\n";
+    }
+
+    static std::string CycleToolCallKey(const json &tool_call)
+    {
+        if (!tool_call.is_object() || !tool_call.contains("function") || !tool_call["function"].is_object())
+            return "";
+        const auto &fn = tool_call["function"];
+        const std::string name = fn.value("name", std::string());
+        if (name.empty())
+            return "";
+        std::string raw_args;
+        if (fn.contains("arguments"))
+        {
+            if (fn["arguments"].is_string())
+                raw_args = fn["arguments"].get<std::string>();
+            else
+                raw_args = fn["arguments"].dump();
+        }
+        nlohmann::json parsed = nlohmann::json::parse(raw_args, nullptr, false);
+        const std::string args = parsed.is_discarded() ? raw_args : parsed.dump();
+        return name + "\x1f" + args;
+    }
+
+    static std::vector<std::string> CollectCycleToolCallKeys(const json &messages)
+    {
+        std::vector<std::string> keys;
+        if (!messages.is_array())
+            return keys;
+        for (const auto &message : messages)
+        {
+            if (!message.is_object() || message.value("role", "") != "assistant" ||
+                !message.contains("tool_calls") || !message["tool_calls"].is_array())
+                continue;
+            for (const auto &tool_call : message["tool_calls"])
+            {
+                const std::string key = CycleToolCallKey(tool_call);
+                if (!key.empty())
+                    keys.push_back(key);
+            }
+        }
+        return keys;
+    }
+
+    bool ShouldThinkThisTurn(bool *failure_trigger = nullptr, bool *forced_unblock_trigger = nullptr) const
     {
         const auto &at_cfg = instance_config_->i_model_config_.GetAdaptiveThinkingConfig();
         if (!at_cfg.enabled || at_cfg.time_budget_s <= 0)
@@ -1841,51 +1879,78 @@ private:
             if (role == "tool")
                 recent_errors.push_back(FirstFailureLine(get_json_value<std::string>(messages[i], "content", "")));
         }
-        std::string reason;
-        std::string signature;
+        struct ThinkCandidate {
+            std::string reason;
+            std::string signature;
+            bool failure;
+        };
+        std::vector<ThinkCandidate> candidates;
         if (!recent_errors.empty() && !recent_errors[0].empty())
         {
-            signature = recent_errors[0];
+            std::string failure_reason;
             if (recent_errors.size() < 2 || recent_errors[1].empty())
-                reason = "new_failure";
+                failure_reason = "new_failure";
             else
             {
                 for (size_t i = 2; i < recent_errors.size(); ++i)
                 {
                     if (recent_errors[i] == recent_errors[0])
                     {
-                        reason = "error_repeated";
+                        failure_reason = "error_repeated";
                         break;
                     }
                 }
+                if (failure_reason.empty() && recent_errors[1] != recent_errors[0])
+                    failure_reason = "changed_failure";
             }
+            if (!failure_reason.empty())
+                candidates.push_back({failure_reason, recent_errors[0], true});
         }
-        if (reason.empty() && at_cfg.near_repeat_window > 1)
+        if (at_cfg.near_repeat_window > 1)
         {
             const std::string near_tpl = NearRepeatTemplate(messages, at_cfg.near_repeat_window);
             if (!near_tpl.empty())
-            {
-                reason = "near_repeat";
-                signature = "near:" + near_tpl;
-            }
+                candidates.push_back({"near_repeat", "near:" + near_tpl, false});
+        }
+
+        constexpr size_t kCycleWindow = 48;
+        constexpr size_t kCycleRepeatThreshold = 4;
+        bool cycle_checked = false;
+        size_t cycle_repeats = 0;
+        std::string cycle_signature;
+        const std::vector<std::string> cycle_keys = CollectCycleToolCallKeys(messages);
+        if (!cycle_keys.empty())
+        {
+            cycle_repeats = ToolCallRepetitionStore::CountRepeatsInWindow(cycle_keys, kCycleWindow);
+            cycle_signature = BuildCycleRepeatSignature(cycle_keys, kCycleWindow);
+            cycle_checked = true;
+            if (cycle_repeats >= kCycleRepeatThreshold && !cycle_signature.empty())
+                candidates.push_back({"cycle_repeat", cycle_signature, false});
         }
         const auto &rg_cfg = instance_config_->i_model_config_.GetToolCallRepairConfig().redundant_call_guard;
-        if (reason.empty() && rg_cfg.enabled)
+        std::string repeat_key;
+        int repeat_count = 0;
+        bool repeat_count_checked = false;
+        if (rg_cfg.enabled)
         {
-            const std::string key = ToolCallRepetitionStore::MakeKey(session_key, instance_config_->get_model_name());
-            const int count = ToolCallRepetitionStore::GetInstance().GetRepeatCount(key);
-            if (count >= 2)
-            {
-                reason = "repeat_count=" + std::to_string(count);
-                signature = "repeat:" + key;
-            }
+            repeat_key = ToolCallRepetitionStore::MakeKey(session_key, instance_config_->get_model_name());
+            repeat_count = ToolCallRepetitionStore::GetInstance().GetRepeatCount(repeat_key);
+            repeat_count_checked = true;
+            if (repeat_count >= 2)
+                candidates.push_back({"repeat_count=" + std::to_string(repeat_count), "repeat:" + repeat_key, false});
         }
 
         struct SessionThinkState {
             std::unordered_map<std::string, int> per_signature;
+
+            std::unordered_map<std::string, int> consecutive_block_count;
             size_t last_think_msg_count = 0;
             int think_turns = 0;
             int tool_turns = 0;
+
+            int failure_reserve_used = 0;
+
+            std::string last_cycle_signature;
             std::chrono::steady_clock::time_point touched;
         };
         static std::mutex s_mu;
@@ -1899,32 +1964,95 @@ private:
             st = SessionThinkState{};
         st.touched = now;
         ++st.tool_turns;
-        if (reason.empty())
-            return false;
-
-        const bool new_signature = st.per_signature.find(signature) == st.per_signature.end();
-        int &sig_count = st.per_signature[signature];
-        std::string blocked;
-        if (at_cfg.max_per_signature > 0 && sig_count >= at_cfg.max_per_signature)
-            blocked = "signature_limit";
-        else if (!new_signature && st.last_think_msg_count > 0 && messages.size() <= st.last_think_msg_count + 2)
-            blocked = "cooldown";
-        else if (!new_signature && at_cfg.max_think_turn_share > 0.0 &&
-                 st.think_turns >= static_cast<int>(at_cfg.max_think_turn_share * st.tool_turns))
-            blocked = "turn_share";
-        if (!blocked.empty())
+        if (repeat_count_checked && repeat_count < 2)
         {
-            My_Log{} << "[AdaptiveThinking] skip: " << reason << " blocked_by=" << blocked
-                     << " (sig_count=" << sig_count << ")" << std::endl;
-            return false;
+            const auto it = st.per_signature.find("repeat:" + repeat_key);
+            if (it != st.per_signature.end())
+                it->second = 0;
         }
-        ++sig_count;
-        ++st.think_turns;
-        st.last_think_msg_count = messages.size();
-        My_Log{} << "[AdaptiveThinking] enabling /think for this turn: " << reason
-                 << " (sig_count=" << sig_count << ", think_turns=" << st.think_turns
-                 << "/" << st.tool_turns << ")" << std::endl;
-        return true;
+        if (cycle_checked)
+        {
+            if (cycle_repeats >= kCycleRepeatThreshold && !cycle_signature.empty())
+            {
+                st.last_cycle_signature = cycle_signature;
+            }
+            else if (!st.last_cycle_signature.empty())
+            {
+
+                const auto it = st.per_signature.find(st.last_cycle_signature);
+                if (it != st.per_signature.end())
+                    it->second = 0;
+                st.last_cycle_signature.clear();
+            }
+        }
+        bool fallback_paced = false;
+        for (const auto &candidate : candidates)
+        {
+            const bool new_signature = st.per_signature.find(candidate.signature) == st.per_signature.end();
+            const bool paced = fallback_paced || !new_signature || candidate.reason == "changed_failure";
+            int &sig_count = st.per_signature[candidate.signature];
+            std::string blocked;
+            if (at_cfg.max_per_signature > 0 && sig_count >= at_cfg.max_per_signature)
+                blocked = "signature_limit";
+            else if (paced && st.last_think_msg_count > 0 && messages.size() <= st.last_think_msg_count + 2)
+                blocked = "cooldown";
+            else if (paced && at_cfg.max_think_turn_share > 0.0 &&
+                     st.think_turns >= static_cast<int>(at_cfg.max_think_turn_share * st.tool_turns))
+                blocked = "turn_share";
+
+            bool forced_unblock = false;
+            bool reserve_unblock = false;
+            if (blocked == "signature_limit" || blocked == "cooldown")
+            {
+                forced_unblock = ComputeForcedUnblockFromStreak(
+                    st.consecutive_block_count[candidate.signature], at_cfg.max_consecutive_block);
+            }
+            else if (blocked == "turn_share" && IsReserveEligibleThinkReason(candidate.reason))
+            {
+
+                reserve_unblock = TryConsumeFailureThinkReserve(
+                    st.failure_reserve_used, at_cfg.reserved_failure_think_turns);
+            }
+
+            if (!blocked.empty() && !forced_unblock && !reserve_unblock)
+            {
+                My_Log{} << "[AdaptiveThinking] skip: " << candidate.reason << " blocked_by=" << blocked
+                         << " (sig_count=" << sig_count << ")" << std::endl;
+                fallback_paced = true;
+                continue;
+            }
+            if (forced_unblock)
+            {
+                My_Log{} << "[AdaptiveThinking] force-allow: " << candidate.reason << " blocked_by=" << blocked
+                         << " hit " << at_cfg.max_consecutive_block
+                         << " consecutive blocks, bypassing once and resetting streak (sig_count=" << sig_count
+                         << ")" << std::endl;
+            }
+            else
+            {
+                if (reserve_unblock)
+                {
+                    My_Log{} << "[AdaptiveThinking] reserve-allow: " << candidate.reason
+                             << " blocked_by=turn_share, drawing on the failure think reserve ("
+                             << st.failure_reserve_used << "/" << at_cfg.reserved_failure_think_turns
+                             << ")" << std::endl;
+                }
+
+                st.consecutive_block_count.erase(candidate.signature);
+            }
+            ++sig_count;
+            ++st.think_turns;
+            st.last_think_msg_count = messages.size();
+            if (failure_trigger)
+                *failure_trigger = candidate.failure;
+            if (forced_unblock_trigger)
+                *forced_unblock_trigger = forced_unblock || reserve_unblock;
+            My_Log{} << "[AdaptiveThinking] enabling /think for this turn: " << candidate.reason
+                     << " (sig_count=" << sig_count << ", think_turns=" << st.think_turns
+                     << "/" << st.tool_turns << ")" << std::endl;
+            return true;
+        }
+        return false;
     }
 
     static std::string NearRepeatTemplate(const json &messages, int window)
@@ -1966,34 +2094,25 @@ private:
 
     static std::string FirstFailureLine(const std::string &content)
     {
-        static const char* kSignals[] = {
-            "Traceback (most recent call last)", "Error:", "ERROR:", "error:", "Exception:",
-            "No such file or directory", "Permission denied", "not recognized as", "command not found",
-            "FAILED", "failed with", "Cannot find", "cannot find"};
-        static const std::regex kNonZeroExit(R"((exit|return)\s*(code|status)\s*[:=]?\s*-?[1-9]\d*)", std::regex::icase);
-        size_t pos = 0;
-        std::string fallback;
-        while (pos < content.size())
+        const std::string line = TaskMemoBuilder::FirstFailureLine(content);
+        std::string normalized;
+        normalized.reserve(line.size());
+        bool in_digits = false;
+        for (char c : line)
         {
-            size_t nl = content.find('\n', pos);
-            if (nl == std::string::npos)
-                nl = content.size();
-            const std::string line = content.substr(pos, nl - pos);
-            for (const char* s : kSignals)
+            if (std::isdigit(static_cast<unsigned char>(c)))
             {
-                if (line.find(s) != std::string::npos)
-                {
-                    if (std::string(s) != "Traceback (most recent call last)")
-                        return std::regex_replace(line, std::regex(R"(\d+)"), "#").substr(0, 160);
-                    if (fallback.empty())
-                        fallback = "Traceback";
-                }
+                if (!in_digits)
+                    normalized += '#';
+                in_digits = true;
             }
-            if (fallback.empty() && std::regex_search(line, kNonZeroExit))
-                fallback = "nonzero_exit";
-            pos = nl + 1;
+            else
+            {
+                normalized += c;
+                in_digits = false;
+            }
         }
-        return fallback;
+        return normalized.substr(0, 160);
     }
 
     std::string BuildTaskMemoSection() const
@@ -2003,19 +2122,15 @@ private:
         }
         std::string consecutive_failure_note = BuildConsecutiveToolFailureNote();
 
+        std::string repeat_note = BuildRepeatNotesForTail();
+
         auto memo_entry = task_memo_builder_.Lookup(request_data_["messages"]);
-        if (!memo_entry) {
-            std::string standalone = BuildStandaloneRedundantToolCallNote();
-            return !standalone.empty() ? standalone + consecutive_failure_note
-                                        : (consecutive_failure_note.empty() ? "" : consecutive_failure_note);
-        }
+        if (!memo_entry)
+            return repeat_note + consecutive_failure_note;
 
         std::string rendered = TaskMemoBuilder::Render(*memo_entry);
-        if (rendered.empty()) {
-            std::string standalone = BuildStandaloneRedundantToolCallNote();
-            return !standalone.empty() ? standalone + consecutive_failure_note
-                                        : (consecutive_failure_note.empty() ? "" : consecutive_failure_note);
-        }
+        if (rendered.empty())
+            return repeat_note + consecutive_failure_note;
 
         const auto& po_cfg = instance_config_->i_model_config_.GetPromptOptimizationConfig();
         double ratio = po_cfg.task_memo.token_budget_ratio;
@@ -2028,7 +2143,7 @@ private:
                 rendered = TaskMemoBuilder::Render(*memo_entry, budget_bytes);
             }
         }
-        return "\n\n" + rendered + consecutive_failure_note;
+        return "\n\n" + rendered + repeat_note + consecutive_failure_note;
     }
 
     std::string BuildTaskMemoBody() const
@@ -2057,10 +2172,10 @@ private:
 
     std::string BuildTaskMemoNotes() const
     {
-        return BuildStandaloneRedundantToolCallNote() + BuildConsecutiveToolFailureNote();
+
+        return ComposeTaskMemoNotes(false, BuildRepeatNotesForTail(), BuildConsecutiveToolFailureNote());
     }
 
-    // ========== 辅助函数：调用 FitMessagesToContext 并统一处理错误和日志 ==========
     OptimizedMessages ApplyFitMessagesToContext(
         const std::vector<GenieChatMessage>& messages,
         const std::string& system_prompt,
@@ -2091,25 +2206,23 @@ private:
         return optimized;
     }
 
-    // 通用"重复读取"提示：只对幸存在当前上下文窗口内（未被驱逐）的 read 类工具结果生效——
-    // 已被驱逐的那次读取由 TaskMemoBuilder 的 read_files 索引承接，不在这里重复提示，
-    // 两者判定依据天然互斥（这里只看 FitMessagesToContext 之后仍存活的消息）。
-    //
-    // 重复判定必须基于本次请求的完整原始消息列表（驱逐之前），不能基于幸存消息重新计算：
-    // 否则当某个 path 的"第一次读取"消息在后续某轮被驱逐、而它的重复读取消息幸存下来时，
-    // 该幸存消息会从"已标注"变为"未标注"（反之亦然），导致同一条消息在前缀复用区的文本
-    // 跨轮不一致，使前缀命中率归零。做法：先在完整原始列表上一次性判定每条 tool 消息是否
-    // 为重复，再用双指针按内容匹配回幸存列表，只对"本来就是重复"的幸存消息追加提示。
     void AnnotateRepeatedReads(OptimizedMessages& optimized, const std::vector<GenieChatMessage>& full_messages) const
     {
         std::unordered_set<std::string> seen_paths;
         std::unordered_set<const GenieChatMessage*> duplicate_messages;
-        std::string last_assistant_content;
+        std::deque<std::string> pending_tool_calls;
         for (const auto& m : full_messages) {
             if (m.role == "assistant") {
-                last_assistant_content = m.content;
+                if (m.content.find("<tool_call>") != std::string::npos ||
+                    m.content.find("to=functions.") != std::string::npos)
+                    pending_tool_calls.push_back(m.content);
             } else if (m.role == "tool") {
-                std::string path = TaskMemoBuilder::ExtractReadToolPath(last_assistant_content);
+                std::string call_content;
+                if (!pending_tool_calls.empty()) {
+                    call_content = std::move(pending_tool_calls.front());
+                    pending_tool_calls.pop_front();
+                }
+                std::string path = TaskMemoBuilder::ExtractReadToolPath(call_content);
                 if (path.empty())
                     continue;
                 if (seen_paths.count(path)) {
@@ -2120,26 +2233,30 @@ private:
             }
         }
 
-        size_t full_idx = 0;
-        for (auto& m : optimized.messages) {
+        if (optimized.messages.size() > full_messages.size())
+            return;
+        const size_t full_offset = full_messages.size() - optimized.messages.size();
+        for (size_t optimized_index = 0; optimized_index < optimized.messages.size(); ++optimized_index) {
+            auto& m = optimized.messages[optimized_index];
             if (m.role != "tool")
                 continue;
-            while (full_idx < full_messages.size() &&
-                   !(full_messages[full_idx].role == m.role && full_messages[full_idx].content == m.content)) {
-                ++full_idx;
+            const size_t full_index = full_offset + optimized_index;
+            if (full_index >= full_messages.size())
+                continue;
+            if (full_messages[full_index].role != m.role) {
+                My_Log{My_Log::Level::kWarning}
+                    << "[AnnotateRepeatedReads] Message alignment role mismatch at optimized_index="
+                    << optimized_index << std::endl;
+                continue;
             }
-            if (full_idx >= full_messages.size())
-                break;
-            if (duplicate_messages.count(&full_messages[full_idx])) {
-                m.content += "\n\n[Note: this file was already read at an earlier turn and its "
-                             "result is still present earlier in this context; re-reading it was "
-                             "not necessary unless the file may have changed since then.]";
+            if (duplicate_messages.count(&full_messages[full_index])) {
+                m.content += "\n\n[Note: this file was already read at an earlier turn; its result may still be "
+                             "present in the conversation or summarized in the Task Memo above. Check "
+                             "those before re-reading it unless the file may have changed since then.]";
             }
-            ++full_idx;
         }
     }
 
-    // ========== 辅助方法：计算并打印 FitMessagesToContext 统计信息 ==========
     void ComputeAndPrintFitStats(
         const OptimizedMessages& optimized,
         std::shared_ptr<ContextBase> model_handle,
@@ -2147,15 +2264,13 @@ private:
         size_t tools_tokens,
         int contextSize)
     {
-        // 修复：使用 instance_config_（per-model）而非 model_config_（全局 IModelConfig）
+
         PromptStatsHelper::PrintAfterFitStatsFromOptimized(
             optimized.messages, model_handle,
             system_tokens, tools_tokens,
             contextSize, instance_config_->get_context_size());
     }
 
-    // 辅助函数 - 提取 final 通道内容
-    // 用于 CoT 管理：一般对话只保留 final 通道
     std::string ExtractFinalChannel(const std::string& harmony_msg) const
     {
         static const std::string kFinalChannelMarker = "<|channel|>final<|message|>";
@@ -2190,7 +2305,6 @@ private:
 
             std::string content = harmony_msg.substr(content_start, content_end - content_start);
 
-            // 重新构建为 final 通道消息
             result += "<|start|>assistant" + kFinalChannelMarker + content + kEndMarker;
 
             pos = content_end + end_marker_len;
@@ -2199,18 +2313,16 @@ private:
         return result;
     }
 
-    // 辅助函数 - 检测是否是工具调用消息
     bool IsToolCallMessage(const std::string& harmony_msg) const
     {
         return harmony_msg.find("to=functions.") != std::string::npos;
     }
 
-    // 获取当前日期
     std::string getCurrentDate() const
     {
         auto now = std::chrono::system_clock::now();
         auto time_t = std::chrono::system_clock::to_time_t(now);
-        // 使用线程安全版本替代 std::localtime（std::localtime 在多线程下存在数据竞争）
+
         std::tm tm{};
 #ifdef _WIN32
         localtime_s(&tm, &time_t);
@@ -2223,26 +2335,12 @@ private:
         return oss.str();
     }
 
-    // 返回 instance_config_ 自身 config.json 的 sampler.`key` 值（存在且为数值时），否则返回 null。
-    // 与 chat_request_handler.cpp 匿名命名空间里的同名自由函数语义一致（因作用域限制无法跨文件
-    // 直接复用，这里镜像同一套优先级逻辑）：省略的 key 不会被 SetParamsByConfig() 改写为任意常量，
-    // 而是保留 SDK 创建 Dialog 时的默认值——摘要推理是服务端内部调用，没有"请求显式传入"这一层，
-    // 直接取 config.json 自身配置即是完整优先级链。
     json SamplerFallback(const std::string &key) const
     {
         auto &sampler = instance_config_->sampler();
         return (sampler.contains(key) && sampler.at(key).is_number()) ? sampler.at(key) : json();
     }
 
-    // ── RunSummarizationInference ─────────────────────────────────────────────
-    // 为 Phase -1 摘要化执行单次同步推理。
-    // 直接构造 ModelInput 并调用 context_->Query()，不走 Build() 主流程（避免递归）。
-    // 推理失败、输出为空、或单次推理超过内部墙钟超时（见函数体 kSummarizationInferenceTimeout）
-    // 时均返回空串，调用方保留原文。
-    //
-    // prefill_heartbeat：可选的 prefill 阶段心跳回调，在 prefill 期间定期调用。
-    // 用于在摘要推理的 prefill 阶段向客户端发送保活帧，防止 read 超时。
-    // 返回 false 表示连接已断开，应中止推理。
     std::string RunSummarizationInference(const std::string& prompt,
                                           ContextBase::PrefillHeartbeatCallback prefill_heartbeat = nullptr)
     {
@@ -2251,20 +2349,14 @@ private:
         ModelInput sum_input;
         sum_input.text_ = prompt;
 
-        // 动态调整 max_length：根据 prompt token 数计算可用 output tokens，
-        // 确保摘要推理有足够的输出空间，避免因 output token limit 导致摘要被截断。
-        // 策略：context_size - prompt_tokens，至少保留 512 tokens 用于输出。
         {
             int context_size = instance_config_->get_context_size();
             size_t prompt_tokens = context_->TokenLength(prompt);
             int available_output = context_size - static_cast<int>(prompt_tokens);
-            // 至少保留 512 tokens 输出，最多使用整个 context_size
+
             available_output = std::max(available_output, 512);
             available_output = std::min(available_output, context_size);
 
-            // 只把模型自身 config.json 里有合法数值的采样参数塞进去；缺省的 key 不出现在
-            // 这个 json 里，SetParamsByConfig() 自身按 model_config_.sampler() 的 key 遍历、
-            // j 不含该 key 即 continue，会自然跳过未设置的参数，不再被改写为任意硬编码常量。
             json params;
             json temp = SamplerFallback("temp");
             if (temp.is_number()) params["temp"] = temp;
@@ -2278,9 +2370,6 @@ private:
         std::string result;
         bool success = false;
 
-        // Fix: 单 chunk 摘要子推理的墙钟超时保护，见同名 .notes.md「MapChunk 无超时保护」条目。
-        // static（而非普通 local）constexpr：具有静态存储期，lambda 内直接访问不需要出现在捕获列表里，
-        // 否则 MSVC 严格模式报 C3493（GCC/Clang 对此更宽松，但本项目目标平台是 MSVC/ARM64）。
         static constexpr auto kSummarizationInferenceTimeout = std::chrono::seconds(300);
         const auto infer_start_time = std::chrono::steady_clock::now();
         bool timed_out = false;
@@ -2290,7 +2379,7 @@ private:
             success = context_->Query(
                 sum_input,
                 [&result, &timed_out, infer_start_time](std::string& token) -> bool {
-                    // [调试] 流式打印每个 token 到日志（与主推理的 genie_callback 风格一致）
+
                     if (!token.empty())
                     {
                         My_Log{}.original(true) << token;
@@ -2320,7 +2409,6 @@ private:
             return "";
         }
 
-        // ── 打印性能数据（与主推理格式一致）──────────────────────────────────
         {
             My_Log{} << "--- [Summarization] Token Summary Start ---" << std::endl;
             auto profile = context_->HandleProfile();
@@ -2381,8 +2469,6 @@ private:
             return "";
         }
 
-        // [调试] 打印完整的摘要推理输出，便于诊断摘要质量
-        // 使用 kWarning 级别确保一定输出，用 std::endl 保证立即刷新到日志文件
         My_Log{My_Log::Level::kWarning}
             << "[RunSummarizationInference] Full output (" << result.size() << " chars):\n"
             << result << std::endl;
@@ -2400,41 +2486,27 @@ private:
         model_input_.text_.clear();
         model_input_.image_.clear();
         model_input_.audio_.clear();
-        model_input_.agent_type_ = "sub";  // 默认为子 Agent，由 Build() 中检测后覆盖
+        model_input_.agent_type_ = "sub";
         tool_call_id_to_name_.clear();
         last_ledger_ = PromptLedger{};
     }
 
     static inline const std::string BLANK_STRING;
 
-    // 注意：C++ 按声明顺序初始化成员变量，与初始化列表顺序无关。
-    // 以下声明顺序与构造函数初始化列表顺序保持一致，消除 -Wreorder 编译器警告。
-    // 初始化顺序：chat_history_ → instance_config_ → context_ → optimizer_ → pre_filter_ → task_memo_builder_
-    // optimizer_、pre_filter_、task_memo_builder_ 均依赖 instance_config_（已在前面初始化），
-    // SetContext() 在构造函数体中调用（此时 context_ 已初始化），无 UB 风险。
     ChatHistory &chat_history_;
     ModelInput model_input_;
     ModelInstanceConfig *instance_config_;
     std::shared_ptr<ContextBase> context_;
     PromptOptimizer optimizer_;
     MessagePreFilter pre_filter_;
-    // Task Memo 的 infer_fn 只捕获 this（本对象随请求全程存活，含流式路径的 shared_ptr 持有），
-    // 不捕获 Build() 局部的 is_alive_fn——is_alive_fn_ 恒为 nullptr，模型层触发条件满足时恒不跳过。
+
     TaskMemoBuilder task_memo_builder_;
 
-    // 工具调用 ID 到函数名的映射（用于关联 OpenAI 格式的工具调用和响应）
     std::unordered_map<std::string, std::string> tool_call_id_to_name_;
 
-    // 保存请求数据，用于提取 Skill 描述
-    // 注意：必须使用值拷贝（而非引用），因为在 stream 路径中 Build() 在 lambda 内异步执行，
-    // 此时外部的 data 已超出作用域，若使用引用会导致悬空引用（dangling reference），
-    // 使 ExtractSkillsFromRequest 无法从 request_data_ 中解析到 <available_skills> XML，
-    // 导致本地模型路径的 Skill Catalog 丢失。
     json request_data_;
 
-    // 本轮压缩账本（PromptLedger）：Build()/BuildPrompt()/BuildHarmonyPrompt() 内部填充，
-    // 通过 GetLedger() 只读暴露。Reset() 会将其重置为默认值。
     PromptLedger last_ledger_;
 };
 
-#endif //PROMPT_H
+#endif

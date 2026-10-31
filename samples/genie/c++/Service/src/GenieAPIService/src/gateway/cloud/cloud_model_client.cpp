@@ -440,7 +440,7 @@ static bool DoRequestWinHTTP(
     WinHttpCloseHandle(hSession);
     return true;
 }
-#endif // defined(_WIN32) && defined(USE_WINHTTP)
+#endif
 
 bool CloudModelClient::DoStreamRequest(
         const std::string &url,
@@ -483,7 +483,7 @@ bool CloudModelClient::DoStreamRequest(
                                       config_.timeout_seconds, effective_stream_timeout,
                                       config_.api_key);
     }
-#endif // defined(_WIN32) && defined(USE_WINHTTP)
+#endif
 
     try
     {
@@ -942,7 +942,7 @@ CloudModelClient::HttpResult CloudModelClient::DoSingleHttp(
             }
             return result;
         }
-#endif // defined(_WIN32) && defined(USE_WINHTTP)
+#endif
 
 #if defined(CPPHTTPLIB_SSL_ENABLED) || defined(CPPHTTPLIB_MBEDTLS_SUPPORT)
         auto cli = std::make_unique<httplib::Client>(

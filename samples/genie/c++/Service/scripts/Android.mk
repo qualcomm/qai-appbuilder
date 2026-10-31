@@ -53,9 +53,11 @@ SERVICE_SRC_FILES :=            ../src/GenieAPIService/src/chat_history/chat_his
                                     ../src/GenieAPIService/src/chat_request_handler/long_text_summarizer.cpp \
                                     ../src/GenieAPIService/src/chat_request_handler/task_memo_store.cpp \
                                     ../src/GenieAPIService/src/chat_request_handler/task_memo_builder.cpp \
+                                    ../src/GenieAPIService/src/chat_request_handler/task_memo_doc_scan.cpp \
                                     ../src/GenieAPIService/src/chat_request_handler/tool_call_circuit_breaker_store.cpp \
                                     ../src/GenieAPIService/src/chat_request_handler/tool_call_repetition_store.cpp \
 									../src/GenieAPIService/src/context/context_base.cpp \
+                                    ../src/GenieAPIService/src/context/llama_speculative_config.cpp \
                                     ../src/GenieAPIService/src/context/qnn/genie.cpp \
                                     ../src/GenieAPIService/src/context/qnn/genie_interface.cpp \
                                     ../src/GenieAPIService/src/context/qnn/phi4mm/phi4mm.cpp \
@@ -67,7 +69,10 @@ SERVICE_SRC_FILES :=            ../src/GenieAPIService/src/chat_history/chat_his
                                     ../src/GenieAPIService/src/processor/harmony.cpp \
                                     ../src/GenieAPIService/src/processor/general.cpp \
                                     ../src/GenieAPIService/src/response/response_tools.cpp \
+                                    ../src/GenieAPIService/src/response/tool_call_repair.cpp \
                                     ../src/GenieAPIService/src/response/response_dispatcher.cpp \
+                                    ../src/GenieAPIService/src/response/response_dispatcher_aux.cpp \
+                                    ../src/GenieAPIService/src/response/repeat_gate.cpp \
                                     ../src/GenieAPIService/src/gateway/gateway/gateway.cpp \
                                     ../src/GenieAPIService/src/gateway/gateway/gateway_routing.cpp \
                                     ../src/GenieAPIService/src/gateway/gateway/gateway_session.cpp \

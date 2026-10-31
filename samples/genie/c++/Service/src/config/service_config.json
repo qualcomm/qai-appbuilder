@@ -271,8 +271,6 @@
 
         "agent_routing": {
             "_comment": "Agent 路由偏好配置",
-            "_comment_sub_prefer": "true=子 Agent 默认优先走本地",
-            "sub_agent_prefer_local": true,
             "_comment_sub_cloud": "true=子 Agent 在 S0/S1+C2 且云端可用时允许上云",
             "sub_agent_allow_cloud_on_c2": true
         },

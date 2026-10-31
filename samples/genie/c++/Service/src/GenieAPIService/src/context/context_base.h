@@ -12,18 +12,26 @@
 #define _BUILDER_BASE_H
 
 #include "../model/model_instance_config.h"
+#include <atomic>
+#include <cstdint>
 #include <mutex>
 #include <functional>
+#include <iomanip>
+#include <sstream>
+#include <string>
+
+inline std::string FormatFixed2(double v)
+{
+    std::ostringstream oss;
+    oss << std::fixed << std::setprecision(2) << v;
+    return oss.str();
+}
 
 class ContextBase
 {
 public:
     using Callback = std::function<bool(std::string &)>;
 
-    // Prefill 阶段心跳回调：在 prefill（prompt 处理）期间定期调用，
-    // 向客户端发送保活消息，防止代理因长时间无数据而超时断开。
-    // 返回 true  = 连接正常，继续 prefill；
-    // 返回 false = 连接已断开，应立即中止 prefill 并返回 false。
     using PrefillHeartbeatCallback = std::function<bool()>;
 
     explicit ContextBase(const ModelInstanceConfig &config) : model_config_{config} {};
@@ -49,9 +57,6 @@ public:
 
     virtual void ClearConversationState() {}
 
-    // 检查模型是否正在执行推理（query_mutex_ 是否被锁定）
-    // 用于诊断安全检查与主推理之间的锁竞争
-    // 注意：此方法仅用于诊断，不保证原子性（检查后状态可能改变）
     bool is_query_busy() const {
         if (query_mutex_.try_lock()) {
             query_mutex_.unlock();
@@ -65,13 +70,13 @@ public:
     virtual void setLoraStrength(const std::string &engineRole,
                                  const std::unordered_map<std::string, float> &alphaValue);
 
-    // 返回 true 表示上一次生成因触达输出 token 上限而停止（finish_reason = "length"）；
-    // 基类默认返回 false，GenieContext 等子类用实际标记位覆盖。
     virtual bool was_stopped_by_output_limit() const { return false; }
 
     virtual json GetLastQueryTraceMetrics() const { return nullptr; }
 
     virtual bool UsesCrossRequestPrefixCache() const { return false; }
+
+    virtual bool SupportsMultimodalInput() const { return false; }
 
 protected:
     virtual int ApplyParams();
@@ -80,16 +85,66 @@ protected:
 
     int max_length_{};
 
-    // 序列化 Query() 调用的互斥锁。
-    // 各后端（GGUF/llama.cpp、MNN、QNN 等）的模型上下文均不是线程安全的，
-    // 同一模型实例同一时刻只能有一个 Query() 调用在执行。
-    // 安全检查、复杂度评估和正常推理都通过同一个模型句柄调用 Query()，
-    // 必须通过此锁保证互斥。
-    //
-    // 注意：每个 ContextBase 实例（即每个已加载的模型实例）拥有独立的
-    // query_mutex_，不同模型实例之间的锁互不干扰，可以并发推理。
-    // 模型实例的底层硬件类型（CPU/GPU/NPU）不影响此锁的独立性。
+    std::mutex params_mutex_;
     mutable std::mutex query_mutex_;
+
+    std::atomic<bool> destroying_{false};
+    std::atomic<int> stop_in_flight_{0};
+    std::atomic<int> pending_queries_{0};
+    std::atomic<uint64_t> stop_epoch_{0};
+
+    class StopScope
+    {
+    public:
+        explicit StopScope(ContextBase &ctx) : ctx_{ctx}
+        {
+            ctx_.stop_in_flight_.fetch_add(1);
+            admitted_ = !ctx_.destroying_.load();
+        }
+
+        ~StopScope() { ctx_.stop_in_flight_.fetch_sub(1); }
+
+        StopScope(const StopScope &) = delete;
+
+        StopScope &operator=(const StopScope &) = delete;
+
+        bool admitted() const { return admitted_; }
+
+    private:
+        ContextBase &ctx_;
+        bool admitted_{false};
+    };
+
+    class QueryScope
+    {
+    public:
+        explicit QueryScope(ContextBase &ctx) : ctx_{ctx}, epoch_{ctx.stop_epoch_.load()}
+        {
+            ctx_.pending_queries_.fetch_add(1);
+            admitted_ = !ctx_.destroying_.load();
+        }
+
+        ~QueryScope() { ctx_.pending_queries_.fetch_sub(1); }
+
+        QueryScope(const QueryScope &) = delete;
+
+        QueryScope &operator=(const QueryScope &) = delete;
+
+        bool admitted() const { return admitted_; }
+
+        bool stopped() const { return ctx_.stop_epoch_.load() != epoch_; }
+
+        uint64_t epoch() const { return epoch_; }
+
+    private:
+        ContextBase &ctx_;
+        uint64_t epoch_;
+        bool admitted_{false};
+    };
+
+    void MarkDestroying();
+
+    bool WaitForIdle(int timeout_ms);
 };
 
 #endif

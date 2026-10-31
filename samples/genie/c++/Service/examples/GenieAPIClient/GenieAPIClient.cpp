@@ -39,7 +39,7 @@ public:
 private:
     static std::string ArgToString(const char *s)
     {
-        return std::string(s); // plain char* → std::string
+        return std::string(s);
     }
 
 #ifdef WIN32
@@ -102,6 +102,8 @@ void CLI::Init(int argc, CharT **argv)
 std::string message;
 std::string response_chunk;
 bool stop_loop{false};
+bool reasoning_started{false};
+bool reasoning_ended{false};
 
 size_t write_callback_stream(char *ptr, size_t size, size_t nmemb, void *userdata)
 {
@@ -132,10 +134,33 @@ size_t write_callback_stream(char *ptr, size_t size, size_t nmemb, void *userdat
 
                 json j = json::parse(jsonStr);
                 if (j.contains("choices") && !j["choices"].empty() &&
+                    j["choices"][0].contains("status_message") &&
+                    j["choices"][0]["status_message"].is_string())
+                {
+                    My_Log{} << "[Status] " << j["choices"][0]["status_message"].get<std::string>() << "\n";
+                }
+                if (j.contains("choices") && !j["choices"].empty() &&
+                    j["choices"][0].contains("delta") &&
+                    j["choices"][0]["delta"].contains("reasoning_content") &&
+                    j["choices"][0]["delta"]["reasoning_content"].is_string())
+                {
+                    if (!reasoning_started)
+                    {
+                        reasoning_started = true;
+                        My_Log{}.original(true) << "\n[Thinking]\n";
+                    }
+                    My_Log{}.original(true) << j["choices"][0]["delta"]["reasoning_content"].get<std::string>();
+                }
+                if (j.contains("choices") && !j["choices"].empty() &&
                     j["choices"][0].contains("delta") &&
                     j["choices"][0]["delta"].contains("content"))
                 {
                     auto part = j["choices"][0]["delta"]["content"].get<std::string>();
+                    if (reasoning_started && !reasoning_ended && !part.empty())
+                    {
+                        reasoning_ended = true;
+                        My_Log{}.original(true) << "\n[Answer]\n";
+                    }
                     My_Log{}.original(true) << part;
                     response_chunk += part;
                     if (!cli_info.bench_.empty() && response_chunk.size() > 500)
@@ -178,11 +203,6 @@ std::string build_request_body(const std::string &model, const T1 &prompt, const
             {{"role", "system"}, {"content", system}},
             {{"role", "user"},   {"content", prompt}}
     };
-//    body["size"] = 4096;
-//    body["seed"] = 146;
-//    body["temp"] = 1.5;
-//    body["top_k"] = 13;
-//    body["top_p"] = 0.6;
 
     return body.dump(4);
 }
@@ -241,7 +261,12 @@ std::string Do(const std::string &body)
         try
         {
             full_response = json::parse(message).dump(4);
-            response_chunk = json::parse(message)["choices"][0]["message"]["content"].get<std::string>();
+            const auto &msg = json::parse(message)["choices"][0]["message"];
+            if (msg.contains("reasoning_content") && msg["reasoning_content"].is_string())
+            {
+                My_Log{} << "[Thinking]\n" << msg["reasoning_content"].get<std::string>() << "\n[Answer]\n";
+            }
+            response_chunk = msg["content"].get<std::string>();
             My_Log{} << response_chunk << "\n";
         }
         catch (std::exception &e)
@@ -417,14 +442,8 @@ MAIN
             }
         }
 
-
         BuildUserContentV2(j_system, j_user);
         req_body = build_request_body(cli_info.model, j_user, j_system, cli_info.stream);
-//        req_body = build_request_body(cli_info.model, BuildUserContentV1(cli_info.prompt,
-//                                                                         cli_info.picture_path_,
-//                                                                         cli_info.audio_path_),
-//                                      cli_info.system, cli_info.stream);
-//        std::string req_body = build_request_body(cli_info.model, cli_info.prompt, cli_info.system, cli_info.stream);
 
         ahead:
         Do(req_body);

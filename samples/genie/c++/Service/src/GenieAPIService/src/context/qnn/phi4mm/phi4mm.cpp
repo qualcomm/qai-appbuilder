@@ -7,12 +7,10 @@
 //==============================================================================
 
 #define STB_IMAGE_IMPLEMENTATION
-#define STB_IMAGE_WRITE_IMPLEMENTATION
 #define STB_IMAGE_RESIZE2_IMPLEMENTATION
 
 #include <stb_image.h>
 #include <stb_image_resize2.h>
-#include <stb_image_write.h>
 
 #include "phi4mm.h"
 
@@ -48,7 +46,7 @@ std::pair<int, int> find_closest_aspect_ratio(
         }
         else if (ratio_diff == best_ratio_diff)
         {
-            // tie-breaker: same as Python: if area > 0.5 * image_size * image_size * ratio[0] * ratio[1]
+
             double threshold = 0.5 * static_cast<double>(image_size) * static_cast<double>(image_size) * static_cast<double>(ratio.first) * static_cast<double>(ratio.second);
             if (area > threshold)
             {
@@ -65,7 +63,6 @@ std::vector<std::pair<int, int>> QInterface::PHI4Embedding::GenerateTargetRatios
     int min_num = 1;
     int max_num = DynamicHD;
 
-    // 1) collect unique pairs (i,j)
     std::set<std::pair<int, int>> target_set;
     for (int n = min_num; n <= max_num; ++n)
     {
@@ -82,7 +79,6 @@ std::vector<std::pair<int, int>> QInterface::PHI4Embedding::GenerateTargetRatios
         }
     }
 
-    // 2) move to vector and sort by product (then by i, then by j)
     std::vector<std::pair<int, int>> target_ratios(target_set.begin(), target_set.end());
     std::sort(target_ratios.begin(), target_ratios.end(),
               [](const std::pair<int, int> &a, const std::pair<int, int> &b)
@@ -128,7 +124,6 @@ Shape_2D<float> make_attention_mask(
             zero_rows = rows;
     }
 
-    // zero last zero_cols columns
     if (zero_cols > 0)
     {
         int start_col = cols - zero_cols;
@@ -142,7 +137,6 @@ Shape_2D<float> make_attention_mask(
         }
     }
 
-    // zero last zero_rows rows
     if (zero_rows > 0)
     {
         int start_row = rows - zero_rows;
@@ -156,7 +150,6 @@ Shape_2D<float> make_attention_mask(
         }
     }
 
-    // ensure at least one element remains non-zero
     double sum = 0.0;
     for (float v: out.buf)
         sum += static_cast<double>(v);
@@ -165,7 +158,6 @@ Shape_2D<float> make_attention_mask(
         throw std::runtime_error("attention_mask sum is zero or negative");
     }
 
-    //    out.buf = File::ReadFile<float>("attention_mask.raw");
     return out;
 }
 
@@ -182,12 +174,9 @@ Image pad_image_hwc(
     int dst_w = src_w + pad_left + pad_right;
     int dst_h = src_h + pad_top + pad_bottom;
 
-
     int size = dst_w * dst_h * channels;
     float *dst = new float[size];
-    //    std::vector<float> dst(static_cast<size_t>(dst_w) * dst_h * channels);
 
-    // fill whole dst with fill color
     for (int y = 0; y < dst_h; ++y)
     {
         for (int x = 0; x < dst_w; ++x)
@@ -200,7 +189,6 @@ Image pad_image_hwc(
         }
     }
 
-    // copy src into dst at offset (pad_top, pad_left)
     for (int y = 0; y < src_h; ++y)
     {
         for (int x = 0; x < src_w; ++x)
@@ -214,10 +202,6 @@ Image pad_image_hwc(
     return {dst_w, dst_h, 3, dst, size};
 }
 
-// 注意: 这里必须使用 STBIR_FILTER_CATMULLROM, 不能用 STBIR_FILTER_MITCHELL —— 经实测定位,
-// stb_image_resize2 的 STBIR_FILTER_MITCHELL 在特定放大比例(如 640x640 -> 896x896, 1.4x)下,
-// 其内部采样系数表构建(stbir_build_samplers)存在越界访问缺陷,必现触发 0xC0000005。
-// CATMULLROM 与 MITCHELL 同属 support=2 的三次滤波器家族,视觉质量相近,且未复现该缺陷。
 Image resize_srgb_float_pipeline(float *pixels, int org_w, int org_h, int comp, int tar_w, int tar_h)
 {
     Image out{tar_w, tar_h, comp};
@@ -236,7 +220,6 @@ Image resize_srgb_float_pipeline(float *pixels, int org_w, int org_h, int comp, 
     return out;
 }
 
-// <img_buf, attention_mask>
 std::pair<Image, Shape_2D<float>> QInterface::PHI4Embedding::DynamicPreprocess()
 {
     constexpr int kRequestedChannels = 3;
@@ -278,7 +261,7 @@ std::pair<Image, Shape_2D<float>> QInterface::PHI4Embedding::DynamicPreprocess()
     float ratio_width = float(tar_w) / (float) safe_w;
     float ratio_height = float(tar_h) / (float) safe_h;
 
-    std::pair<int, int> new_size; // <w, h>
+    std::pair<int, int> new_size;
     int padding_width, padding_height;
     if (ratio_width < ratio_height)
     {
@@ -318,7 +301,6 @@ Shape_3D<float> ImageToTensorNormalized(const Image &img)
         float g = f_pixels[i * 3 + 1];
         float b = f_pixels[i * 3 + 2];
 
-        // Option A: return values in [0,1] and let Python Normalize
         chw[0 * np + i] = r;
         chw[1 * np + i] = g;
         chw[2 * np + i] = b;
@@ -345,8 +327,6 @@ Shape_3D<float> patchify_attention_mask(
     out.d2 = mask_res;
     out.buf.assign(static_cast<size_t>(N) * mask_res * mask_res, 0.0f);
 
-    // Input indexing: mask.buf[y * W_mask + x]
-    // Output indexing: out.buf[(n * mask_res + y) * mask_res + x]
     int n = 0;
     for (int by = 0; by < blocks_h; ++by)
     {
@@ -379,11 +359,11 @@ Shape_4D<float> unsqueeze_batch(const Shape_3D<float> &in)
         throw std::invalid_argument("input buffer size mismatch");
 
     Shape_4D<float> out;
-    out.d0 = 1;       // batch size 1
-    out.d1 = in.d0;   // C
-    out.d2 = in.d1;   // H
-    out.d3 = in.d2;   // W
-    out.buf = in.buf; // copy buffer; layout becomes N x C x H x W with N=1
+    out.d0 = 1;
+    out.d1 = in.d0;
+    out.d2 = in.d1;
+    out.d3 = in.d2;
+    out.buf = in.buf;
 
     return out;
 }
@@ -391,7 +371,6 @@ Shape_4D<float> unsqueeze_batch(const Shape_3D<float> &in)
 Shape_4D<float> QInterface::PHI4Embedding::GenerateGlobalImg(const Image &img)
 {
     Image standard_img = resize_srgb_float_pipeline(img.point, img.w, img.h, img.c, kWidth, kHeight);
-    save_float_image(standard_img.point, standard_img.w, standard_img.h, 3, "resized_srgb3.png");
     auto result = unsqueeze_batch(ImageToTensorNormalized(standard_img));
     delete[] standard_img.point;
     return result;
@@ -446,7 +425,7 @@ T truncate_inplace(T s, int start, int end)
 
     if (start >= end)
     {
-        // empty result
+
         s.buf.clear();
         s.d0 = 0;
         return s;
@@ -459,8 +438,7 @@ T truncate_inplace(T s, int start, int end)
 
     if (offset != 0)
     {
-        // move the kept prefix to the beginning
-        // use std::move to avoid element-wise copy if T is movable
+
         std::move(s.buf.begin() + offset, s.buf.begin() + offset + new_size, s.buf.begin());
     }
     s.buf.resize(new_size);
@@ -485,12 +463,9 @@ Shape_3D<uint8_t> to_bool_mask(const Shape_3D<float> &src)
     return out;
 }
 
-// Broadcast-add for two common patterns:
-// 1) in_h shape [N,1] and in_w shape [M] -> out shape [N,M], out[i,j] = in_h[i,0] + in_w[j]
-// 2) in_h shape [1,M] and in_w shape [N] -> out shape [N,M], out[i,j] = in_w[i] + in_h[0,j]
 Shape_2D<int64_t> BroadcastAddHplusW(const Shape_2D<int64_t> &in_h, const Shape_1D<int64_t> &in_w)
 {
-    // Validate buffers
+
     if (in_h.buf.size() != static_cast<std::size_t>(in_h.d0) * static_cast<std::size_t>(in_h.d1))
         throw std::runtime_error("in_h buffer size mismatch");
     if (in_w.buf.size() != static_cast<std::size_t>(in_w.d0))
@@ -498,7 +473,6 @@ Shape_2D<int64_t> BroadcastAddHplusW(const Shape_2D<int64_t> &in_h, const Shape_
 
     Shape_2D<int64_t> out;
 
-    // Case A: in_h is [N,1], broadcast in_w across columns -> out [N, M]
     if (in_h.d1 == 1)
     {
         int N = in_h.d0;
@@ -518,7 +492,6 @@ Shape_2D<int64_t> BroadcastAddHplusW(const Shape_2D<int64_t> &in_h, const Shape_
         return out;
     }
 
-    // Case B: in_h is [1,M], broadcast in_w across rows -> out [N, M]
     if (in_h.d0 == 1)
     {
         int N = in_w.d0;
@@ -539,21 +512,16 @@ Shape_2D<int64_t> BroadcastAddHplusW(const Shape_2D<int64_t> &in_h, const Shape_
         return out;
     }
 
-    // Unsupported broadcasting pattern
     throw std::invalid_argument("unsupported shapes for broadcasting: expected in_h.d1==1 or in_h.d0==1");
 }
 
-// Assign pos_ids into position_ids[batch_idx][mask.view(-1)]
-// mask: Shape_2D<uint8_t> treated as boolean (nonzero = true)
-// position_ids: Shape_2D<int64_t> with shape [B, L]
-// pos_ids: Shape_1D<int64_t> with length == number of true elements in mask
 void AssignWithMask(
         Shape_2D<int64_t> &position_ids,
         int batch_idx,
         const Shape_2D<uint8_t> &p_attn_mask,
         const Shape_1D<int64_t> &pos_ids)
 {
-    // Validate position_ids shape and batch index
+
     if (position_ids.d0 <= 0 || position_ids.d1 <= 0)
         throw std::invalid_argument("position_ids dims must be > 0");
     if (batch_idx < 0 || batch_idx >= position_ids.d0)
@@ -561,13 +529,11 @@ void AssignWithMask(
     if (static_cast<size_t>(position_ids.buf.size()) != static_cast<size_t>(position_ids.d0) * position_ids.d1)
         throw std::runtime_error("position_ids buffer size mismatch");
 
-    // Validate mask shape and buffer
     if (p_attn_mask.d0 <= 0 || p_attn_mask.d1 <= 0)
         throw std::invalid_argument("p_attn_mask dims must be > 0");
     if (static_cast<size_t>(p_attn_mask.buf.size()) != static_cast<size_t>(p_attn_mask.d0) * p_attn_mask.d1)
         throw std::runtime_error("p_attn_mask buffer size mismatch");
 
-    // Flatten mask and collect indices where mask != 0
     std::vector<int> indices;
     indices.reserve(static_cast<size_t>(p_attn_mask.d0) * p_attn_mask.d1);
     for (int i = 0; i < p_attn_mask.d0; ++i)
@@ -577,13 +543,12 @@ void AssignWithMask(
             size_t flat_idx = static_cast<size_t>(i) * p_attn_mask.d1 + static_cast<size_t>(j);
             if (p_attn_mask.buf[flat_idx] != 0)
             {
-                // flat index in range [0, L-1]
+
                 indices.push_back(static_cast<int>(flat_idx));
             }
         }
     }
 
-    // Validate pos_ids length matches number of true elements
     if (static_cast<int>(indices.size()) != pos_ids.d0)
     {
         throw std::runtime_error("pos_ids length does not match number of true elements in p_attn_mask");
@@ -591,7 +556,6 @@ void AssignWithMask(
     if (static_cast<size_t>(pos_ids.buf.size()) != static_cast<size_t>(pos_ids.d0))
         throw std::runtime_error("pos_ids buffer size mismatch");
 
-    // Perform assignment: position_ids[batch_idx, indices[k]] = pos_ids[k]
     size_t row_offset = static_cast<size_t>(batch_idx) * static_cast<size_t>(position_ids.d1);
     for (size_t k = 0; k < indices.size(); ++k)
     {
@@ -619,10 +583,8 @@ Shape_2D<int64_t> QInterface::PHI4Embedding::compute_position_ids(
     {
         Shape_2D<uint8_t> &p_attn_mask = patch_attention_mask_lists[i];
 
-        // p_attn_mask[:, 0]
         int nb_patches_h = Sum(slice_keep_one_axis_2d(p_attn_mask, 0, 0));
 
-        // p_attn_mask[0]
         int nb_patches_w = Sum(slice_keep_one_axis_2d(p_attn_mask, 1, 0));
         if (!nb_patches_w || !nb_patches_h)
             continue;
@@ -647,7 +609,7 @@ Shape_2D<uint8_t> flatten_copy(const Shape_3D<uint8_t> &src)
     Shape_2D<uint8_t> out;
     out.d0 = src.d0;
     out.d1 = src.d1 * src.d2;
-    out.buf = src.buf; // copy entire buffer; layout is already batch-major row-major
+    out.buf = src.buf;
     return out;
 }
 
@@ -665,7 +627,7 @@ Shape_4D<float> make_attn_mask_4d(const Shape_2D<uint8_t> &mask2d, float mask_va
     }
     if (!need_expand)
     {
-        //        throw std::runtime_error("mask2d need to expand");
+
         return {};
     }
 
@@ -679,22 +641,18 @@ Shape_4D<float> make_attn_mask_4d(const Shape_2D<uint8_t> &mask2d, float mask_va
     out.d3 = seq_len;
     out.buf.assign(static_cast<std::size_t>(batch) * out.d1 * out.d2 * out.d3, 0.0f);
 
-    // For each batch b, for each target row i (0..seq_len-1), and for each column j (0..seq_len-1):
-    // expand_mask[b,0,i,j] = mask2d[b, j] (reshape+expand semantics)
-    // inverted_mask = 1.0 - expand_mask -> equals 1 when mask2d[b,j] == 0
-    // final[b,0,i,j] = (inverted_mask == 1) ? mask_value : 0.0f
     for (int b = 0; b < batch; ++b)
     {
         std::size_t base_mask = static_cast<std::size_t>(b) * seq_len;
-        std::size_t base_out = static_cast<std::size_t>(b) * out.d1 * out.d2 * out.d3; // equals b * seq_len * seq_len
+        std::size_t base_out = static_cast<std::size_t>(b) * out.d1 * out.d2 * out.d3;
         for (int i = 0; i < seq_len; ++i)
         {
-            // row i in the expanded matrix; each column j depends only on mask2d[b, j]
+
             std::size_t row_offset = base_out + static_cast<std::size_t>(i) * out.d3;
             for (int j = 0; j < seq_len; ++j)
             {
                 uint8_t m = mask2d.buf[base_mask + static_cast<std::size_t>(j)];
-                // inverted_mask = 1 - m (treat nonzero as 1)
+
                 bool inverted = (m == 0u);
                 out.buf[row_offset + static_cast<std::size_t>(j)] = inverted ? mask_value : 0.0f;
             }
@@ -711,13 +669,12 @@ int compute_num_img_tokens(
     const int extra_token = 1;
     const int tail_tokens = 16;
     int result;
-    // sum all elements
+
     double total_sum = 0.0;
     std::size_t total_elems = static_cast<std::size_t>(mask.d0) * mask.d1;
     for (std::size_t i = 0; i < total_elems; ++i)
         total_sum += static_cast<double>(mask.buf[i]);
 
-    // sum first column mask[:,0]
     double first_col_sum = 0.0;
     for (int r = 0; r < mask.d0; ++r)
     {
@@ -736,20 +693,16 @@ Shape_3D<float> extract_global_img_feature(const Shape_4D<T> &src)
     if (src.d0 <= 0 || src.d1 <= 0 || src.d2 <= 0 || src.d3 <= 0)
         throw std::invalid_argument("invalid source dimensions");
 
-    // normalize batch index (allow negative indexing)
     if (batch_idx < 0)
         batch_idx += src.d0;
     if (batch_idx < 0 || batch_idx >= src.d0)
         throw std::out_of_range("batch_idx out of range");
 
-    // We want the first token along d1: token_start = 0, token_count = 1
     const int token_start = 0;
     const int token_count = 1;
 
-    // size of one token (d2 * d3)
     std::size_t per_token = static_cast<std::size_t>(src.d2) * static_cast<std::size_t>(src.d3);
 
-    // offset in elements: ((batch_idx * d1) + token_start) * per_token
     std::size_t offset = (static_cast<std::size_t>(batch_idx) * static_cast<std::size_t>(src.d1) + static_cast<std::size_t>(token_start)) * per_token;
 
     std::size_t new_size = static_cast<std::size_t>(token_count) * per_token;
@@ -758,24 +711,24 @@ Shape_3D<float> extract_global_img_feature(const Shape_4D<T> &src)
         throw std::out_of_range("source buffer too small for requested slice");
 
     Shape_3D<T> out;
-    out.d0 = 1;            // batch dimension preserved as 1 (matches Python result [1, 256, 1152])
-    out.d1 = src.d2;       // channels / height (256)
-    out.d2 = src.d3;       // width (1152)
+    out.d0 = 1;
+    out.d1 = src.d2;
+    out.d2 = src.d3;
     out.buf.assign(src.buf.begin() + offset, src.buf.begin() + offset + new_size);
     return out;
 }
 
 Shape_3D<float> slice_image_attention_mask_range(
         const Shape_3D<float> &in,
-        int start0,   // inclusive
-        int end0,     // exclusive
+        int start0,
+        int end0,
         int start_h,
         int step_h,
         int start_w,
         int step_w
 )
 {
-    // Basic validation
+
     if (in.d0 <= 0 || in.d1 <= 0 || in.d2 <= 0)
         throw std::invalid_argument("input dims must be > 0");
     if (start0 < 0 || end0 < 0 || start0 > end0)
@@ -791,7 +744,6 @@ Shape_3D<float> slice_image_attention_mask_range(
 
     int out_d0 = end0 - start0;
 
-    // compute output spatial sizes by iterating until we exceed bounds (matches Python slicing behavior)
     int out_h = 0;
     for (int h = start_h; h < in.d1; h += step_h)
         ++out_h;
@@ -816,7 +768,7 @@ Shape_3D<float> slice_image_attention_mask_range(
 
     for (int ob = 0; ob < out_d0; ++ob)
     {
-        int sb = start0 + ob; // source b index
+        int sb = start0 + ob;
         for (int ih = 0, sh = start_h; sh < in.d1; ++ih, sh += step_h)
         {
             for (int iw = 0, sw = start_w; sw < in.d2; ++iw, sw += step_w)
@@ -901,8 +853,6 @@ IVisionEmbedding &QInterface::PHI4Embedding::BuildImgPixel()
     auto &image_transformed = hd_images_reshape_4d;
     auto &image_attention_mask = hd_masks_reshape;
 
-    // ------------------------
-
     int max_crops = image_transformed.d0;
     valid_crops_ = std::min(max_crops, 1 + crop_h_ * crop_w_);
 
@@ -946,9 +896,8 @@ IVisionEmbedding &QInterface::PHI4Embedding::BuildImgPixel()
     image_attention_mask4 = permute_shape4d(image_attention_mask4, {0, 2, 1, 3});
     Shape_3D<float> image_attention_mask3 = reshape_4d_to_3d(image_attention_mask4, 1, crop_h_ * H, crop_w_ * H);
 
-    // [0, : ,0]
     useful_height_ = Sum(slice_keep_one_axis(image_attention_mask3, 1, 0, 0));
-    // [0, 0, :]
+
     useful_width_ = Sum(slice_keep_one_axis(image_attention_mask3, 2, 0, 0));
     return *this;
 }
@@ -986,21 +935,19 @@ Shape_3D<float> QInterface::PHI4Embedding::Compose()
 
     Shape_3D<float> glb_img3 = reshape_4d_to_3d(glb_img4, 1, -1, C);
 
-    // patch_feature[0, 1:]
     Shape_3D<float> sub_img3 = Slice4DTo3D(
             patch_feature_view,
-            /*idx0*/ 0,
-            /*axis1*/ 1, -1, 1,   // 1:
-            /*axis2*/ 0, -1, 1,   // :
-            /*axis3*/ 0, -1, 1    // :
+                     0,
+                      1, -1, 1,
+                      0, -1, 1,
+                      0, -1, 1
     );
 
-    // sub_img[:self.B_]
     sub_img3 = slice_shape3d_range(
             sub_img3,
-            /*axis0*/ 0, B, 1,
-            /*axis1*/ 0, -1, 1,
-            /*axis2*/ 0, -1, 1
+                      0, B, 1,
+                      0, -1, 1,
+                      0, -1, 1
     );
 
     Shape_4D<float> sub_img = reshape_3d_to_4d(sub_img3, B, H, H, C);
@@ -1104,7 +1051,7 @@ IVisionEmbedding &QInterface::PHI4Embedding::EmbeddingProcess<uint16_t>::MergeEm
         float val = static_cast<float>(embedded_bin[i] / parent->BASE16_SCALE - parent->BASE16_OFFSET);
         float sign = (val < 0.0f) ? -1.0f : 1.0f;
         float rounded = std::floor(std::fabs(val) + 0.5f) * sign;
-        // clip
+
         if (rounded < static_cast<float>(std::numeric_limits<uint16_t>::min()))
         {
             rounded = static_cast<float>(std::numeric_limits<uint16_t>::min());
@@ -1154,7 +1101,7 @@ IVisionEmbedding &QInterface::PHI4Embedding::MergeEmbedding()
 
         if (token_id == SPECIAL_TOKEN_ID)
         {
-            // Use vision embedding
+
             if ((vision_idx + 1) * HIDDEN_DIM > img_inferred_buffer.buf.size())
             {
                 throw std::runtime_error("not enough vision embeddings for special tokens");

@@ -14,8 +14,6 @@
 #include <functional>
 #include <regex>
 
-// When writing the C++ implementation of RecursiveCharacterTextSplitter, I referenced the Python code in LangChain.
-// https://github.com/langchain-ai/langchain/blob/master/libs/text-splitters/langchain_text_splitters/character.py#L58
 class RecursiveCharacterTextSplitter
 {
 private:
@@ -104,4 +102,4 @@ public:
     static inline const int DOCS_MAX_SIZE = DEFAULT_CONTEXT_SIZE - 1024;
 };
 
-#endif //TEXT_SPLITTER_H
+#endif

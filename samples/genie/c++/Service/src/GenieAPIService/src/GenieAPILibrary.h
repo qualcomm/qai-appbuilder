@@ -12,6 +12,8 @@
 #include <vector>
 #include <functional>
 #include <string>
+#include <atomic>
+#include <mutex>
 
 
 #ifdef _WIN32
@@ -120,11 +122,13 @@ private:
 
     void stream_ask(const std::string& prompt);
     void inference_thread();
+    bool EnsureImpl(const char* tag);
     std::string build_response_json(const std::string& response, const std::string& prompt, bool is_stream=false, bool is_stream_end=false);
 
     Level level_{};
-    int status{ init };
+    std::atomic<int> status{ init };
     QInterfaceImpl* impl_{};
+    std::mutex impl_mutex_;
     std::string config_;
 };
 

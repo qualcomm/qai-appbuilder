@@ -3,6 +3,20 @@
     "_comment_scope": "本文件只承载与端云结合完全无关的通用本地能力：工具调用兜底修复/消息裁剪/紧急截断/长文本摘要/Task Memo 等算法参数，以及本地调试开关；与 -n 取值无关，无条件生效。下游客户端自己的提示词文案（身份声明/段落过滤规则/SpawnGuard 等）不在此文件，仍在 service_config.json 的 prompt_optimization 节下。",
     "_version": "1.0",
 
+    "generation_repeat_guard": {
+        "_comment": "单次生成内的退化 token 循环防护：检测到重复周期后暂存后续 token，确认重复时提前结束并回滚 KV；不影响正常生成",
+        "_comment_enabled": "true=启用（默认），false=关闭本次生成内退化循环防护",
+        "enabled": true,
+        "_comment_max_period_tokens": "检测的最大重复周期长度，默认48；只检测尾部两个完全相同的 token 块",
+        "max_period_tokens": 48
+    },
+
+    "adaptive_thinking": {
+        "_comment": "动态深度思考（ShouldThinkThisTurn）：只在检测到失败/重复/循环类通用信号时，为这一轮把 assistant 预填换成开放的 <think>。本节只显式声明需要跟进的项，未列出的字段（enabled/time_budget_s/min_tokens/max_per_signature/max_think_turn_share/error_repeat_window/near_repeat_window/max_tokens/ctx_reserve_tokens/goal_reminder_chars/max_consecutive_block）缺省时按 model_config.h 里 AdaptiveThinkingConfig 的默认值工作",
+        "_comment_reserved_failure_think_turns": "失败/重复类信号（new_failure/changed_failure/error_repeated/near_repeat/repeat_count）的思考轮保底份额：turn_share（think_turns >= max_think_turn_share x tool_turns）跳闸后，这几类自救信号仍可在整个会话内额外放行这么多轮。turn_share 是全局占比节流、不是某个签名的死锁，所以 max_consecutive_block 那条兑底刻意不覆盖它；没有这份保底时，最需要思考的那几轮重复失败会被全部挡掉。cycle_repeat 不得动用这份份额：它是循环探测信号而不是自救请求。默认 3；0 或负数表示关闭保底",
+        "reserved_failure_think_turns": 3
+    },
+
     "tool_call_repair": {
         "_comment": "工具调用兜底修复配置：现有正则修复链+Layer1本地确定性提取均失败后（最终会落回 name=unknow），Layer2 在返回给客户端之前发起服务端内部隐形自纠正重试",
         "_comment_enabled": "true=启用本节全部新增行为（默认），false=完全跳过，行为与改动前逐字节一致",
@@ -17,10 +31,8 @@
 
         "circuit_breaker": {
             "_comment": "Layer3 分级终态协议熔断器：连续多次真正走到 Layer3 终态（Layer0/1/2 均未成功恢复），说明该会话+模型系统性不具备工具调用能力，熔断后动态降级 system prompt（跳过工具声明注入），避免模型继续做徒劳的工具调用尝试",
-            "_comment_threshold": "连续触发 Layer3 达到此次数后判定熔断，默认 3",
-            "consecutive_layer3_threshold": 3,
-            "_comment_cooldown": "熔断后的冷却时间（秒），期间该会话+模型持续降级 system prompt；冷却到期后自动解除，默认 300（5 分钟）",
-            "cooldown_seconds": 300
+            "_comment_threshold": "连续触发 Layer3 达到此次数后判定熔断，默认 3；熔断只由 Layer0/1/2 任一层成功恢复出合法工具调用解除，不设按秒数的冷却窗口（长链路任务单轮百秒量级，按墙钟的窗口会让连续判定失效）",
+            "consecutive_layer3_threshold": 3
         },
 
         "redundant_call_guard": {
@@ -29,10 +41,24 @@
             "enabled": true,
             "_comment_repeat_threshold": "同一(工具名,参数)签名连续成功调用达到此次数后触发纠偏提示，默认 2（即发现重复的第一时间）",
             "repeat_threshold": 2,
-            "_comment_ttl_seconds": "距上一次调用超过此秒数视为新的序列，重新从 1 计数，默认 300（5 分钟）",
-            "ttl_seconds": 300,
             "_comment_consecutive_failure_threshold": "请求尾部连续为空或失败的 tool 结果达到此次数时追加纠偏提示，默认 3；0 或负数关闭",
-            "consecutive_failure_threshold": 3
+            "consecutive_failure_threshold": 3,
+            "_comment_internal_retry_threshold": "发前闸门的软拦阈值（同一(工具名,参数)签名的累计执行次数，含本次）：达到该值且该签名历史结果指纹始终一致时，在发给客户端之前先做一次服务端内部隐形重试（复用 Layer2 的 scratch 重试通道），把账本里记的上次真实结果喂给模型后让它自己决定下一步；模型改主意就发新调用，仍坚持就放行这一次。默认 2；0 表示关闭软拦（硬拦不受影响）",
+            "internal_retry_threshold": 2,
+            "_comment_non_contiguous_repeat_threshold": "同签名穿插重复提示的阈值（该签名累计执行次数，含中间插入其他调用的情形）：达到后在尾部追加一次事实提示。必须严格小于 hard_block_threshold，否则穿插型重复会在收到任何警告之前就被发前硬拦拦死；代码里还会再夹到 hard_block_threshold-1 兜底。默认 2；0 表示关闭该提示",
+            "non_contiguous_repeat_threshold": 2,
+            "_comment_hard_block_threshold": "发前闸门的硬拦阈值（同一签名的累计执行次数，含本次）：达到该值且结果指纹始终一致时绝不发给客户端，改走降级终态。默认 3，即「结果完全相同的动作最多执行两次，第三次不可达」；0 表示关闭硬拦。出现过两种不同结果指纹（世界变了，如改完代码重新构建）时计数清零、恢复自由放行，正当重跑不被误伤",
+            "hard_block_threshold": 3,
+            "_comment_hard_block_stop_after": "同一签名累计被硬拦达到该次数后，降级正文改为明确收尾说明、finish_reason 改为 stop（而不是 length）。原因：本地模型的客户端会对 length 自动续跑，若不收尾则会对同一个被拦动作无限续跑。默认 2；0 表示始终用 length",
+            "hard_block_stop_after": 2,
+            "_comment_soft_retry_enabled": "软拦（发前隐形重试）的独立开关，默认 false。硬拦不需要额外推理、零 KV 代价所以默认开；软拦要多付一次全量 prefill，且当前代码层没有「保护/恢复前缀快照」的公开接口，scratch 请求的快照会顶掉原快照、使下一轮真实请求的前缀复用归零。真机 token 级 KV 回归验证通过前保持 false；关闭时 internal_retry_threshold 不起作用，闸门只有「放行/硬拦」两态，功能性保证（结果相同的动作最多执行两次）不变",
+            "soft_retry_enabled": false,
+            "_comment_max_signatures_per_entry": "单个（会话::模型）条目下最多记多少个签名；超限时按价值打分淘汰（未解决失败 > 累计次数高 > 最近触达），不按插入顺序 FIFO（FIFO 恰好会先丢掉反复失败的那条命令）。默认 256",
+            "max_signatures_per_entry": 256,
+            "_comment_note_min_interval_turns": "两次同类重复/重访提示之间的最小工具轮间隔（真节流状态，取代取模放行；取模一旦落在放行余数上会导致此后每轮逐字复读）。默认 4",
+            "note_min_interval_turns": 4,
+            "_comment_overlap_reread_threshold": "非零 offset 重访已读区间信号的触发次数阈值：独立于上面两个精确签名计数器（它们按参数变化清零），累计到该次数才提示，避免把一次合理的交叉引用式重读当成循环。默认 2",
+            "overlap_reread_threshold": 2
         }
     },
 
@@ -58,18 +84,15 @@
         "_comment": "Prompt 优化与分级压缩配置，控制历史消息的保留与压缩策略",
 
         "skill_catalog_format": "structured",
-        "enable_tool_whitelist": true,
-        "allowed_tools": ["read", "edit", "write", "exec", "web_search", "web_fetch"],
         "enable_skill_auto_correction": true,
-        "tool_call_temperature": 0.1,
 
         "_comment_output_reserve_ratio": "为模型输出预留的上下文窗口比率（默认 0.20 即 20%）；实际可用于 Prompt 的 token 数 = context_size × (1 - output_reserve_ratio)",
         "output_reserve_ratio": 0.20,
 
-        "_comment_max_messages_limit": "消息数量上限（超出时智能丢弃最旧的消息，保留工具调用序列完整性）；配合下方 token_pressure_trigger_ratio 做 token 预算感知裁剪：仅当条数超限且 token 使用率也达到压力阈值时才真正裁剪，纯条数超限、预算仍充足时不裁剪",
+        "_comment_max_messages_limit": "消息数量上限（超出时智能丢弃最旧的消息，保留工具调用序列完整性）；配合下方 token_pressure_trigger_ratio 做 token 预算感知裁剪：仅当条数超限且 token 使用率也达到压力阈值时才真正裁剪，纯条数超限、预算仍充足时不裁剪；跨请求前缀缓存生效时不作为独立驱逐条件",
         "max_messages_limit": 48,
 
-        "_comment_token_pressure_trigger_ratio": "Step 1 token 预算感知裁剪的压力阈值（0.0-1.0）：仅当消息条数超过 max_messages_limit 且当前消息 token 使用率（相对 available_tokens）达到此比例时才真正触发裁剪；16384 context 下 token 预算通常用不到一半就先撞上条数上限（Run9 实测 41% 使用率即被裁剪），把关键早期事实（如模型刚读到的配置文件路径）挤出历史、仅留数字占位符，无 Task Memo 兜底时会导致模型'失忆'后幻觉——此前的临时规避是把 max_messages_limit 调大到 48，本次改为真正的 token 预算感知判断，使条数上限成为纯粹的安全兜底，不再是主要触发因素",
+        "_comment_token_pressure_trigger_ratio": "Step 1 token 预算感知裁剪的压力阈值（0.0-1.0）：仅当消息条数超过 max_messages_limit 且当前消息 token 使用率（相对 available_tokens）达到此比例时才真正触发裁剪；16384 context 下 token 预算通常用不到一半就先撞上条数上限（Run9 实测 41% 使用率即被裁剪），把关键早期事实（如模型刚读到的配置文件路径）挤出历史、仅留数字占位符，无 Task Memo 兜底时会导致模型'失忆'后幻觉——此前的临时规避是把 max_messages_limit 调大到 48，本次改为真正的 token 预算感知判断，使条数上限成为纯粹的安全兜底，不再是主要触发因素；跨请求前缀缓存生效时跳过 Step 1 的条数门控",
         "token_pressure_trigger_ratio": 0.75,
 
         "_comment_recent_window": "最近 N 条消息视为'新消息'，在分级压缩中受到更高保护（优先保留完整内容）",

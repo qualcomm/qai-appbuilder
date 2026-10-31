@@ -18,8 +18,24 @@ using json = nlohmann::ordered_json;
 class ModelInstanceConfig
 {
 public:
+    ModelInstanceConfig() = default;
+    ModelInstanceConfig(const ModelInstanceConfig &) = delete;
+    ModelInstanceConfig &operator=(const ModelInstanceConfig &) = delete;
+
+    ~ModelInstanceConfig()
+    {
+        i_model_config_.genieModelHandle.reset();
+        i_model_config_.qnn_embedding_.Clean();
+    }
+
     const std::string &get_model_path() const { return model_path_; }
     void set_model_path(const std::string &path) { model_path_ = path; }
+
+    const std::string &get_config_file() const { return config_file_; }
+    void set_config_file(const std::string &path) { config_file_ = path; }
+
+    const std::string &get_known_model_path() const { return known_model_path_; }
+    void set_known_model_path(const std::string &path) { known_model_path_ = path; }
 
     const std::string &get_model_name() const { return  model_name_; }
     void set_model_name(const std::string &name) { model_name_ = name; }
@@ -97,6 +113,8 @@ public:
 
 private:
     std::string model_path_;
+    std::string config_file_;
+    std::string known_model_path_;
     std::string model_name_;
     mutable json sampler_;
     int context_size_{DEFAULT_CONTEXT_SIZE};
@@ -137,4 +155,4 @@ private:
                                         "</tool_call>\n";
 };
 
-#endif //MODEL_INSTANCE_CONFIG_H
+#endif

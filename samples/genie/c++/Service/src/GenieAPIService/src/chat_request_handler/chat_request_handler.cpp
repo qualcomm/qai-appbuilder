@@ -39,6 +39,14 @@ json SamplerFallback(const ModelInstanceConfig &config, const std::string &key)
     return (sampler.contains(key) && sampler.at(key).is_number()) ? sampler.at(key) : json();
 }
 
+constexpr float kSpeculativeToolCallTemperature = 0.1f;
+constexpr float kToolCallTemperature = 0.7f;
+
+float ToolCallTemperatureCap(const ModelInstanceConfig &config)
+{
+    return config.is_speculative_draft_configured() ? kSpeculativeToolCallTemperature : kToolCallTemperature;
+}
+
 void ApplyOutputSizeBudget(ContextBase &handle, ModelInstanceConfig &config,
                           size_t prompt_tokens, const json &temperature)
 {
@@ -63,6 +71,60 @@ void ApplyOutputSizeBudget(ContextBase &handle, ModelInstanceConfig &config,
         params["top_p"] = top_p;
     handle.SetParamsByConfig(params);
 }
+
+std::shared_ptr<LoadedModel> ResolveLoadedModel(ModelManager &manager, const std::string &model_name,
+                                                httplib::Response &res)
+{
+    if (model_name.empty())
+    {
+        res.status = 400;
+        res.set_content(R"({"error": "model is required"})", ResponseDispatcher::MIMETYPE_JSON);
+        return nullptr;
+    }
+    auto loaded = manager.GetModel(model_name);
+    if (!loaded || !loaded->is_loaded || !loaded->config || !loaded->context)
+    {
+        json err = {{"error", "model '" + model_name + "' is not loaded"}};
+        res.status = 404;
+        res.set_content(err.dump(), ResponseDispatcher::MIMETYPE_JSON);
+        return nullptr;
+    }
+    return loaded;
+}
+
+std::vector<std::shared_ptr<LoadedModel>> ResolveQueriedModels(ModelManager &manager, const std::string &model_name,
+                                                                httplib::Response &res)
+{
+    std::vector<std::shared_ptr<LoadedModel>> result;
+    if (!model_name.empty())
+    {
+        auto loaded = ResolveLoadedModel(manager, model_name, res);
+        if (loaded)
+        {
+            result.push_back(std::move(loaded));
+        }
+        return result;
+    }
+    for (auto &loaded: manager.GetAllLoadedModels())
+    {
+        if (loaded && loaded->is_loaded && loaded->config && loaded->context)
+        {
+            result.push_back(std::move(loaded));
+        }
+    }
+    return result;
+}
+
+std::string ModelNameFromBody(const std::string &body)
+{
+    json data = json::parse(body, nullptr, false);
+    if (!data.is_object() || !data.contains("model") || !data["model"].is_string())
+    {
+        return "";
+    }
+    return data["model"].get<std::string>();
+}
+
 void WriteRequestTrace(const std::string &request_id, const std::string &model_name, bool is_stream,
                        const ResponseDispatcher &dispatcher, const std::shared_ptr<ContextBase> &handle,
                        const PromptLedger &ledger, const std::string &request_body)
@@ -99,7 +161,7 @@ void WriteRequestTrace(const std::string &request_id, const std::string &model_n
     }
     writer.WriteRecord(rec);
 }
-} // namespace
+}
 
 ChatRequestHandler::ChatRequestHandler(GenieService *srv) :
         model_manager(*srv->modelManager),
@@ -137,65 +199,57 @@ void ChatRequestHandler::FetchModelList(const httplib::Request &req, httplib::Re
         return r;
     };
 
-    auto current = model_manager.GetDefaultModel();
-    std::string current_name_lower, current_dir_lower;
-    if (current && current->config)
-    {
-        current_name_lower = to_lower(current->config->get_model_name());
-        fs::path p(current->config->get_model_path());
-        current_dir_lower = to_lower(p.filename().generic_string());
-    }
+    auto loaded_models = model_manager.GetAllLoadedModels();
+    std::vector<bool> loaded_matched(loaded_models.size(), false);
 
     std::vector<json> disk_models = model_manager.ScanModelDirectory();
 
-    if (!disk_models.empty())
+    for (auto &m : disk_models)
     {
-        bool current_found_on_disk = false;
-        for (auto &m : disk_models)
+        m["object"]   = "model";
+        m["created"]  = now_ts;
+        m["owned_by"] = "owner";
+        const std::string disk_id_lower = to_lower(m["id"].get<std::string>());
+        m["is_loaded"] = false;
+        for (size_t i = 0; i < loaded_models.size(); ++i)
         {
-            m["object"]   = "model";
-            m["created"]  = now_ts;
-            m["owned_by"] = "owner";
-            const std::string disk_id_lower = to_lower(m["id"].get<std::string>());
-            bool is_current = current && (
-                (!current_name_lower.empty() && disk_id_lower == current_name_lower) ||
-                (!current_dir_lower.empty() && disk_id_lower == current_dir_lower));
-            m["is_loaded"] = is_current;
-            if (is_current)
+            const auto &loaded = loaded_models[i];
+            if (!loaded || !loaded->config)
+                continue;
+            std::string name_lower = to_lower(loaded->config->get_model_name());
+            fs::path p(loaded->config->get_model_path());
+            std::string dir_lower = to_lower(p.filename().generic_string());
+            bool is_match = (!name_lower.empty() && disk_id_lower == name_lower) ||
+                            (!dir_lower.empty() && disk_id_lower == dir_lower);
+            if (is_match)
             {
-                current_found_on_disk = true;
-                m["context_length"] = current->config->get_context_size();
-                m["backend"] = current->backend;
-                m["device"] = current->device;
+                loaded_matched[i] = true;
+                m["is_loaded"]      = true;
+                m["context_length"] = loaded->config->get_context_size();
+                m["backend"]        = loaded->backend;
+                m["device"]         = loaded->device;
+                break;
             }
-            model_list.push_back(m);
         }
-
-        if (current && current->config && !current_found_on_disk)
-        {
-            json m;
-            m["id"]             = current->config->get_model_name();
-            m["object"]         = "model";
-            m["created"]        = now_ts;
-            m["owned_by"]       = "owner";
-            m["is_loaded"]      = true;
-            m["context_length"] = current->config->get_context_size();
-            m["backend"]        = current->backend;
-            m["device"]         = current->device;
-            model_list.push_back(m);
-        }
+        model_list.push_back(m);
     }
-    else if (current && current->config)
+
+    for (size_t i = 0; i < loaded_models.size(); ++i)
     {
+        if (loaded_matched[i])
+            continue;
+        const auto &loaded = loaded_models[i];
+        if (!loaded || !loaded->config)
+            continue;
         json m;
-        m["id"]             = current->config->get_model_name();
+        m["id"]             = loaded->config->get_model_name();
         m["object"]         = "model";
         m["created"]        = now_ts;
         m["owned_by"]       = "owner";
         m["is_loaded"]      = true;
-        m["context_length"] = current->config->get_context_size();
-        m["backend"]        = current->backend;
-        m["device"]         = current->device;
+        m["context_length"] = loaded->config->get_context_size();
+        m["backend"]        = loaded->backend;
+        m["device"]         = loaded->device;
         model_list.push_back(m);
     }
 
@@ -207,21 +261,25 @@ void ChatRequestHandler::FetchModelList(const httplib::Request &req, httplib::Re
 
 void ChatRequestHandler::ContextSize(const httplib::Request &req, httplib::Response &res)
 {
-    json data = json::parse(req.body, nullptr, false);
-    std::string model_name = data.value("model", "");
-
-    json contextSize;
-    auto loaded = model_manager.GetModel(model_name);
-    if (!loaded) {
-        loaded = model_manager.GetDefaultModel();
+    std::string model_name = req.get_param_value("model");
+    if (model_name.empty() && req.method == "POST")
+    {
+        model_name = ModelNameFromBody(req.body);
+    }
+    const auto queried = ResolveQueriedModels(model_manager, model_name, res);
+    if (!model_name.empty() && queried.empty())
+    {
+        return;
     }
 
-    if (loaded) {
-        contextSize["contextsize"] = loaded->config->get_context_size();
-    } else {
-        contextSize["contextsize"] = 0;
+    json entries = json::array();
+    for (const auto &loaded: queried)
+    {
+        entries.push_back({{"model", loaded->config->get_model_name()},
+                           {"contextsize", loaded->config->get_context_size()}});
     }
-    res.set_content(contextSize.dump(2), ResponseDispatcher::MIMETYPE_JSON);
+    json result = {{"models", std::move(entries)}, {"loaded_models", queried.size()}};
+    res.set_content(result.dump(2), ResponseDispatcher::MIMETYPE_JSON);
     res.status = 200;
 }
 
@@ -244,37 +302,35 @@ void ChatRequestHandler::ServiceExit(const httplib::Request &req, httplib::Respo
 
 void ChatRequestHandler::ModelStop(const httplib::Request &req, httplib::Response &res)
 {
-    json data = json::parse(req.body, nullptr, false);
-    std::string text = data.value("text", "");
-    std::string model_name = data.value("model", "");
-
-    if (text == "stop")
+    const std::string model_name = ModelNameFromBody(req.body);
+    auto loaded = ResolveLoadedModel(model_manager, model_name, res);
+    if (!loaded)
     {
-        auto loaded = model_manager.GetModel(model_name);
-        if (!loaded) {
-            loaded = model_manager.GetDefaultModel();
-        }
-
-        if (loaded && loaded->context) {
-            loaded->context->Stop();
-        }
+        return;
     }
-    res.set_content("", ResponseDispatcher::MIMETYPE_JSON);
+
+    json data = json::parse(req.body, nullptr, false);
+    if (data.value("text", "") != "stop")
+    {
+        res.status = 400;
+        res.set_content(R"({"error": "text must be 'stop'"})", ResponseDispatcher::MIMETYPE_JSON);
+        return;
+    }
+    loaded->context->Stop();
+    json ok = {{"status", "stopped"}, {"model", loaded->config->get_model_name()}};
+    res.set_content(ok.dump(), ResponseDispatcher::MIMETYPE_JSON);
     res.status = 200;
 }
 
 void ChatRequestHandler::ClearMessage(const httplib::Request &req, httplib::Response &res)
 {
-    json data = json::parse(req.body, nullptr, false);
-    std::string model_name = data.is_object() ? data.value("model", "") : "";
-
-    auto loaded = model_manager.GetModel(model_name);
-    if (!loaded) {
-        loaded = model_manager.GetDefaultModel();
+    const std::string model_name = ModelNameFromBody(req.body);
+    auto loaded = ResolveLoadedModel(model_manager, model_name, res);
+    if (!loaded)
+    {
+        return;
     }
-    if (loaded && loaded->context) {
-        loaded->context->ClearConversationState();
-    }
+    loaded->context->ClearConversationState();
 
     ClearPreFilterSessionStates();
     TaskMemoStore::GetInstance().Clear();
@@ -349,20 +405,15 @@ void ChatRequestHandler::TextSplitter(const httplib::Request &req, httplib::Resp
     }
 
     std::string text = data.value("text", "");
-    std::string model_name = data.value("model", "");
-    
-    auto loaded = model_manager.GetModel(model_name);
-    if (!loaded) {
-        loaded = model_manager.GetDefaultModel();
-    }
+    std::string model_name = data.contains("model") && data["model"].is_string() ? data["model"].get<std::string>() : "";
 
-    if (!loaded) {
-        res.status = 500;
-        res.set_content(R"({"error": "No model loaded."})", ResponseDispatcher::MIMETYPE_JSON);
+    auto loaded = ResolveLoadedModel(model_manager, model_name, res);
+    if (!loaded)
+    {
         return;
     }
     auto& config = *loaded->config;
-    
+
     int maxLength = data.value("max_length", 0);
     if (maxLength <= 0)
     {
@@ -419,22 +470,22 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
         modelName = modelName.substr(kLocalPrefix.size());
     }
 
-    auto loaded_model = model_manager.GetModel(modelName);
-    if (!loaded_model && modelName.empty()) {
-        loaded_model = model_manager.GetDefaultModel();
+    if (modelName.empty())
+    {
+        res.status = 400;
+        res.set_content(R"({"error": "model is required"})", ResponseDispatcher::MIMETYPE_JSON);
+        return;
     }
 
+    auto loaded_model = model_manager.GetModel(modelName);
+
     bool model_confirmed_missing = false;
-    if (!loaded_model && !modelName.empty())
+    if (!loaded_model)
     {
         bool new_model = false;
         if (model_manager.LoadModelByName(modelName, new_model))
         {
             loaded_model = model_manager.GetModel(modelName);
-            if (!loaded_model)
-            {
-                loaded_model = model_manager.GetDefaultModel();
-            }
         }
         else
         {
@@ -453,9 +504,7 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
     if (!loaded_model || !loaded_model->is_loaded)
     {
         json err_json;
-        err_json["error"] = modelName.empty()
-            ? "No model available. Please load a model first."
-            : "Model '" + modelName + "' not found or unavailable.";
+        err_json["error"] = "Model '" + modelName + "' not found or unavailable.";
         auto failure_reason = model_manager.GetLastLoadFailureReason();
         if (failure_reason == ModelManager::LoadFailureReason::kInsufficientMemory)
         {
@@ -548,6 +597,7 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
                         };
                         auto& model_input = input_builder->Build(
                             const_cast<json&>(data_copy), is_tool, is_alive_fn);
+                        dispatcher->SetSkillMappings(input_builder->GetRuntimeSkillMappings());
 
                         ResponseTools::post_stream_data(sink, "data",
                             ResponseTools::statusDataJson("prompt_optimized", "Prompt optimization complete",
@@ -562,10 +612,10 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
                                       && data_copy["tools"].is_array()
                                       && !data_copy["tools"].empty();
                         if (has_tools) {
-                            const auto& opt_config = model_manager.GetPromptOptimizationConfig();
+                            const float cap = ToolCallTemperatureCap(*loaded_model_ref->config);
                             temperature = temperature.is_number()
-                                ? json(std::min(temperature.get<float>(), opt_config.tool_call_temperature))
-                                : json(opt_config.tool_call_temperature);
+                                ? json(std::min(temperature.get<float>(), cap))
+                                : json(cap);
                             My_Log{My_Log::Level::kInfo}
                                 << "[Tool Call] Adjusting temperature to " << temperature
                                 << " for tool calling scenario" << std::endl;
@@ -577,7 +627,7 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
                         }
 
                         dispatcher->Prepare(model_input, is_tool, /*is_stream=*/true, req,
-                                            /*is_dll_mode=*/false, &data_copy);
+                                                            false, &data_copy);
 
                         ResponseTools::post_stream_data(sink, "data",
                             ResponseTools::statusDataJson("preparing", "Preparing inference..."));
@@ -662,6 +712,7 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
         {
             bool is_tool;
             auto &model_input = input_builder->Build(data, is_tool);
+            dispatcher->SetSkillMappings(input_builder->GetRuntimeSkillMappings());
 
             input_builder->GetLedger().WriteHeaders(res);
 
@@ -672,10 +723,10 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
             }
             bool has_tools = data.contains("tools") && data["tools"].is_array() && !data["tools"].empty();
             if (has_tools) {
-                const auto& opt_config = model_manager.GetPromptOptimizationConfig();
+                const float cap = ToolCallTemperatureCap(config);
                 temperature = temperature.is_number()
-                    ? json(std::min(temperature.get<float>(), opt_config.tool_call_temperature))
-                    : json(opt_config.tool_call_temperature);
+                    ? json(std::min(temperature.get<float>(), cap))
+                    : json(cap);
                 My_Log{My_Log::Level::kInfo}
                     << "[Tool Call] Adjusting temperature to " << temperature
                     << " for tool calling scenario" << std::endl;
@@ -687,7 +738,7 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
             }
 
             dispatcher->Prepare(model_input, is_tool, /*is_stream=*/false, req,
-                                /*is_dll_mode=*/false, &data);
+                                                false, &data);
             dispatcher->SendResponse(0, nullptr, &res);
             WriteRequestTrace(request_id, trace_model_name, false, *dispatcher, handle,
                           input_builder->GetLedger(), req.body);
@@ -741,25 +792,35 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
 
 void ChatRequestHandler::FetchProfile(const httplib::Request &req, httplib::Response &res)
 {
-    auto loaded = model_manager.GetDefaultModel();
-    if (!loaded || !loaded->context)
+    const std::string model_name = req.get_param_value("model");
+    const auto queried = ResolveQueriedModels(model_manager, model_name, res);
+    if (!model_name.empty() && queried.empty())
     {
-        res.status = 503;
-        res.set_content(R"({"error": "No model loaded or model unavailable"})", ResponseDispatcher::MIMETYPE_JSON);
         return;
     }
-    json result = loaded->context->HandleProfile();
-    if (!result.empty())
+
+    json entries = json::array();
+    for (const auto &loaded: queried)
     {
-        res.set_content(json_to_str(result), ResponseDispatcher::MIMETYPE_JSON);
-        res.status = 200;
+        json profile = loaded->context->HandleProfile();
+        if (profile.empty())
+        {
+            if (!model_name.empty())
+            {
+                res.status = 503;
+                res.set_content(R"({"error": "Profile data not ready", "reason": "no_profile_data"})",
+                                ResponseDispatcher::MIMETYPE_JSON);
+                return;
+            }
+            profile = json::object();
+            profile["reason"] = "no_profile_data";
+        }
+        profile["model"] = loaded->config->get_model_name();
+        entries.push_back(std::move(profile));
     }
-    else
-    {
-        res.status = 503;
-        res.set_content(R"({"error": "Profile data not ready", "reason": "no_profile_data"})",
-                         ResponseDispatcher::MIMETYPE_JSON);
-    }
+    json result = {{"models", std::move(entries)}, {"loaded_models", queried.size()}};
+    res.set_content(json_to_str(result), ResponseDispatcher::MIMETYPE_JSON);
+    res.status = 200;
 }
 
 void ChatRequestHandler::ImageGenerate(const httplib::Request &req, httplib::Response &res)
@@ -794,14 +855,61 @@ void ChatRequestHandler::HandleWelcome(const httplib::Request &req, httplib::Res
 void ChatRequestHandler::FetchModelStatus(const httplib::Request &req, httplib::Response &res)
 {
     json result;
-    result["loading"] = std::to_string(!model_manager.IsLoaded());
+
+    json slots = json::array({
+        { {"device", "npu"}, {"model", ""}, {"is_loaded", false}, {"backend", ""} },
+        { {"device", "gpu"}, {"model", ""}, {"is_loaded", false}, {"backend", ""} },
+        { {"device", "cpu"}, {"model", ""}, {"is_loaded", false}, {"backend", ""} }
+    });
+    const auto loaded_models = model_manager.GetAllLoadedModels();
+    size_t loaded_model_count = 0;
+
+    for (const auto &loaded_model: loaded_models)
+    {
+        if (!loaded_model || !loaded_model->is_loaded || !loaded_model->config)
+        {
+            continue;
+        }
+        ++loaded_model_count;
+        for (const auto &family: loaded_model->occupied_families)
+        {
+            for (auto &slot: slots)
+            {
+                if (slot["device"].get<std::string>() != family || slot["is_loaded"].get<bool>())
+                {
+                    continue;
+                }
+                slot["model"] = loaded_model->config->get_model_name();
+                slot["is_loaded"] = true;
+                slot["backend"] = loaded_model->backend;
+                break;
+            }
+        }
+    }
+
+    result["slots"] = std::move(slots);
+    result["loaded_models"] = loaded_model_count;
     res.set_content(result.dump(), ResponseDispatcher::MIMETYPE_JSON);
     res.status = 200;
 }
 
 void ChatRequestHandler::UnloadModel(const httplib::Request &req, httplib::Response &res)
 {
-    model_manager.UnloadModel();
-    res.set_content("", ResponseDispatcher::MIMETYPE_JSON);
+    const std::string model_name = ModelNameFromBody(req.body);
+    if (model_name.empty())
+    {
+        res.status = 400;
+        res.set_content(R"({"error": "model is required"})", ResponseDispatcher::MIMETYPE_JSON);
+        return;
+    }
+    if (!model_manager.UnloadModelByName(model_name))
+    {
+        json err = {{"error", "model '" + model_name + "' is not loaded"}};
+        res.status = 404;
+        res.set_content(err.dump(), ResponseDispatcher::MIMETYPE_JSON);
+        return;
+    }
+    json ok = {{"status", "unloaded"}, {"model", model_name}};
+    res.set_content(ok.dump(), ResponseDispatcher::MIMETYPE_JSON);
     res.status = 200;
 }

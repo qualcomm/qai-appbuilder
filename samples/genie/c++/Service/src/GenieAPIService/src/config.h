@@ -166,4 +166,4 @@ inline bool Config::Process()
     return true;
 }
 
-#endif //CONFIG_H
+#endif

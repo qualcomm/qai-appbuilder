@@ -205,6 +205,16 @@ if (MSVC)
     # 并显式预先声明 CMAKE_C_COMPILER_WORKS/CMAKE_CXX_COMPILER_WORKS 为已知可用(该编译器已在
     # 顶层项目自己的构建中得到验证)，跳过导致 FTK1011 的 TryCompile 检测，而不需要回退到
     # Ninja + Clang。
+    # Libappbuilder 自己的 CMakeLists.txt 在多处直接读取 $ENV{QNN_SDK_ROOT}（而非一个
+    # 可传入的 CMake 缓存变量）来设置 include/lib 路径。ExternalProject_Add 的“命令行是否
+    # 变化”增量检测只比对 CMAKE_ARGS 的文本，感知不到纯环境变量的变化；因此机器升级了
+    # QNN SDK 并重新 configure 顶层工程后，libappbuilder.dll 仍可能因为自己的 configure
+    # 步骤被跳过而继续沿用旧 SDK 头文件编译产物，与顶层一起拷贝的新版 QnnHtp.dll/Genie.dll
+    # 之间出现接口版本不匹配（表现为 QNN 报 "Unable to find a valid interface"，具体发生在
+    # 依赖 libappbuilder 的音频/图像等多模态子模型加载路径）。下面这个 -D 本身不会被该子
+    # 工程的 CMakeLists.txt 消费，只是作为“哨兵”让 ExternalProject_Add 的命令行比对能
+    # 感知到 QNN_SDK_ROOT 的变化，从而在下次构建时自动重新 configure 并重新编译
+    # libappbuilder，不必每次升级 SDK 都手动删除整个构建目录做完全 clean rebuild。
     ExternalProject_Add(Libappbuilder
             SOURCE_DIR ${LIBAPPBUILDER_ROOT}
             BINARY_DIR ${CMAKE_BINARY_DIR}/libappbuilder-build
@@ -212,6 +222,7 @@ if (MSVC)
             -DCMAKE_C_COMPILER_WORKS=1
             -DCMAKE_CXX_COMPILER_WORKS=1
             -DCMAKE_BUILD_TYPE=Release
+            -DQNN_SDK_ROOT_CHANGE_SENTINEL:STRING=$ENV{QNN_SDK_ROOT}
             INSTALL_COMMAND ""
             BUILD_IN_SOURCE OFF
     )
@@ -221,12 +232,15 @@ if (MSVC)
     list(APPEND EXTERNAL_LIBS libappbuilder)
 elseif (UNIX)
     # Native Linux: build libappbuilder.so via the top-level CMake project
+    # 同上（MSVC 分支）注释：这个哨兵变量同样用于让 ExternalProject_Add 感知 QNN_SDK_ROOT
+    # 的变化，避免 Linux 侧增量构建遗留旧 SDK 版本的 libappbuilder.so。
     ExternalProject_Add(Libappbuilder
             SOURCE_DIR ${LIBAPPBUILDER_ROOT}
             BINARY_DIR ${CMAKE_BINARY_DIR}/libappbuilder-build
             CMAKE_ARGS
             -DCMAKE_BUILD_TYPE=Release
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+            -DQNN_SDK_ROOT_CHANGE_SENTINEL:STRING=$ENV{QNN_SDK_ROOT}
             INSTALL_COMMAND ""
             BUILD_IN_SOURCE OFF
     )
@@ -391,9 +405,8 @@ if (MSVC)
 
         set(LLAMACPP_SRC_DIR ${CMAKE_BINARY_DIR}/llama-cpp-src)
         ExternalProject_Add(Libllama.cpp
-                GIT_REPOSITORY https://github.com/qualcomm/llama.cpp.git
-                GIT_TAG 7c371551f00b766f1262d716f72c18b4f3a9ecf4
-                GIT_SHALLOW OFF
+                URL https://codeload.github.com/qualcomm/llama.cpp/zip/7c371551f00b766f1262d716f72c18b4f3a9ecf4
+                DOWNLOAD_EXTRACT_TIMESTAMP TRUE
                 SOURCE_DIR ${LLAMACPP_SRC_DIR}
                 BINARY_DIR ${CMAKE_BINARY_DIR}/llama-cpp-build
                 DEPENDS OpenCLICDLoader KleidiAISrc
@@ -405,6 +418,7 @@ if (MSVC)
                 -DCMAKE_CXX_COMPILER=${MSVC_CLANG_COMPILER}
                 -DCMAKE_LINKER=${MSVC_CLANG_LINKER}
                 -DCMAKE_BUILD_TYPE=Release
+                -DCMAKE_UNITY_BUILD=OFF
                 -DCMAKE_POSITION_INDEPENDENT_CODE=ON
                 -DCMAKE_PREFIX_PATH=${OPENCL_INSTALL_PREFIX}
                 # ARM64 向量化/快速数学编译选项，用于加速 ggml CPU 侧计算(Ninja + Clang 工具链)

@@ -11,8 +11,6 @@
 
 #include "base.h"
 
-// Concatenate a list of Shape_3D along axis `dim` (0,1,2).
-// Throws on empty input, mismatched non-concat dims, or overflow.
 template<typename T>
 Shape_3D<T> concat_3d_list(const std::vector<Shape_3D<T>> &inputs, int dim)
 {
@@ -21,13 +19,11 @@ Shape_3D<T> concat_3d_list(const std::vector<Shape_3D<T>> &inputs, int dim)
     if (dim < 0 || dim > 2)
         throw std::invalid_argument("dim must be 0, 1, or 2");
 
-    // Use first tensor as reference for non-concat dims
     const Shape_3D<T> *ref_ptr = &inputs[0];
     const Shape_3D<T> &ref = *ref_ptr;
     if (ref.d0 < 0 || ref.d1 < 0 || ref.d2 < 0)
         throw std::invalid_argument("invalid reference dims");
 
-    // Validate and compute output dims
     long long out_d0 = ref.d0;
     long long out_d1 = ref.d1;
     long long out_d2 = ref.d2;
@@ -61,16 +57,14 @@ Shape_3D<T> concat_3d_list(const std::vector<Shape_3D<T>> &inputs, int dim)
     out.d1 = static_cast<int>(out_d1);
     out.d2 = static_cast<int>(out_d2);
 
-    // total elements and per-plane size
     size_t plane = static_cast<size_t>(out.d1) * out.d2;
-    // For axis0 concat, plane is d1*d2; for axis1 concat, plane_per_slice = d2; for axis2 concat, innermost
+
     size_t total_elems = static_cast<size_t>(out.d0) * out.d1 * out.d2;
     out.buf.resize(total_elems);
 
-    // Copy inputs into out buffer
     if (dim == 0)
     {
-        // copy whole planes sequentially
+
         size_t offset_planes = 0;
         for (const auto &s: inputs)
         {
@@ -83,19 +77,18 @@ Shape_3D<T> concat_3d_list(const std::vector<Shape_3D<T>> &inputs, int dim)
     }
     else if (dim == 1)
     {
-        // iterate over output d0, for each input append its d1 slices
-        // For each input, for each b in [0..d0-1], copy its d1 rows of length d2 into correct position.
+
         size_t out_d1_accum = 0;
         for (const auto &s: inputs)
         {
-            // s.d1 rows to place starting at out_d1_accum
+
             for (int b = 0; b < s.d0; ++b)
             {
                 for (int r = 0; r < s.d1; ++r)
                 {
-                    // source offset: ((b * s.d1) + r) * s.d2
+
                     size_t src_off = (static_cast<size_t>(b) * s.d1 + r) * static_cast<size_t>(s.d2);
-                    // dest offset: ((b * out.d1) + (out_d1_accum + r)) * out.d2
+
                     size_t dst_off = (static_cast<size_t>(b) * out.d1 + (out_d1_accum + r)) * static_cast<size_t>(out.d2);
                     std::copy(s.buf.begin() + src_off, s.buf.begin() + src_off + s.d2, out.buf.begin() + dst_off);
                 }
@@ -104,8 +97,8 @@ Shape_3D<T> concat_3d_list(const std::vector<Shape_3D<T>> &inputs, int dim)
         }
     }
     else
-    { // dim == 2
-        // concatenate along innermost axis: for each b and r, append each input's row
+    {
+
         for (int b = 0; b < out.d0; ++b)
         {
             for (int r = 0; r < out.d1; ++r)
@@ -114,7 +107,7 @@ Shape_3D<T> concat_3d_list(const std::vector<Shape_3D<T>> &inputs, int dim)
                 size_t dst_pos = 0;
                 for (const auto &s: inputs)
                 {
-                    // source row length = s.d2, source base = ((b * s.d1) + r) * s.d2
+
                     size_t src_base = (static_cast<size_t>(b) * s.d1 + r) * static_cast<size_t>(s.d2);
                     std::copy(s.buf.begin() + src_base, s.buf.begin() + src_base + s.d2, out.buf.begin() + dst_base + dst_pos);
                     dst_pos += static_cast<size_t>(s.d2);
@@ -126,8 +119,6 @@ Shape_3D<T> concat_3d_list(const std::vector<Shape_3D<T>> &inputs, int dim)
     return out;
 }
 
-// Split a Shape_3D into a vector of Shape_2D by slicing along axis 0.
-// For input shape [N, H, W] returns N elements each of shape [H, W].
 template<typename T>
 std::vector<Shape_2D<T>> SplitShape3d(const Shape_3D<T> &in)
 {
@@ -158,7 +149,6 @@ std::vector<Shape_2D<T>> SplitShape3d(const Shape_3D<T> &in)
     return out;
 }
 
-
 Shape_1D<float> slice_keep_one_axis(
         const Shape_3D<float> &in,
         int keep_axis,
@@ -166,16 +156,14 @@ Shape_1D<float> slice_keep_one_axis(
         int idx_b
 )
 {
-    // Validate input dims
+
     if (in.d0 <= 0 || in.d1 <= 0 || in.d2 <= 0)
         throw std::invalid_argument("input dims must be > 0");
     if (keep_axis < 0 || keep_axis > 2)
         throw std::invalid_argument("keep_axis must be 0, 1, or 2");
 
-    // Determine sizes and validate fixed indices
     int keep_len = (keep_axis == 0) ? in.d0 : (keep_axis == 1) ? in.d1 : in.d2;
-    // Validate idx_a and idx_b against the two fixed axes in axis order
-    // axis order: 0,1,2. For each axis != keep_axis we check the corresponding idx.
+
     auto check_index = [&](int axis, int idx)
     {
         if (idx < 0)
@@ -188,61 +176,57 @@ Shape_1D<float> slice_keep_one_axis(
             throw std::out_of_range("idx_a/idx_b out of range for axis 2");
     };
 
-    // Map idx_a and idx_b to the two non-kept axes in axis order
-    int fixed_idx0 = 0, fixed_idx1 = 0; // will hold indices for axis0 and axis2 when needed
+    int fixed_idx0 = 0, fixed_idx1 = 0;
     if (keep_axis == 0)
     {
-        // keep axis0, so idx_a -> axis1, idx_b -> axis2
+
         check_index(1, idx_a);
         check_index(2, idx_b);
-        fixed_idx0 = idx_a; // axis1 fixed
-        fixed_idx1 = idx_b; // axis2 fixed
+        fixed_idx0 = idx_a;
+        fixed_idx1 = idx_b;
     }
     else if (keep_axis == 1)
     {
-        // keep axis1, so idx_a -> axis0, idx_b -> axis2
+
         check_index(0, idx_a);
         check_index(2, idx_b);
-        fixed_idx0 = idx_a; // axis0 fixed
-        fixed_idx1 = idx_b; // axis2 fixed
+        fixed_idx0 = idx_a;
+        fixed_idx1 = idx_b;
     }
     else
-    { // keep_axis == 2
-        // keep axis2, so idx_a -> axis0, idx_b -> axis1
+    {
+
         check_index(0, idx_a);
         check_index(1, idx_b);
-        fixed_idx0 = idx_a; // axis0 fixed
-        fixed_idx1 = idx_b; // axis1 fixed
+        fixed_idx0 = idx_a;
+        fixed_idx1 = idx_b;
     }
 
-    // Prepare output
     Shape_1D<float> out;
     out.d0 = keep_len;
     out.buf.resize(static_cast<size_t>(keep_len));
 
-    // Input linear index helper: ((b * d1 + h) * d2 + w)
     auto in_index = [&](int i0, int i1, int i2) -> size_t
     {
         return static_cast<size_t>(((i0 * in.d1 + i1) * in.d2) + i2);
     };
 
-    // Fill output by iterating over the kept axis and using fixed indices for others
     for (int k = 0; k < keep_len; ++k)
     {
         size_t src_idx = 0;
         if (keep_axis == 0)
         {
-            // src = (k, fixed_idx0, fixed_idx1)  where fixed_idx0==axis1, fixed_idx1==axis2
+
             src_idx = in_index(k, fixed_idx0, fixed_idx1);
         }
         else if (keep_axis == 1)
         {
-            // src = (fixed_idx0, k, fixed_idx1)  where fixed_idx0==axis0, fixed_idx1==axis2
+
             src_idx = in_index(fixed_idx0, k, fixed_idx1);
         }
         else
-        { // keep_axis == 2
-            // src = (fixed_idx0, fixed_idx1, k)  where fixed_idx0==axis0, fixed_idx1==axis1
+        {
+
             src_idx = in_index(fixed_idx0, fixed_idx1, k);
         }
         out.buf[static_cast<size_t>(k)] = in.buf[src_idx];
@@ -258,18 +242,16 @@ Shape_2D<T> reshape_3d_to_2d(
         int out_d1
 )
 {
-    // Validate input dims
+
     if (in.d0 <= 0 || in.d1 <= 0 || in.d2 <= 0)
         throw std::invalid_argument("input dims must be > 0");
 
-    // Count how many -1s
     int neg1_count = 0;
     neg1_count += (out_d0 == -1);
     neg1_count += (out_d1 == -1);
     if (neg1_count > 1)
         throw std::invalid_argument("only one -1 allowed");
 
-    // Validate provided positive dims (allow -1)
     auto check_positive_or_neg1 = [](int v, const char *name)
     {
         if (v == 0 || v < -1)
@@ -278,10 +260,8 @@ Shape_2D<T> reshape_3d_to_2d(
     check_positive_or_neg1(out_d0, "out_d0");
     check_positive_or_neg1(out_d1, "out_d1");
 
-    // Compute input total
     long long in_total = static_cast<long long>(in.d0) * in.d1 * in.d2;
 
-    // If one dim is -1, infer it
     if (neg1_count == 1)
     {
         long long prod = 1;
@@ -306,29 +286,23 @@ Shape_2D<T> reshape_3d_to_2d(
             out_d1 = static_cast<int>(inferred);
     }
 
-    // Now all dims must be positive
     if (out_d0 <= 0 || out_d1 <= 0)
         throw std::invalid_argument("output dims must be > 0");
 
-    // Final total check
     long long out_total = static_cast<long long>(out_d0) * out_d1;
     if (in_total != out_total)
         throw std::invalid_argument("total number of elements must match for reshape");
 
-    // Prepare output
     Shape_2D<T> out;
     out.d0 = out_d0;
     out.d1 = out_d1;
     out.buf.resize(static_cast<size_t>(out_total));
 
-    // Copy linear buffer (contiguous row-major)
     std::copy(in.buf.begin(), in.buf.end(), out.buf.begin());
 
     return out;
 }
 
-// Reshape contiguous Shape_3D -> contiguous Shape_4D
-// Allows exactly one of out_d0/out_d1/out_d2/out_d3 to be -1 (to infer that dimension).
 Shape_4D<float> reshape_3d_to_4d(
         Shape_3D<float> &in,
         int out_d0,
@@ -337,11 +311,10 @@ Shape_4D<float> reshape_3d_to_4d(
         int out_d3
 )
 {
-    // Validate input dims
+
     if (in.d0 <= 0 || in.d1 <= 0 || in.d2 <= 0)
         throw std::invalid_argument("input dims must be > 0");
 
-    // Count how many -1s
     int neg1_count = 0;
     neg1_count += (out_d0 == -1);
     neg1_count += (out_d1 == -1);
@@ -350,7 +323,6 @@ Shape_4D<float> reshape_3d_to_4d(
     if (neg1_count > 1)
         throw std::invalid_argument("only one -1 allowed");
 
-    // Validate provided positive dims
     auto check_positive_or_neg1 = [](int v, const char *name)
     {
         if (v == 0 || v < -1)
@@ -361,13 +333,11 @@ Shape_4D<float> reshape_3d_to_4d(
     check_positive_or_neg1(out_d2, "out_d2");
     check_positive_or_neg1(out_d3, "out_d3");
 
-    // Compute input total
     long long in_total = static_cast<long long>(in.d0) * in.d1 * in.d2;
 
-    // If one dim is -1, infer it
     if (neg1_count == 1)
     {
-        // compute product of provided positive dims
+
         long long prod = 1;
         if (out_d0 != -1)
             prod *= static_cast<long long>(out_d0);
@@ -398,16 +368,13 @@ Shape_4D<float> reshape_3d_to_4d(
             out_d3 = static_cast<int>(inferred);
     }
 
-    // Now all dims must be positive
     if (out_d0 <= 0 || out_d1 <= 0 || out_d2 <= 0 || out_d3 <= 0)
         throw std::invalid_argument("output dims must be > 0");
 
-    // Final total check
     long long out_total = static_cast<long long>(out_d0) * out_d1 * out_d2 * out_d3;
     if (in_total != out_total)
         throw std::invalid_argument("total number of elements must match for reshape");
 
-    // Prepare output
     Shape_4D<float> out;
     out.d0 = out_d0;
     out.d1 = out_d1;
@@ -415,7 +382,6 @@ Shape_4D<float> reshape_3d_to_4d(
     out.d3 = out_d3;
     out.buf.resize(static_cast<size_t>(out_total));
 
-    // Copy linear buffer (contiguous row-major)
     std::copy(in.buf.begin(), in.buf.end(), out.buf.begin());
 
     return out;
@@ -427,13 +393,11 @@ Shape_4D<T> reshape_3d_to_4d(Shape_3D<T> &src, bool allow_move = true)
     if (src.d0 <= 0 || src.d1 <= 0 || src.d2 <= 0)
         throw std::invalid_argument("invalid source dimensions");
 
-    // N must be a perfect square: N = H * H
     int N = src.d1;
     int H = static_cast<int>(std::lround(std::sqrt(static_cast<double>(N))));
     if (H * H != N)
         throw std::invalid_argument("second dimension is not a perfect square");
 
-    // Validate buffer size
     std::size_t expected = static_cast<std::size_t>(src.d0) * static_cast<std::size_t>(src.d1) * static_cast<std::size_t>(src.d2);
     if (src.buf.size() != expected)
         throw std::invalid_argument("buffer size does not match dimensions");
@@ -446,15 +410,15 @@ Shape_4D<T> reshape_3d_to_4d(Shape_3D<T> &src, bool allow_move = true)
 
     if (allow_move)
     {
-        // zero-copy: transfer ownership of the underlying vector
+
         out.buf = std::move(src.buf);
-        // leave src in a valid empty state
+
         src.buf.clear();
         src.d0 = src.d1 = src.d2 = 0;
     }
     else
     {
-        // copy the data (no reordering required because reshape is just reinterpretation)
+
         out.buf = src.buf;
     }
 
@@ -466,19 +430,17 @@ Shape_5D<float> reshape_3d_to_5d(
         int out_d0, int out_d1, int out_d2, int out_d3, int out_d4
 )
 {
-    // Validate positive dims
+
     if (in.d0 <= 0 || in.d1 <= 0 || in.d2 <= 0)
         throw std::invalid_argument("input dims must be > 0");
     if (out_d0 <= 0 || out_d1 <= 0 || out_d2 <= 0 || out_d3 <= 0 || out_d4 <= 0)
         throw std::invalid_argument("output dims must be > 0");
 
-    // Check total element counts match
     long long in_total = static_cast<long long>(in.d0) * in.d1 * in.d2;
     long long out_total = static_cast<long long>(out_d0) * out_d1 * out_d2 * out_d3 * out_d4;
     if (in_total != out_total)
         throw std::invalid_argument("total number of elements must match for reshape");
 
-    // Prepare output container
     Shape_5D<float> out;
     out.d0 = out_d0;
     out.d1 = out_d1;
@@ -487,24 +449,20 @@ Shape_5D<float> reshape_3d_to_5d(
     out.d4 = out_d4;
     out.buf.resize(static_cast<size_t>(out_total));
 
-    // Precompute multipliers for destination unflattening (row-major)
     long long dest_stride0 = static_cast<long long>(out_d1) * out_d2 * out_d3 * out_d4;
     long long dest_stride1 = static_cast<long long>(out_d2) * out_d3 * out_d4;
     long long dest_stride2 = static_cast<long long>(out_d3) * out_d4;
     long long dest_stride3 = static_cast<long long>(out_d4);
-    // dest_stride4 = 1
 
-    // Iterate over input logical indices and map to destination indices
     for (int b = 0; b < in.d0; ++b)
     {
         for (int f = 0; f < in.d1; ++f)
         {
             for (int c = 0; c < in.d2; ++c)
             {
-                // source linear index (row-major)
+
                 long long g = (static_cast<long long>(b) * in.d1 + f) * in.d2 + c;
 
-                // unflatten g into destination multi-index
                 long long rem = g;
                 int i0 = static_cast<int>(rem / dest_stride0);
                 rem %= dest_stride0;
@@ -514,9 +472,8 @@ Shape_5D<float> reshape_3d_to_5d(
                 rem %= dest_stride2;
                 int i3 = static_cast<int>(rem / dest_stride3);
                 rem %= dest_stride3;
-                int i4 = static_cast<int>(rem); // rem < out_d4
+                int i4 = static_cast<int>(rem);
 
-                // compute destination linear index (row-major)
                 long long dst_idx = ((((static_cast<long long>(i0) * out.d1 + i1) * out.d2 + i2) * out.d3 + i3) * out.d4) + i4;
                 out.buf[static_cast<size_t>(dst_idx)] = in.buf[static_cast<size_t>(g)];
             }
@@ -531,21 +488,17 @@ Shape_6D<float> reshape_3d_to_6d(
         int out_d0, int out_d1, int out_d2, int out_d3, int out_d4, int out_d5
 )
 {
-    // Validate positive dims
+
     if (in.d0 <= 0 || in.d1 <= 0 || in.d2 <= 0)
         throw std::invalid_argument("input dims must be > 0");
     if (out_d0 <= 0 || out_d1 <= 0 || out_d2 <= 0 || out_d3 <= 0 || out_d4 <= 0 || out_d5 <= 0)
         throw std::invalid_argument("output dims must be > 0");
 
-    // Check total element counts match
-    // in_total = in.d0 * in.d1 * in.d2
-    // out_total = out_d0 * out_d1 * out_d2 * out_d3 * out_d4 * out_d5
     long long in_total = static_cast<long long>(in.d0) * in.d1 * in.d2;
     long long out_total = static_cast<long long>(out_d0) * out_d1 * out_d2 * out_d3 * out_d4 * out_d5;
     if (in_total != out_total)
         throw std::invalid_argument("total number of elements must match for reshape");
 
-    // Prepare output container
     Shape_6D<float> out;
     out.d0 = out_d0;
     out.d1 = out_d1;
@@ -555,26 +508,21 @@ Shape_6D<float> reshape_3d_to_6d(
     out.d5 = out_d5;
     out.buf.resize(static_cast<size_t>(out_total));
 
-    // Precompute multipliers for destination unflattening (row-major)
-    // dest_stride[k] = product of dims after axis k
     long long dest_stride0 = static_cast<long long>(out_d1) * out_d2 * out_d3 * out_d4 * out_d5;
     long long dest_stride1 = static_cast<long long>(out_d2) * out_d3 * out_d4 * out_d5;
     long long dest_stride2 = static_cast<long long>(out_d3) * out_d4 * out_d5;
     long long dest_stride3 = static_cast<long long>(out_d4) * out_d5;
     long long dest_stride4 = static_cast<long long>(out_d5);
-    // dest_stride5 = 1
 
-    // Iterate over input logical indices (b, flat, c) and map to destination indices
-    // linear index in input buffer (row-major) is: g = ((b * in.d1 + f) * in.d2) + c
     for (int b = 0; b < in.d0; ++b)
     {
         for (int f = 0; f < in.d1; ++f)
         {
             for (int c = 0; c < in.d2; ++c)
             {
-                // source linear index
+
                 long long g = (static_cast<long long>(b) * in.d1 + f) * in.d2 + c;
-                // compute destination multi-index by unflattening g
+
                 long long rem = g;
                 int i0 = static_cast<int>(rem / dest_stride0);
                 rem %= dest_stride0;
@@ -586,9 +534,8 @@ Shape_6D<float> reshape_3d_to_6d(
                 rem %= dest_stride3;
                 int i4 = static_cast<int>(rem / dest_stride4);
                 rem %= dest_stride4;
-                int i5 = static_cast<int>(rem); // rem < out_d5
+                int i5 = static_cast<int>(rem);
 
-                // compute destination linear index (row-major)
                 long long dst_idx = (((((static_cast<long long>(i0) * out.d1 + i1) * out.d2 + i2) * out.d3 + i3) * out.d4 + i4) * out.d5) + i5;
                 out.buf[static_cast<size_t>(dst_idx)] = in.buf[static_cast<size_t>(g)];
             }
@@ -608,7 +555,6 @@ Shape_3D<float> slice_shape3d_range(
     if (in.d0 <= 0 || in.d1 <= 0 || in.d2 <= 0)
         throw std::invalid_argument("input dims must be > 0");
 
-    // Normalize end == -1 to mean full length
     if (end0 == -1)
         end0 = in.d0;
     if (end1 == -1)
@@ -675,4 +621,4 @@ Shape_3D<float> slice_shape3d_range(
     return out;
 }
 
-#endif //SHAPE_3D_H
+#endif

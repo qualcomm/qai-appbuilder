@@ -17,15 +17,7 @@
 #include <windows.h>
 #endif
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Anchor: address of this function is passed to GetModuleHandleExA so Windows
-// can identify which loaded module (exe or dll) owns this translation unit.
-// ─────────────────────────────────────────────────────────────────────────────
 static void SentinelFn() {}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// WatermarkProviderHost singleton
-// ─────────────────────────────────────────────────────────────────────────────
 
 static std::once_flag s_init_flag;
 
@@ -66,10 +58,6 @@ const GenieWatermarkProviderVTable* WatermarkProviderHost::GetVTable() const
     return vtable_;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Platform-specific loading
-// ─────────────────────────────────────────────────────────────────────────────
-
 #ifdef _WIN32
 
 void WatermarkProviderHost::Load()
@@ -80,8 +68,6 @@ void WatermarkProviderHost::Load()
         return;
     }
 
-    // Locate the module (exe or dll) that owns this code by using the
-    // address of a local function as an anchor.
     HMODULE hmod = nullptr;
     if (!GetModuleHandleExA(
             GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
@@ -190,17 +176,16 @@ void WatermarkProviderHost::Load()
         }
     }
 
-    // DLL is now adopted for the process lifetime; do not FreeLibrary.
     vtable_         = vt;
     has_token_hook_ = (validated_caps & GENIE_WM_CAP_TOKEN_HOOK) != 0;
     has_text_hook_  = (validated_caps & GENIE_WM_CAP_TEXT_HOOK)  != 0;
 }
 
-#else  // !_WIN32
+#else
 
 void WatermarkProviderHost::Load()
 {
-    // Non-Windows: watermark plugin loading requires Win32 APIs; disabled.
+
 }
 
-#endif // _WIN32
+#endif

@@ -15,6 +15,8 @@
 #include <iomanip>
 #include <filesystem>
 #include <functional>
+#include <chrono>
+#include <ctime>
 
 #if defined(_WIN32) || defined(__WIN32__) || defined(WIN32) || (defined(__linux__) && !defined(__ANDROID__))
 
@@ -47,7 +49,6 @@
 #define RESET ""
 #endif
 
-
 class My_Log
 {
 public:
@@ -71,12 +72,17 @@ public:
         }
 
         LoggerHelper::kFile_.log_path_ = std::move(log_path);
-        LoggerHelper::kFile_.tmp_path_ =
-                std::filesystem::path{LoggerHelper::kFile_.log_path_}.parent_path().append("tmp.log").generic_string();
-        LoggerHelper::kFile_.out_.close();
-        LoggerHelper::kFile_.out_.open(LoggerHelper::kFile_.log_path_, std::ios::app | std::ios::binary);
+        bool opened = false;
+        {
+            std::lock_guard<std::mutex> lock(file_mtx_);
+            LoggerHelper::kFile_.tmp_path_ =
+                    std::filesystem::path{LoggerHelper::kFile_.log_path_}.parent_path().append("tmp.log").generic_string();
+            LoggerHelper::kFile_.out_.close();
+            LoggerHelper::kFile_.out_.open(LoggerHelper::kFile_.log_path_, std::ios::app | std::ios::binary);
+            opened = LoggerHelper::kFile_.out_.is_open();
+        }
 
-        if (!LoggerHelper::kFile_.out_.is_open())
+        if (!opened)
         {
             func_ = &My_Log::LogConsole;
             My_Log{My_Log::Level::kAlways} << "create or open file failed:  " << errno << std::endl;
@@ -99,13 +105,11 @@ public:
         }
     }
 
-    // assume not fragement
     My_Log(char *msg, Level lev = kWarning) : My_Log{lev}
     {
         Log(msg, LoggerHelper::kConsoleBufferLen - 1);
     }
 
-    // output once. like My_Log(const std::string& message);
     My_Log(const std::string &msg, Level lev = kWarning) : My_Log{lev}
     {
         Log(msg.c_str(), msg.size());
@@ -161,7 +165,12 @@ public:
         auto now = std::chrono::system_clock::now();
         std::time_t t = std::chrono::system_clock::to_time_t(now);
         auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
-        std::tm tm = *std::localtime(&t);
+        std::tm tm{};
+#if defined(_WIN32)
+        localtime_s(&tm, &t);
+#else
+        localtime_r(&t, &tm);
+#endif
         std::ostringstream oss;
         oss << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
         oss << '.' << std::setfill('0') << std::setw(3) << milliseconds.count();
@@ -207,7 +216,7 @@ private:
             }
         } kFile_;
 
-        static inline uint16_t const kConsoleBufferLen{1018}; // 1024 include "\n"
+        static inline uint16_t const kConsoleBufferLen{1018};
 
         static const char *get_level_str(Level lev)
         {
@@ -245,9 +254,7 @@ private:
 
     inline void LogConsole(const char *msg, uint32_t len)
     {
-        // Fix: 使用 mutex 保护控制台输出，防止多线程下日志乱序。
-        // LogFile 已有 mutex 保护，LogConsole 此前无锁，在多线程场景（如安全检查
-        // 与主推理并发）下可能导致 [E]/[W]/[I] 级别日志交错输出，难以诊断。
+
         static std::mutex console_mtx;
         std::lock_guard<std::mutex> lk(console_mtx);
 
@@ -276,16 +283,19 @@ private:
 #endif
     }
 
+    static inline std::mutex file_mtx_;
+
     void LogFile(const char *msg, uint32_t len)
     {
-        static std::mutex mtx;
         static int times;
-        mtx.lock();
+        std::lock_guard<std::mutex> lock(file_mtx_);
 
         LoggerHelper::kFile_.out_ << get_log_title_();
         LoggerHelper::kFile_.out_.write(msg, len);
         LoggerHelper::kFile_.out_.flush();
-        if (times >= 20 && LoggerHelper::kFile_.out_.tellp() >= LoggerHelper::kFile_.kMaxSize_)
+        const auto pos = LoggerHelper::kFile_.out_.tellp();
+        const uint64_t file_size = pos < 0 ? 0 : static_cast<uint64_t>(pos);
+        if (times >= 20 && file_size >= LoggerHelper::kFile_.kMaxSize_)
         {
             LoggerHelper::kFile_.out_.close();
             LoggerHelper::File::RotateFile(LoggerHelper::kFile_.log_path_,
@@ -299,7 +309,6 @@ private:
             times = 0;
         }
         ++times;
-        mtx.unlock();
     }
 
     using LogFunc = void (My_Log::*)(const char *msg, uint32_t len);
@@ -311,4 +320,4 @@ private:
                                                 }};
 };
 
-#endif //LOG_H
+#endif

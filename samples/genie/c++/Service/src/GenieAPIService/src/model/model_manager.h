@@ -11,9 +11,12 @@
 
 #include "model_config.h"
 #include "model_instance_config.h"
+#include <chrono>
 #include <memory>
 #include <mutex>
-#include <atomic>
+#include <unordered_map>
+#include <vector>
+#include <string>
 
 class ContextBase;
 
@@ -23,6 +26,7 @@ struct LoadedModel
     std::shared_ptr<ContextBase> context;
     std::string backend;
     std::string device;
+    std::vector<std::string> occupied_families;
     bool is_loaded{false};
 };
 
@@ -36,23 +40,26 @@ public:
     bool LoadModelByName(const std::string &new_model, bool &first_load);
     bool InitializeConfig();
     void UnloadModel();
+    bool UnloadModelByName(const std::string &model_name);
 
-    bool IsLoaded()
+    bool IsLoaded() const
     {
-        return loaded_.load();
+        std::lock_guard<std::mutex> lock(models_mutex_);
+        return !loaded_models_.empty();
     }
 
     bool IsLocalModelAvailable() const override
     {
         std::lock_guard<std::mutex> lock(models_mutex_);
-        return current_model_ != nullptr;
+        return !loaded_models_.empty();
     }
 
     std::weak_ptr<ContextBase> GetDefaultModelHandle() const override
     {
         std::lock_guard<std::mutex> lock(models_mutex_);
-        if (current_model_ && current_model_->context) {
-            return current_model_->context;
+        auto model = GetDefaultModelLocked();
+        if (model && model->context) {
+            return model->context;
         }
         return genieModelHandle;
     }
@@ -60,8 +67,9 @@ public:
     ModelInstanceConfig* GetDefaultInstanceConfig() const override
     {
         std::lock_guard<std::mutex> lock(models_mutex_);
-        if (current_model_ && current_model_->config) {
-            return current_model_->config.get();
+        auto model = GetDefaultModelLocked();
+        if (model && model->config) {
+            return model->config.get();
         }
         return nullptr;
     }
@@ -72,9 +80,9 @@ public:
 
     std::vector<std::string> ListLoadedModels() const;
 
-    std::vector<json> ScanModelDirectory() const;
+    std::vector<std::shared_ptr<LoadedModel>> GetAllLoadedModels() const;
 
-    void UnloadModelsByDevice(const std::string &device);
+    std::vector<json> ScanModelDirectory() const;
 
     bool LoadSingleModel();
 
@@ -105,12 +113,22 @@ public:
     }
 
 private:
+    struct ModelLoadRequest
+    {
+        std::string name;
+        std::string path;
+        std::string config_file;
+    };
+
+    bool LoadModel(const ModelLoadRequest &request);
 
     std::shared_ptr<ContextBase> CreateContext(
         const std::shared_ptr<ModelInstanceConfig> &config,
         const std::string &backend);
 
-    PromptType LoadPromptTemplates(std::string &&prompt_path);
+    PromptType LoadPromptTemplates(std::string &&prompt_path, const std::string &model_name,
+                                   const std::string &model_path, json &out_prompt, int &out_ctx_size,
+                                   std::string &out_known_model_path);
     std::string ResolveKnownModelPath(const std::string& model_feature, bool only_prefix);
     void Clean();
     static bool ModelComparer(const std::string &source, const std::string &target, bool only_prefix);
@@ -118,15 +136,24 @@ private:
     struct ModeVerifier;
     class QNNImpl;
 
-    uint64_t EstimateOtherLoadedModelsMemoryBytes() const;
+    uint64_t EstimateOtherLoadedModelsMemoryBytes(const std::string &exclude_name) const;
 
-    std::shared_ptr<LoadedModel> current_model_;
+    std::shared_ptr<LoadedModel> GetDefaultModelLocked() const;
+    void UnloadModelsByDevice(const std::vector<std::string> &families);
+    void StopAndDrain(std::vector<std::shared_ptr<LoadedModel>> &models, std::chrono::seconds timeout,
+                      const std::shared_ptr<ContextBase> &extra_context = nullptr);
+    static std::vector<std::string> ComputeOccupiedFamilies(const LoadedModel &model);
+    static std::vector<std::string> ResolveTentativeFamilies(const std::string &model_path,
+                                                              const std::string &config_file);
+
+    std::unordered_map<std::string, std::shared_ptr<LoadedModel>> loaded_models_;
+    std::string default_model_name_;
     mutable std::mutex models_mutex_;
-
-    std::atomic<bool> loaded_{false};
+    std::recursive_mutex load_mutex_;
+    std::once_flag config_list_once_;
 
     LoadFailureReason last_load_failure_reason_{LoadFailureReason::kNone};
     std::string last_load_failure_detail_;
 };
 
-#endif //MODEL_MANAGER_H
+#endif

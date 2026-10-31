@@ -7,6 +7,7 @@
 //==============================================================================
 
 #include "message_pre_filter.h"
+#include "task_memo_doc_scan.h"
 #include "content_condenser.h"
 #include "../processor/harmony.h"
 #include "../gateway/security/security_utils.h"
@@ -15,6 +16,7 @@
 #include <map>
 #include <sstream>
 #include <algorithm>
+#include <cstdio>
 #include <regex>
 #include <unordered_set>
 #include <mutex>
@@ -23,7 +25,117 @@
 
 using json = nlohmann::ordered_json;
 
+std::string CanonicalToolCallKey(const json& tool_call)
+{
+    if (!tool_call.is_object() || !tool_call.contains("function") || !tool_call["function"].is_object())
+        return "";
+    const json& fn = tool_call["function"];
+    const std::string name = fn.value("name", std::string());
+    if (name.empty()) return "";
+    std::string args;
+    if (fn.contains("arguments")) {
+        nlohmann::json parsed;
+        if (fn["arguments"].is_string()) {
+            const std::string raw = fn["arguments"].get<std::string>();
+            parsed = nlohmann::json::parse(raw, nullptr, false);
+            if (parsed.is_discarded()) return name + "\x01" + raw;
+        } else {
+            parsed = nlohmann::json(fn["arguments"]);
+        }
+        if (parsed.is_object()) {
+            nlohmann::json norm = nlohmann::json::object();
+            for (auto it = parsed.begin(); it != parsed.end(); ++it) {
+                if (it.value().is_null()) continue;
+                const bool path_like = it.value().is_string() && [&]() {
+                    const std::string& s = it.value().get_ref<const std::string&>();
+                    return !s.empty() && s.find_first_of(" \t\r\n") == std::string::npos &&
+                           s.find_first_of("/\\") != std::string::npos;
+                }();
+                if (path_like) {
+                    std::string p = it.value().get<std::string>();
+                    std::replace(p.begin(), p.end(), '/', '\\');
+                    norm[it.key()] = p;
+                } else {
+                    norm[it.key()] = it.value();
+                }
+            }
+            parsed = std::move(norm);
+        }
+        args = parsed.dump();
+    }
+    return name + "\x01" + args;
+}
+
 namespace {
+
+std::string NormalizeDumpPath(const std::string& p)
+{
+    std::string out = p;
+    std::replace(out.begin(), out.end(), '/', '\\');
+    return out;
+}
+
+std::string ExtractJsonPathArgFromToolCall(const json& tool_call)
+{
+    if (!tool_call.is_object() || !tool_call.contains("function") || !tool_call["function"].is_object())
+        return "";
+    const json& fn = tool_call["function"];
+    if (!fn.contains("arguments")) return "";
+    nlohmann::json parsed;
+    if (fn["arguments"].is_string()) {
+        parsed = nlohmann::json::parse(fn["arguments"].get<std::string>(), nullptr, false);
+        if (parsed.is_discarded()) return "";
+    } else {
+        parsed = nlohmann::json(fn["arguments"]);
+    }
+    if (!parsed.is_object()) return "";
+    static const char* kPathKeys[] = {"path", "file", "file_path", "filename"};
+    for (const char* key : kPathKeys) {
+        if (parsed.contains(key) && parsed[key].is_string())
+            return NormalizeDumpPath(parsed[key].get<std::string>());
+    }
+    return "";
+}
+
+std::string ExtractExecCommandFromToolCall(const json& tool_call)
+{
+    if (!tool_call.is_object() || !tool_call.contains("function") || !tool_call["function"].is_object())
+        return "";
+    const json& fn = tool_call["function"];
+    std::string name = fn.value("name", std::string());
+    std::transform(name.begin(), name.end(), name.begin(), [](unsigned char c) { return (char) std::tolower(c); });
+    if (name != "exec")
+        return "";
+    if (!fn.contains("arguments")) return "";
+    nlohmann::json parsed;
+    if (fn["arguments"].is_string()) {
+        parsed = nlohmann::json::parse(fn["arguments"].get<std::string>(), nullptr, false);
+        if (parsed.is_discarded()) return "";
+    } else {
+        parsed = nlohmann::json(fn["arguments"]);
+    }
+    if (!parsed.is_object()) return "";
+    static const char* kCommandKeys[] = {"command", "cmd", "script"};
+    for (const char* key : kCommandKeys) {
+        if (parsed.contains(key) && parsed[key].is_string())
+            return parsed[key].get<std::string>();
+    }
+    return "";
+}
+
+std::string ExtractFullOutputSavedPath(const std::string& content)
+{
+    static const char kMarker[] = "[full_output_saved] path=";
+    const size_t pos = content.find(kMarker);
+    if (pos == std::string::npos) return "";
+    size_t start = pos + sizeof(kMarker) - 1;
+    size_t end = content.find_first_of("\r\n", start);
+    if (end == std::string::npos) end = content.size();
+    while (end > start && (content[end - 1] == ']' || std::isspace(static_cast<unsigned char>(content[end - 1]))))
+        --end;
+    if (end <= start) return "";
+    return NormalizeDumpPath(content.substr(start, end - start));
+}
 
 constexpr float kEvictionLowWaterRatio = 0.5f;
 constexpr float kEvictionHighWaterRatio = 0.95f;
@@ -40,7 +152,8 @@ std::string OmittedMarker(const std::string& content, size_t head_end, size_t ta
     const size_t last = static_cast<size_t>(std::count(content.begin(), content.begin() + tail_begin, '\n'));
     const size_t total = static_cast<size_t>(std::count(content.begin(), content.end(), '\n')) + 1;
     return "\n[... output truncated: lines " + std::to_string(first) + "-" + std::to_string(std::max(first, last)) +
-           " of " + std::to_string(total) + " omitted; re-read that line range if you need it ...]\n";
+           " of " + std::to_string(total) + " dropped by context compression; repeating this same read returns a "
+           "result that gets compressed the same way, so continue with the content shown here ...]\n";
 }
 
 bool IsErrorLine(const std::string& line)
@@ -60,11 +173,38 @@ size_t Utf8Floor(const std::string& s, size_t pos)
     return pos;
 }
 
+bool CapPagedReadHead(const std::string& content, size_t keep_bytes, std::string& out)
+{
+    constexpr size_t kFooterReserve = 200;
+    const size_t marker = content.rfind("showed lines ");
+    if (marker == std::string::npos || keep_bytes <= kFooterReserve) return false;
+    size_t first = 0, last = 0, total = 0;
+    if (std::sscanf(content.c_str() + marker, "showed lines %zu-%zu of total %zu", &first, &last, &total) != 3)
+        return false;
+    const size_t footer_nl = content.rfind('\n', marker);
+    if (footer_nl == std::string::npos) return false;
+    const size_t body_budget = keep_bytes - kFooterReserve;
+    if (footer_nl + 1 <= body_budget) return false;
+    const size_t cut_nl = content.rfind('\n', Utf8Floor(content, body_budget));
+    if (cut_nl == std::string::npos) return false;
+    const size_t kept_lines = static_cast<size_t>(std::count(content.begin(), content.begin() + cut_nl + 1, '\n'));
+    const size_t shown_last = first + kept_lines - 1;
+    if (kept_lines == 0 || shown_last >= last) return false;
+    const size_t footer_end = content.find('\n', marker);
+    out = content.substr(0, cut_nl + 1) + "...[read truncated: context budget; showed lines " + std::to_string(first) +
+          "-" + std::to_string(shown_last) + " of total " + std::to_string(total) +
+          "; next offset=" + std::to_string(shown_last + 1) + "]" +
+          (footer_end == std::string::npos ? std::string() : content.substr(footer_end));
+    return true;
+}
+
 std::string CapToolResultHeadTail(const std::string& content, size_t content_tokens, size_t cap_tokens)
 {
     if (cap_tokens == 0 || content_tokens <= cap_tokens || content.empty()) return content;
     const double keep_ratio = 0.95 * static_cast<double>(cap_tokens) / static_cast<double>(content_tokens);
     const size_t keep_bytes = static_cast<size_t>(static_cast<double>(content.size()) * keep_ratio);
+    std::string paged_head;
+    if (CapPagedReadHead(content, keep_bytes, paged_head)) return paged_head;
     const size_t head_target = static_cast<size_t>(static_cast<double>(keep_bytes) * kToolEntryHeadShare);
     const size_t tail_target = keep_bytes - head_target;
     size_t head_end = Utf8Floor(content, head_target);
@@ -97,6 +237,101 @@ std::string CapToolResultHeadTail(const std::string& content, size_t content_tok
                content.substr(tail_begin);
     }
     return content.substr(0, head_end) + OmittedMarker(content, head_end, tail_begin) + content.substr(tail_begin);
+}
+
+bool IsGrepToolName(const std::string& name)
+{
+    std::string lower = name;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return (char)tolower(c); });
+    return lower == "grep";
+}
+
+bool IsGrepMatchLine(const std::string& line)
+{
+    return line.size() >= 2 && line[0] == '>' && line[1] == ' ';
+}
+
+bool IsGrepFooterLine(const std::string& line)
+{
+    return line.find("match(es) in ") != std::string::npos ||
+           line.find("no matches found for pattern") != std::string::npos ||
+           (line.size() >= 2 && line.front() == '[' && line.back() == ']');
+}
+
+std::string CapGrepResultByMatches(const std::string& content, size_t content_tokens, size_t cap_tokens)
+{
+    if (cap_tokens == 0 || content_tokens <= cap_tokens || content.empty()) return content;
+    const double keep_ratio = 0.95 * static_cast<double>(cap_tokens) / static_cast<double>(content_tokens);
+    const size_t keep_bytes = static_cast<size_t>(static_cast<double>(content.size()) * keep_ratio);
+    if (keep_bytes >= content.size()) return content;
+
+    std::vector<std::string> lines;
+    size_t pos = 0;
+    while (pos <= content.size()) {
+        const size_t nl = content.find('\n', pos);
+        if (nl == std::string::npos) { lines.push_back(content.substr(pos)); break; }
+        lines.push_back(content.substr(pos, nl - pos));
+        pos = nl + 1;
+    }
+
+    size_t body_end = lines.size();
+    while (body_end > 0 && (lines[body_end - 1].empty() || IsGrepFooterLine(lines[body_end - 1]))) --body_end;
+
+    std::string footer;
+    for (size_t i = body_end; i < lines.size(); ++i) footer += lines[i] + "\n";
+
+    size_t match_bytes = 0;
+    size_t match_count = 0;
+    for (size_t i = 0; i < body_end; ++i) {
+        if (IsGrepMatchLine(lines[i])) { match_bytes += lines[i].size() + 1; ++match_count; }
+    }
+
+    const size_t footer_reserve = std::min(keep_bytes, footer.size() + 80);
+    const size_t body_budget = keep_bytes - footer_reserve;
+
+    std::string body;
+    size_t dropped_context = 0;
+    bool shortened_matches = false;
+    if (match_count == 0 || match_bytes <= body_budget) {
+        const size_t context_budget = body_budget > match_bytes ? body_budget - match_bytes : 0;
+        size_t used = 0;
+        bool pending_gap = false;
+        for (size_t i = 0; i < body_end; ++i) {
+            if (IsGrepMatchLine(lines[i])) {
+                if (pending_gap) { body += "  ...\n"; pending_gap = false; }
+                body += lines[i] + "\n";
+                continue;
+            }
+            const std::string line_with_nl = lines[i] + "\n";
+            if (used + line_with_nl.size() <= context_budget) {
+                if (pending_gap) { body += "  ...\n"; pending_gap = false; }
+                body += line_with_nl;
+                used += line_with_nl.size();
+            } else if (!lines[i].empty()) {
+                ++dropped_context;
+                pending_gap = true;
+            }
+        }
+    } else {
+        shortened_matches = true;
+        const size_t per_match_budget = match_count > 0 ? body_budget / match_count : 0;
+        for (size_t i = 0; i < body_end; ++i) {
+            if (!IsGrepMatchLine(lines[i])) {
+                if (!lines[i].empty()) ++dropped_context;
+                continue;
+            }
+            std::string line = lines[i];
+            if (per_match_budget > 0 && line.size() > per_match_budget)
+                line = line.substr(0, Utf8Floor(line, per_match_budget)) + "...";
+            body += line + "\n";
+        }
+    }
+
+    std::string note = "[... " + std::to_string(dropped_context) + " context line(s) omitted by context compression";
+    if (shortened_matches) note += ", match line content shortened to fit budget";
+    note += "; all " + std::to_string(match_count) +
+            " match line(s) above are kept, re-reading this same query returns the same result ...]\n";
+    return body + note + footer;
 }
 
 constexpr size_t kMinSurvivorFloor = 4;
@@ -165,16 +400,15 @@ void StripRawIdx(json& messages)
     }
 }
 
-
 const char kRepeatStubPrefix[] = "[Note: this ";
 const char kRepeatStubSuffix[] =
     " call returned exactly the same result as the earlier identical call, which is still shown above; "
     "calling it again will not return anything new. Use that result or change approach.";
-const char kRepeatStubTruncatedHint[] =
-    " That earlier result was truncated; to see an omitted part, read that line range instead of repeating the call.";
 const char kRepeatStubTailHeader[] = "\nIts last lines:\n";
+const char kRepeatStubFullHeader[] = "\nIts full result:\n";
 constexpr size_t kRepeatStubTailLines = 3;
 constexpr size_t kRepeatStubTailMaxBytes = 300;
+constexpr size_t kRepeatStubFullInlineMaxBytes = 500;
 
 std::string LastLines(const std::string& content, size_t n, size_t max_bytes)
 {
@@ -208,47 +442,6 @@ struct RepeatState {
 std::mutex g_repeat_mutex;
 std::unordered_map<std::string, RepeatState> g_repeat_states;
 
-std::string CanonicalToolCallKey(const json& tool_call)
-{
-    if (!tool_call.is_object() || !tool_call.contains("function") || !tool_call["function"].is_object())
-        return "";
-    const json& fn = tool_call["function"];
-    const std::string name = fn.value("name", std::string());
-    if (name.empty()) return "";
-    std::string args;
-    if (fn.contains("arguments")) {
-        nlohmann::json parsed;
-        if (fn["arguments"].is_string()) {
-            const std::string raw = fn["arguments"].get<std::string>();
-            parsed = nlohmann::json::parse(raw, nullptr, false);
-            if (parsed.is_discarded()) return name + "\x01" + raw;
-        } else {
-            parsed = nlohmann::json(fn["arguments"]);
-        }
-        if (parsed.is_object()) {
-            nlohmann::json norm = nlohmann::json::object();
-            for (auto it = parsed.begin(); it != parsed.end(); ++it) {
-                if (it.value().is_null()) continue;
-                const bool path_like = it.value().is_string() && [&]() {
-                    const std::string& s = it.value().get_ref<const std::string&>();
-                    return !s.empty() && s.find_first_of(" \t\r\n") == std::string::npos &&
-                           s.find_first_of("/\\") != std::string::npos;
-                }();
-                if (path_like) {
-                    std::string p = it.value().get<std::string>();
-                    std::replace(p.begin(), p.end(), '/', '\\');
-                    norm[it.key()] = p;
-                } else {
-                    norm[it.key()] = it.value();
-                }
-            }
-            parsed = std::move(norm);
-        }
-        args = parsed.dump();
-    }
-    return name + "\x01" + args;
-}
-
 void ApplyRepeatResultStubs(json& msg, const std::string& key, const void* model,
                              const std::unordered_set<size_t>& evicted_raw_idx,
                              bool eviction_state_unknown,
@@ -256,10 +449,12 @@ void ApplyRepeatResultStubs(json& msg, const std::string& key, const void* model
                              size_t must_keep_budget_total,
                              const std::function<size_t(const std::string&)>& count_tokens_fn,
                              std::unordered_set<size_t>& protected_idx,
-                             std::unordered_set<size_t>& must_keep_idx)
+                             std::unordered_set<size_t>& must_keep_idx,
+                             std::vector<TaskMemoBuilder::RepeatDetection>& repeat_detections)
 {
     protected_idx.clear();
     must_keep_idx.clear();
+    repeat_detections.clear();
     size_t must_keep_used = 0;
     if (key.empty() || !msg.is_array()) return;
     std::lock_guard<std::mutex> lk(g_repeat_mutex);
@@ -274,8 +469,10 @@ void ApplyRepeatResultStubs(json& msg, const std::string& key, const void* model
 
     std::unordered_map<std::string, std::string> call_keys;
     std::unordered_map<std::string, std::string> call_names;
+    std::unordered_map<std::string, std::string> call_commands;
     std::string last_call_key;
     std::string last_call_name;
+    std::string last_call_command;
     struct KeyHistory { size_t full_idx = SIZE_MAX; size_t full_hash = 0; size_t repeat_count = 0; };
     std::unordered_map<std::string, KeyHistory> history;
 
@@ -286,16 +483,19 @@ void ApplyRepeatResultStubs(json& msg, const std::string& key, const void* model
         if (role == "assistant") {
             last_call_key.clear();
             last_call_name.clear();
+            last_call_command.clear();
             if (m.contains("tool_calls") && m["tool_calls"].is_array()) {
                 for (const auto& tc : m["tool_calls"]) {
                     const std::string ck = CanonicalToolCallKey(tc);
                     if (ck.empty()) continue;
                     const std::string nm = tc["function"].value("name", std::string());
+                    const std::string cmd = ExtractExecCommandFromToolCall(tc);
                     if (tc.contains("id") && tc["id"].is_string()) {
                         call_keys[tc["id"].get<std::string>()] = ck;
                         call_names[tc["id"].get<std::string>()] = nm;
+                        call_commands[tc["id"].get<std::string>()] = cmd;
                     }
-                    if (last_call_key.empty()) { last_call_key = ck; last_call_name = nm; }
+                    if (last_call_key.empty()) { last_call_key = ck; last_call_name = nm; last_call_command = cmd; }
                 }
             }
             continue;
@@ -304,9 +504,10 @@ void ApplyRepeatResultStubs(json& msg, const std::string& key, const void* model
 
         std::string ck = last_call_key;
         std::string nm = last_call_name;
+        std::string cmd = last_call_command;
         if (m.contains("tool_call_id") && m["tool_call_id"].is_string()) {
             auto it = call_keys.find(m["tool_call_id"].get<std::string>());
-            if (it != call_keys.end()) { ck = it->second; nm = call_names[it->first]; }
+            if (it != call_keys.end()) { ck = it->second; nm = call_names[it->first]; cmd = call_commands[it->first]; }
         }
         if (ck.empty()) continue;
 
@@ -352,15 +553,22 @@ void ApplyRepeatResultStubs(json& msg, const std::string& key, const void* model
                                               << " alive=" << (alive ? 1 : 0) << " action="
                                               << (stub ? "stub" : (keep_fail ? "keep_fail" : "refill"))
                                               << std::endl;
+
+                if (!cmd.empty())
+                    repeat_detections.push_back(TaskMemoBuilder::RepeatDetection{cmd, content});
             }
         }
 
         if (stub) {
             const std::string original = msg[kh.full_idx].value("content", std::string());
             std::string note = std::string(kRepeatStubPrefix) + nm + kRepeatStubSuffix;
-            if (cap_tokens > 0 && count_tokens_fn(original) > cap_tokens) note += kRepeatStubTruncatedHint;
-            const std::string tail = LastLines(original, kRepeatStubTailLines, kRepeatStubTailMaxBytes);
-            if (!tail.empty()) note += kRepeatStubTailHeader + tail;
+            const size_t trimmed_end = original.find_last_not_of(" \t\r\n");
+            if (trimmed_end != std::string::npos && trimmed_end + 1 <= kRepeatStubFullInlineMaxBytes) {
+                note += kRepeatStubFullHeader + original.substr(0, trimmed_end + 1);
+            } else {
+                const std::string tail = LastLines(original, kRepeatStubTailLines, kRepeatStubTailMaxBytes);
+                if (!tail.empty()) note += kRepeatStubTailHeader + tail;
+            }
             m["content"] = note + "]";
         } else {
             if (kh.full_hash != h) kh.repeat_count = 0;
@@ -538,7 +746,7 @@ bool ShrinkToolCallEnvelope(const std::string& content,
     return true;
 }
 
-}  // namespace
+}
 
 void ClearPreFilterSessionStates()
 {
@@ -560,10 +768,6 @@ void ClearPreFilterSessionStates()
     }
 }
 
-// ============================================================
-// Constructor
-// ============================================================
-
 MessagePreFilter::MessagePreFilter(IModelConfig& model_config, ContextBase* context)
     : model_config_(model_config), context_override_(context)
 {}
@@ -576,10 +780,6 @@ bool MessagePreFilter::PrefixCacheActive()
     auto handle = model_config_.get_genie_model_handle().lock();
     return handle && handle->UsesCrossRequestPrefixCache();
 }
-
-// ============================================================
-// CountTokens
-// ============================================================
 
 size_t MessagePreFilter::CountTokens(const std::string& text)
 {
@@ -595,33 +795,6 @@ size_t MessagePreFilter::CountTokens(const std::string& text)
         text, fid_cfg.cjk_bytes_per_token, fid_cfg.ascii_bytes_per_token);
     return static_cast<size_t>(static_cast<double>(text.length()) / bytes_per_token);
 }
-
-// ============================================================
-// ShouldKeepFull
-// ============================================================
-
-bool MessagePreFilter::ShouldKeepFull(const GenieChatMessage& msg) const
-{
-    if (msg.role == "tool") {
-        return true;
-    }
-
-    if (msg.role == "assistant") {
-        if (msg.content.find("to=functions.") != std::string::npos) {
-            return true;
-        }
-
-        if (msg.content.find("<tool_call>") != std::string::npos) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-// ============================================================
-// CaptureDroppedMessages
-// ============================================================
 
 void MessagePreFilter::CaptureDroppedMessages(const json& original, const json& kept)
 {
@@ -683,10 +856,6 @@ void MessagePreFilter::CaptureDroppedMessages(const json& original, const json& 
     }
 }
 
-// ============================================================
-// FitMessagesToContext
-// ============================================================
-
 OptimizedMessages MessagePreFilter::FitMessagesToContext(
     const std::vector<GenieChatMessage>& all_messages,
     const std::string& system_prompt,
@@ -703,10 +872,8 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
                                    << " messages, Context: " << context_size << " tokens" << std::endl;
     My_Log{My_Log::Level::kDebug} << "[FitMessagesToContext] Note: Message count, token pre-filtering, and content compression already done in PreFilterMessages()" << std::endl;
 
-    // 步骤 1: 计算系统提示词的 tokens
     size_t system_tokens = CountTokens(system_prompt);
 
-    // 检查系统提示词是否过大
     if (system_tokens > context_size) {
         result.success = false;
         result.error_message = "System prompt alone (" + std::to_string(system_tokens) +
@@ -721,7 +888,6 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
 
     size_t available_tokens = context_size - system_tokens;
 
-    // 步骤 2: 计算总 tokens
     MessageCategoryStats stats;
     stats.system_tokens = system_tokens;
     size_t total_tokens = system_tokens;
@@ -751,12 +917,6 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
                                    << " tokens, Context: " << context_size << " tokens" << std::endl;
     }
 
-    // 步骤 3: 如果仍然超出 contextSize，逐个丢弃旧消息
-    // 保护策略：最后一条 user 消息及其之后的消息不可丢弃
-    // assistant+tool 配对检测：丢弃 assistant 时，同时丢弃其后所有连续的 tool 消息
-    // 两阶段丢弃策略：
-    //   第一阶段：优先丢弃 recent_boundary 之前的旧消息
-    //   第二阶段：若第一阶段仍不满足，再丢弃 recent_boundary 之后（但 last_user_index 之前）的消息
     std::vector<GenieChatMessage> final_messages = all_messages;
     std::vector<GenieChatMessage> dropped_for_memo;
 
@@ -767,7 +927,6 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
             ? static_cast<size_t>(static_cast<float>(context_size) * kEvictionLowWaterRatio)
             : context_size;
 
-        // 找到最后一条 user 消息的位置
         int last_user_index = -1;
         for (int i = (int)final_messages.size() - 1; i >= 0; i--) {
             if (final_messages[i].role == "user") {
@@ -1128,7 +1287,6 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
 
             result.emergency_truncated = phase4_applied;
 
-            // Phase 4 未能解决溢出，进入错误流程
             if (!phase4_applied) {
             result.success = false;
             result.error_message = "Protected messages (last user message and all subsequent messages) "
@@ -1165,7 +1323,7 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
             My_Log{My_Log::Level::kError} << "[FitMessagesToContext] Exceeded by: " << (system_tokens + accumulated_tokens - context_size) << " tokens" << std::endl;
 
             return result;
-            } // if (!phase4_applied)
+            }
         }
     } else {
         My_Log{My_Log::Level::kDebug} << "[FitMessagesToContext] Step 3: Total tokens within context size" << std::endl;
@@ -1206,7 +1364,6 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
                                        << ")" << std::endl;
     }
 
-    // 成功
     result.messages = final_messages;
     result.total_tokens = total_tokens;
     result.success = true;
@@ -1220,10 +1377,6 @@ OptimizedMessages MessagePreFilter::FitMessagesToContext(
     return result;
 }
 
-// ============================================================
-// IsToolRelatedMessage
-// ============================================================
-
 bool MessagePreFilter::IsToolRelatedMessage(const json& element, const std::string& role)
 {
     if (role == "tool") {
@@ -1231,13 +1384,12 @@ bool MessagePreFilter::IsToolRelatedMessage(const json& element, const std::stri
     }
 
     if (role == "assistant") {
-        // 优先检查 tool_calls 字段（OpenAI 标准格式）
+
         if (element.contains("tool_calls") && !element["tool_calls"].is_null() &&
             element["tool_calls"].is_array() && !element["tool_calls"].empty()) {
             return true;
         }
 
-        // 检查 content 中的工具调用标记（仅当 content 存在且为字符串时）
         if (element.contains("content") && element["content"].is_string()) {
             std::string content = element["content"].get<std::string>();
             if (!content.empty() &&
@@ -1251,24 +1403,12 @@ bool MessagePreFilter::IsToolRelatedMessage(const json& element, const std::stri
     return false;
 }
 
-// ============================================================
-// RemoveToolResponseRedundancy
-// ============================================================
-
-// 移除 Tool 返回内容中的冗余安全警告
-// 单次扫描 + 输出缓冲区策略（O(n)）：
-//   1. 遇到 "SECURITY NOTICE:" 时，跳过直到 "<<<EXTERNAL_UNTRUSTED_CONTENT>>>" 结束
-//   2. 遇到独立的 "<<<EXTERNAL_UNTRUSTED_CONTENT>>>" 时，直接跳过
-//   3. 遇到 "<<<END_EXTERNAL_UNTRUSTED_CONTENT>>>" 时，直接跳过
-//   4. 其余字符原样追加到输出缓冲区
-//   5. 最后对输出做连续换行符压缩和首尾空白清理
 std::string MessagePreFilter::RemoveToolResponseRedundancy(const std::string& content)
 {
     static const std::string security_notice_start = "SECURITY NOTICE:";
     static const std::string start_marker          = "<<<EXTERNAL_UNTRUSTED_CONTENT>>>";
     static const std::string end_marker            = "<<<END_EXTERNAL_UNTRUSTED_CONTENT>>>";
 
-    // 快速路径：若内容中不含任何标记，直接返回原字符串，避免不必要的内存分配
     if (content.find(security_notice_start) == std::string::npos &&
         content.find(start_marker)          == std::string::npos &&
         content.find(end_marker)            == std::string::npos)
@@ -1283,38 +1423,34 @@ std::string MessagePreFilter::RemoveToolResponseRedundancy(const std::string& co
     const size_t len = content.size();
 
     while (pos < len) {
-        // ── 检查 "SECURITY NOTICE:" ──────────────────────────────────────
+
         if (content.compare(pos, security_notice_start.size(), security_notice_start) == 0) {
-            // 向后查找对应的 start_marker
+
             size_t sm_pos = content.find(start_marker, pos + security_notice_start.size());
             if (sm_pos != std::string::npos) {
-                // 跳过从 "SECURITY NOTICE:" 到 start_marker 末尾的整块内容
+
                 pos = sm_pos + start_marker.size();
             } else {
-                // 只有头没有尾，只跳过 "SECURITY NOTICE:" 本身
+
                 pos += security_notice_start.size();
             }
             continue;
         }
 
-        // ── 检查 "<<<EXTERNAL_UNTRUSTED_CONTENT>>>" ──────────────────────
         if (content.compare(pos, start_marker.size(), start_marker) == 0) {
             pos += start_marker.size();
             continue;
         }
 
-        // ── 检查 "<<<END_EXTERNAL_UNTRUSTED_CONTENT>>>" ──────────────────
         if (content.compare(pos, end_marker.size(), end_marker) == 0) {
             pos += end_marker.size();
             continue;
         }
 
-        // ── 普通字符，原样追加 ───────────────────────────────────────────
         result += content[pos];
         ++pos;
     }
 
-    // 清理多余的空白行（3个或更多连续换行符压缩为2个）
     {
         std::string cleaned;
         cleaned.reserve(result.size());
@@ -1336,7 +1472,6 @@ std::string MessagePreFilter::RemoveToolResponseRedundancy(const std::string& co
         result = std::move(cleaned);
     }
 
-    // 清理首尾空白
     return SecurityUtils::TrimWhitespace(result);
 }
 
@@ -1376,14 +1511,6 @@ std::string MessagePreFilter::CleanMessageContent(const std::string& content)
     return SecurityUtils::TrimWhitespace(cleaned);
 }
 
-// ============================================================
-// SmartSelectMessages
-// ============================================================
-
-// 智能选择消息，确保：
-// 1. 至少保留一条 user 消息
-// 2. tool 消息前有对应的 assistant 消息
-// 3. 保持消息的原始顺序
 json MessagePreFilter::SmartSelectMessages(const json& msg, size_t max_messages)
 {
     if (model_config_.getenablePromptDebug()) {
@@ -1391,12 +1518,10 @@ json MessagePreFilter::SmartSelectMessages(const json& msg, size_t max_messages)
                                        << " messages, max: " << max_messages << std::endl;
     }
 
-    // 步骤 1: 简单保留最新的消息（保持原始顺序）
     json selected = json::array();
-    // selected[i] 对应 msg[selected_orig_indices[i]]
+
     std::vector<size_t> selected_orig_indices;
 
-    // 保留 system 消息
     bool has_system_msg = false;
     for (size_t i = 0; i < msg.size(); i++) {
         if (msg[i]["role"] == "system") {
@@ -1407,14 +1532,10 @@ json MessagePreFilter::SmartSelectMessages(const json& msg, size_t max_messages)
         }
     }
 
-    // 计算起始索引（保留最新的非 system 消息）
-    // 若有 system 消息，system 消息占用 1 个槽位，非 system 消息最多保留 max_messages-1 条；
-    // 若无 system 消息，所有槽位都可用于非 system 消息，最多保留 max_messages 条
     size_t keep_count = has_system_msg
         ? (max_messages > 1 ? max_messages - 1 : 0)
         : max_messages;
 
-    // 先收集非 system 消息的原始索引
     std::vector<size_t> non_system_indices;
     for (size_t i = 0; i < msg.size(); i++) {
         if (msg[i]["role"] != "system") {
@@ -1422,20 +1543,16 @@ json MessagePreFilter::SmartSelectMessages(const json& msg, size_t max_messages)
         }
     }
 
-    // 基于非 system 消息数量计算跳过数量
     size_t skip_count = (non_system_indices.size() > keep_count)
                         ? (non_system_indices.size() - keep_count) : 0;
 
-    // 保留最新的 keep_count 条非 system 消息（同时记录原始索引）
     for (size_t k = skip_count; k < non_system_indices.size(); k++) {
         selected.push_back(msg[non_system_indices[k]]);
         selected_orig_indices.push_back(non_system_indices[k]);
     }
 
-    // 步骤 2: 检查是否有 user 消息
     bool has_user = false;
 
-    // 在选中的消息中查找 user 消息
     for (size_t i = 0; i < selected.size(); i++) {
         if (selected[i]["role"] == "user") {
             has_user = true;
@@ -1443,7 +1560,6 @@ json MessagePreFilter::SmartSelectMessages(const json& msg, size_t max_messages)
         }
     }
 
-    // 如果没有 user 消息，往前找最新的一条
     if (!has_user) {
         int last_user_index = -1;
         for (int i = msg.size() - 1; i >= 0; i--) {
@@ -1454,7 +1570,7 @@ json MessagePreFilter::SmartSelectMessages(const json& msg, size_t max_messages)
         }
 
         if (last_user_index >= 0) {
-            // 有 system 消息且 selected 非空时插入到位置 1，否则插入到位置 0（头部）
+
             size_t insert_pos = (has_system_msg && !selected.empty()) ? 1 : 0;
             selected.insert(selected.begin() + insert_pos, msg[last_user_index]);
             selected_orig_indices.insert(selected_orig_indices.begin() + insert_pos, (size_t)last_user_index);
@@ -1465,13 +1581,11 @@ json MessagePreFilter::SmartSelectMessages(const json& msg, size_t max_messages)
         }
     }
 
-    // 步骤 3: 确保 tool 消息前有对应的 assistant 消息
-    // 构建 tool → assistant 依赖关系
-    std::map<size_t, int> tool_needs_assistant;  // selected中的tool索引 → 原始msg中的assistant索引
+    std::map<size_t, int> tool_needs_assistant;
 
     for (size_t i = 0; i < selected.size(); i++) {
         if (selected[i]["role"] == "tool") {
-            // 在 selected 中向前查找 assistant
+
             bool found_in_selected = false;
             for (int j = i - 1; j >= 0; j--) {
                 auto role = get_json_value(selected[j], "role", BLANK_STRING);
@@ -1483,7 +1597,7 @@ json MessagePreFilter::SmartSelectMessages(const json& msg, size_t max_messages)
 
             if (!found_in_selected) {
                 size_t orig_i = selected_orig_indices[i];
-                // 向前查找 assistant
+
                 for (int j = (int)orig_i - 1; j >= 0; j--) {
                     auto role = get_json_value(msg[j], "role", BLANK_STRING);
                     if (role == "assistant" && IsToolRelatedMessage(msg[j], role)) {
@@ -1499,31 +1613,23 @@ json MessagePreFilter::SmartSelectMessages(const json& msg, size_t max_messages)
         }
     }
 
-    // 插入缺失的 assistant 消息（保持顺序）
-    // std::map 按 key（tool_pos）升序迭代，保证从前往后处理，offset 单调递增
     size_t insert_offset = 0;
     for (const auto& pair : tool_needs_assistant) {
         size_t tool_pos = pair.first + insert_offset;
         int assistant_orig_index = pair.second;
 
-        // 在 tool_pos 之前插入 assistant
         selected.insert(selected.begin() + tool_pos, msg[assistant_orig_index]);
         selected_orig_indices.insert(selected_orig_indices.begin() + tool_pos,
                                      (size_t)assistant_orig_index);
-        insert_offset++;  // 每插入一条消息，后续索引 +1
+        insert_offset++;
         if (model_config_.getenablePromptDebug()) {
             My_Log{My_Log::Level::kWarning} << "[SmartSelect] Inserted missing assistant before tool at position "
                                              << tool_pos << " (offset=" << insert_offset << ")" << std::endl;
         }
     }
 
-    // 步骤 3 补充 assistant 消息后，selected 可能超过 max_messages 约束
-    // 若超出约束，从最旧的非保护消息中删除消息，直到满足约束
-    // 保护规则：system、最后一条 user、最后一条 tool、最后一个 assistant tool_call、最后一条 assistant final 不可删除
-
-    // 一次性扫描 selected，预计算各类消息的最后索引
     auto compute_last_indices = [&]() -> std::array<size_t, 4> {
-        // [0]=last_user, [1]=last_tool, [2]=last_assistant_toolcall, [3]=last_assistant_final
+
         std::array<size_t, 4> idx = {std::string::npos, std::string::npos,
                                      std::string::npos, std::string::npos};
         for (size_t k = 0; k < selected.size(); k++) {
@@ -1562,14 +1668,13 @@ json MessagePreFilter::SmartSelectMessages(const json& msg, size_t max_messages)
     }
 
     while (!skip_overflow_loop && selected.size() > max_messages) {
-        // 每轮删除前重新计算最后索引（O(n)）
+
         auto last_idx = compute_last_indices();
         size_t last_user            = last_idx[0];
         size_t last_tool            = last_idx[1];
         size_t last_asst_toolcall   = last_idx[2];
         size_t last_asst_final      = last_idx[3];
 
-        // 找到最旧的可删除消息（从前往后，跳过 system 和保护消息）
         bool removed = false;
         for (size_t i = 0; i < selected.size(); i++) {
             auto role = get_json_value(selected[i], "role", BLANK_STRING);
@@ -1580,15 +1685,14 @@ json MessagePreFilter::SmartSelectMessages(const json& msg, size_t max_messages)
             if (role == "assistant" && IsToolRelatedMessage(selected[i], role)  && i == last_asst_toolcall) continue;
             if (role == "assistant" && !IsToolRelatedMessage(selected[i], role) && i == last_asst_final)    continue;
 
-            // 找到可删除的消息
             if (role == "assistant" && IsToolRelatedMessage(selected[i], role)) {
-                // 级联删除：删除 assistant tool_call 及其后续连续 tool 消息
+
                 size_t erase_end = i + 1;
                 while (erase_end < selected.size() &&
                        get_json_value(selected[erase_end], "role", BLANK_STRING) == "tool") {
                     erase_end++;
                 }
-                // 检查要删除的链中是否包含受保护的最后一条 tool 消息
+
                 bool chain_has_protected_tool = (last_tool != std::string::npos &&
                                                  last_tool > i && last_tool < erase_end);
                 if (chain_has_protected_tool) {
@@ -1599,8 +1703,7 @@ json MessagePreFilter::SmartSelectMessages(const json& msg, size_t max_messages)
                     continue;
                 }
                 size_t drop_count = erase_end - i;
-                // nlohmann::json v3.10.0 的 ordered_map 未提供 erase(iterator, iterator) 重载，
-                // 因此逐个删除同一位置的元素来等效实现区间删除，而不是直接对 json 数组做范围 erase。
+
                 for (size_t d = 0; d < drop_count; d++) {
                     selected.erase(selected.begin() + i);
                 }
@@ -1612,20 +1715,19 @@ json MessagePreFilter::SmartSelectMessages(const json& msg, size_t max_messages)
                                                      << max_messages << std::endl;
                 }
             } else {
-                // 对于 tool 消息，检查其前面紧邻的 assistant tool_call 是否受保护
-                // 若受保护，则不能单独删除该 tool 消息，否则 assistant 会成为孤立的工具调用请求
+
                 if (role == "tool") {
                     bool prev_assistant_protected = false;
                     for (int j = (int)i - 1; j >= 0; j--) {
                         auto r = get_json_value(selected[j], "role", BLANK_STRING);
                         if (r == "assistant" && IsToolRelatedMessage(selected[j], r)) {
-                            // 找到对应的 assistant，检查是否是受保护的最后一个 assistant tool_call
+
                             if (last_asst_toolcall != std::string::npos && (size_t)j == last_asst_toolcall) {
                                 prev_assistant_protected = true;
                             }
                             break;
                         }
-                        // 遇到非 tool/assistant 消息则停止向前查找
+
                         if (r != "tool") break;
                     }
                     if (prev_assistant_protected) {
@@ -1648,7 +1750,7 @@ json MessagePreFilter::SmartSelectMessages(const json& msg, size_t max_messages)
             removed = true;
             break;
         }
-        // 如果没有可删除的消息（全部受保护），退出循环
+
         if (!removed) {
             if (model_config_.getenablePromptDebug()) {
                 My_Log{My_Log::Level::kWarning} << "[SmartSelect] Step3 overflow: All messages protected, "
@@ -1665,11 +1767,6 @@ json MessagePreFilter::SmartSelectMessages(const json& msg, size_t max_messages)
     return selected;
 }
 
-// ============================================================
-// ValidateToolCallSequence
-// ============================================================
-
-// 验证工具调用序列，确保每个 tool 消息前都有对应的 assistant 消息
 json MessagePreFilter::ValidateToolCallSequence(const json& msg)
 {
     json validated = json::array();
@@ -1679,7 +1776,7 @@ json MessagePreFilter::ValidateToolCallSequence(const json& msg)
         auto role = get_json_value(element, "role", BLANK_STRING);
 
         if (role == "tool") {
-            // 检查前面是否有工具调用类型的 assistant 消息
+
             bool has_assistant = false;
             for (int j = validated.size() - 1; j >= 0; j--) {
                 auto r = get_json_value(validated[j], "role", BLANK_STRING);
@@ -1690,15 +1787,13 @@ json MessagePreFilter::ValidateToolCallSequence(const json& msg)
             }
 
             if (!has_assistant) {
-                // 孤立的 tool 消息，记录警告并跳过
+
                 My_Log{My_Log::Level::kWarning}
                     << "[ValidateToolCall] Skipping orphaned tool message at index " << i << std::endl;
                 continue;
             }
         }
 
-        // 检查 assistant tool_call 消息后是否紧跟至少一条 tool 响应
-        // 若 assistant tool_call 后面没有 tool 响应，则该 assistant 消息也应被跳过
         if (role == "assistant" && IsToolRelatedMessage(element, role)) {
             bool has_tool_response = (i + 1 < msg.size() &&
                                       get_json_value(msg[i + 1], "role", BLANK_STRING) == "tool");
@@ -1723,39 +1818,6 @@ json MessagePreFilter::ValidateToolCallSequence(const json& msg)
     return validated;
 }
 
-// ============================================================
-// SafeEraseToolChain
-// ============================================================
-
-// 级联删除工具调用链：给定一个 assistant tool_call 消息的索引，删除它及其后所有连续的 tool responses
-// 返回实际删除的消息数量
-size_t MessagePreFilter::SafeEraseToolChain(json& messages, size_t assistant_idx)
-{
-    // 统计紧跟在 assistant 后面的连续 tool 消息数量
-    size_t tool_count = 0;
-    for (size_t k = assistant_idx + 1; k < messages.size(); k++) {
-        auto role = get_json_value(messages[k], "role", BLANK_STRING);
-        if (role == "tool") {
-            tool_count++;
-        } else {
-            break;
-        }
-    }
-    size_t drop_count = 1 + tool_count;
-    // nlohmann::json v3.10.0 的 ordered_map 未提供 erase(iterator, iterator) 重载，
-    // 因此逐个删除同一位置的元素来等效实现区间删除。
-    for (size_t d = 0; d < drop_count; d++) {
-        messages.erase(messages.begin() + assistant_idx);
-    }
-    return drop_count;
-}
-
-// ============================================================
-// DropOldMessagesBatch
-// ============================================================
-
-// 批量删除旧消息直到满足预算（Phase 1 专用）
-// 贪心 + 批量删除策略（O(n)）
 void MessagePreFilter::DropOldMessagesBatch(
     json& filtered_msg,
     const std::vector<bool>& old_flags,
@@ -1765,15 +1827,13 @@ void MessagePreFilter::DropOldMessagesBatch(
     size_t available_tokens,
     const std::function<void()>& refresh_prot_idx)
 {
-    if (current_tokens <= available_tokens) return;  // 已满足预算，无需删除
+    if (current_tokens <= available_tokens) return;
 
-    // 更新保护索引缓存（批量删除前只需调用一次）
     if (refresh_prot_idx) refresh_prot_idx();
 
-    // 步骤 1：预计算每条消息的 token 数，并确定删除集合
     size_t n = filtered_msg.size();
     std::vector<bool> to_delete(n, false);
-    size_t tokens_to_free = current_tokens - available_tokens;  // 需要释放的 token 数
+    size_t tokens_to_free = current_tokens - available_tokens;
     size_t freed_tokens = 0;
 
     size_t non_system_total = 0;
@@ -1803,17 +1863,14 @@ void MessagePreFilter::DropOldMessagesBatch(
     while (i < n && freed_tokens < tokens_to_free) {
         auto role = get_json_value(filtered_msg[i], "role", BLANK_STRING);
 
-        // 跳过 system 消息
         if (role == "system") { i++; continue; }
 
-        // 跳过非旧消息（old_flags[i] == false）
         if (!old_flags[i]) { i++; continue; }
 
-        // 跳过受保护的消息
         if (is_protected(filtered_msg, i)) { i++; continue; }
 
         if (role == "assistant" && IsToolRelatedMessage(filtered_msg[i], role)) {
-            // assistant tool_call：级联删除其后的连续 tool responses
+
             size_t chain_end = i + 1;
             while (chain_end < n &&
                    get_json_value(filtered_msg[chain_end], "role", BLANK_STRING) == "tool") {
@@ -1878,7 +1935,7 @@ void MessagePreFilter::DropOldMessagesBatch(
             }
             prefilter_stats_.dropped_by_token_limit += (chain_end - i);
             prefilter_stats_.total_dropped += (chain_end - i);
-            i = chain_end;  // 跳过整条链
+            i = chain_end;
         } else {
             if (non_system_total - deleted_count - 1 < survivor_floor) {
                 floor_hit = true;
@@ -1946,7 +2003,6 @@ void MessagePreFilter::DropOldMessagesBatch(
         }
     }
 
-    // 步骤 3：更新 current_tokens（饱和减法防止下溢）
     if (current_tokens >= freed_tokens) {
         current_tokens -= freed_tokens;
     } else {
@@ -1954,12 +2010,6 @@ void MessagePreFilter::DropOldMessagesBatch(
     }
 }
 
-// ============================================================
-// CompressMessages
-// ============================================================
-
-// 通用辅助函数：压缩指定角色的消息内容
-// 统一处理 Phase 2（旧 user/assistant）、Phase 3（新 user/assistant）、Phase 4（tool）的压缩逻辑
 size_t MessagePreFilter::CompressMessages(
     json& filtered_msg,
     const std::vector<bool>& old_flags,
@@ -1979,8 +2029,6 @@ size_t MessagePreFilter::CompressMessages(
     bool is_tool_phase = (target_role == "tool");
     size_t compressed_count = 0;
 
-    // 当 available_tokens == 0 时，system prompt 已占满整个 context，
-    // 消息内容压缩无法解决根本问题，由 FitMessagesToContext 作为最终兜底处理
     if (available_tokens == 0) {
         return 0;
     }
@@ -1990,19 +2038,17 @@ size_t MessagePreFilter::CompressMessages(
     for (size_t i = 0; i < filtered_msg.size(); i++) {
         auto role = get_json_value(filtered_msg[i], "role", BLANK_STRING);
 
-        // ── 角色过滤 ──────────────────────────────────────────────────────
         if (is_tool_phase) {
             if (role != "tool") continue;
             if (only_old && !old_flags[i]) continue;
             if (!only_old && old_flags[i]) continue;
         } else {
-            // user_assistant 模式：跳过 system 和 tool
+
             if (role == "system" || role == "tool") continue;
             if (only_old && !old_flags[i]) continue;
             if (!only_old && old_flags[i]) continue;
         }
 
-        // ── 截断保护检查 ──────────────────────────────────────────────────
         if (is_truncate_protected(filtered_msg, i)) {
             if (is_tool_phase && model_config_.getenablePromptDebug()) {
                 My_Log{My_Log::Level::kInfo} << "[PreFilter]   " << phase_name
@@ -2011,12 +2057,11 @@ size_t MessagePreFilter::CompressMessages(
             continue;
         }
 
-        // ── 执行截断 ──────────────────────────────────────────────────────
         bool is_old = old_flags[i];
         std::string content = get_json_value(filtered_msg[i], "content", BLANK_STRING);
         std::string truncated = truncate_content(content, max_len);
         if (truncated.length() < content.length()) {
-            // tool 消息：新消息压缩后不得低于 tool_min_length
+
             if (is_tool_phase && !is_old && tool_min_length > 0 &&
                 truncated.length() < tool_min_length) {
                 if (model_config_.getenablePromptDebug()) {
@@ -2042,9 +2087,8 @@ size_t MessagePreFilter::CompressMessages(
                 }
             }
 
-            // 满足预算后提前退出，避免不必要的压缩（有意为之的保守策略）
             if (use_incremental) {
-                // 增量 token 计数时，tool 消息需要加入与 calc_msg_tokens 相同的包装开销
+
                 std::string old_for_count = content;
                 std::string new_for_count = truncated;
                 if (is_tool_phase) {
@@ -2073,7 +2117,7 @@ size_t MessagePreFilter::CompressMessages(
                 }
                 if (*current_tokens <= available_tokens) break;
             } else {
-                // 回退：全量 token 计算（O(n) per compression，整体 O(n²)）
+
                 if (within_budget(filtered_msg)) break;
             }
         }
@@ -2081,12 +2125,6 @@ size_t MessagePreFilter::CompressMessages(
     return compressed_count;
 }
 
-// ============================================================
-// PreFilterMessages
-// ============================================================
-
-// 消息预过滤函数（分级压缩算法）
-// 所有阈值均从 service_config.json 的 prompt_optimization 节加载
 nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
     json& msg,
     int contextSize,
@@ -2102,22 +2140,17 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         My_Log{My_Log::Level::kInfo} << "[PreFilter] Input: " << msg.size() << " messages" << std::endl;
     }
 
-    // 重置统计信息
     prefilter_stats_.Reset();
     prefilter_dropped_messages_.clear();
 
-    // 获取 model handle（提前到 Step 1 之前：token 预算感知裁剪判断需要用它计算 token 使用率）
-    // 修复：多模型场景下优先使用 context_override_（per-model 的 ContextBase），
-    // 而非 model_config_.get_genie_model_handle()（全局单模型句柄）
     std::shared_ptr<ContextBase> handle;
     if (context_override_) {
-        // 使用非拥有 shared_ptr 包装 context_override_（生命周期由调用方保证）
+
         handle = std::shared_ptr<ContextBase>(context_override_, [](ContextBase*){});
     } else {
         handle = model_config_.get_genie_model_handle().lock();
     }
 
-    // 计算 system tokens 和 available_tokens（同样提前到 Step 1 之前）
     size_t system_tokens = 0;
     size_t available_tokens = 0;
     if (handle) {
@@ -2129,9 +2162,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
                             : 0;
     }
 
-    // 统一 token 计算口径：只计算 content 字段的 tokens（提前到 Step 1 之前定义，使 Step 1
-    // 的预算判断与后续 Phase 0-5 共用同一套包装开销逻辑，避免两处口径不一致）
-    // tool 消息需要加入格式包装开销（普通路径：OptimizeToolResponse 包装；Harmony 路径：BuildToolMessage 包装）
     auto calc_msg_tokens = [&](const json& messages) -> size_t {
         size_t total = 0;
         for (const auto& element : messages) {
@@ -2139,10 +2169,10 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
             if (role == "system") continue;
             std::string content = get_json_value(element, "content", BLANK_STRING);
             if (!is_harmony && role == "tool") {
-                // 普通路径：加入 OptimizeToolResponse 包装开销
+
                 content = "<tool_response>\n" + content + "\n</tool_response>\n";
             } else if (is_harmony && role == "tool") {
-                // Harmony 路径：使用 HarmonyProcessor::BuildToolMessage() 生成估算内容
+
                 std::string actual_tool_name = "unknown_tool";
                 if (element.contains("name") && element["name"].is_string()) {
                     actual_tool_name = element["name"].get<std::string>();
@@ -2157,7 +2187,7 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
                 }
                 content = HarmonyProcessor::BuildToolMessage(actual_tool_name, content);
             } else if (is_harmony && role == "user") {
-                // Harmony 路径：user 消息在传入 FitMessagesToContext 之前会被包装为 Harmony 格式
+
                 content = HarmonyProcessor::BuildUserMessage(content);
             } else if (role == "assistant" && element.contains("tool_calls") &&
                        element["tool_calls"].is_array() && !element["tool_calls"].empty()) {
@@ -2168,11 +2198,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         return total;
     };
 
-    // ── Step 1: 消息数量限制（cfg.max_messages_limit）── token 预算感知 ──────
-    // 仅当"条数超限"且"token 使用率达到压力阈值 cfg.token_pressure_trigger_ratio"时才真正
-    // 触发 SmartSelectMessages 裁剪；否则哪怕条数超限，只要预算充足就不裁剪，交由后续
-    // Phase 0-5/FitMessagesToContext 的 token-aware 逻辑处理。无 model handle 时无法计算
-    // token 使用率，保持旧行为（纯按条数裁剪，视为预算始终紧张）。
     const bool prefix_cache_active = PrefixCacheActive();
     const std::string evict_key = (handle && prefix_cache_active) ? TaskMemoBuilder::ComputeFirstMsgKey(msg) : std::string();
     EvictionState prior_state;
@@ -2186,36 +2211,10 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         ? static_cast<size_t>(static_cast<float>(contextSize) * kToolEntryCapRatio) : 0;
     const size_t must_keep_budget_total = static_cast<size_t>(
         static_cast<double>(available_tokens) * kRepeatRetainExceptionRatio);
-    bool smart_select_possible = false;
-    double smart_select_pressure = 0.0;
-    size_t smart_select_msgs = 0;
-    if (!evict_key.empty()) {
-        json pre_select = json::array();
-        for (size_t i = 0; i < msg.size(); ++i) {
-            if (!prior_dropped_set.count(i)) pre_select.push_back(msg[i]);
-        }
-        smart_select_msgs = pre_select.size();
-        if (pre_select.size() > cfg.max_messages_limit) {
-            smart_select_possible = true;
-            if (available_tokens > 0) {
-                smart_select_pressure = static_cast<double>(calc_msg_tokens(pre_select)) /
-                    static_cast<double>(available_tokens);
-                smart_select_possible = smart_select_pressure >= cfg.token_pressure_trigger_ratio;
-            }
-        }
-    }
-    const size_t must_keep_budget = smart_select_possible ? 0 : must_keep_budget_total;
-    if (!evict_key.empty()) {
-        My_Log{My_Log::Level::kInfo} << "[PreFilter] Smart select: possible=" << (smart_select_possible ? 1 : 0)
-                                      << " msgs=" << smart_select_msgs << "/" << cfg.max_messages_limit
-                                      << " pressure=" << smart_select_pressure
-                                      << " must_keep_budget=" << must_keep_budget << "/" << must_keep_budget_total
-                                      << std::endl;
-    }
     ApplyRepeatResultStubs(msg, evict_key, handle.get(), prior_dropped_set, eviction_state_unknown,
-                           tool_entry_cap_tokens, must_keep_budget,
+                           tool_entry_cap_tokens, must_keep_budget_total,
                            [this](const std::string& t) { return CountTokens(t); },
-                           repeat_protected_raw_, repeat_must_keep_raw_);
+                           repeat_protected_raw_, repeat_must_keep_raw_, repeat_detections_);
     repeat_retain_budget_ = available_tokens;
     json source = msg;
     for (size_t i = 0; i < source.size(); ++i) {
@@ -2238,7 +2237,7 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
 
     const size_t max_messages = cfg.max_messages_limit;
     json filtered_msg = json::array();
-    const bool count_exceeded = (source.size() > max_messages);
+    const bool count_exceeded = evict_key.empty() && (source.size() > max_messages);
     bool budget_pressure = true;
     size_t current_msg_tokens = 0;
     if (count_exceeded && handle && available_tokens > 0) {
@@ -2280,18 +2279,13 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         return filtered_msg;
     }
 
-    // ── [DIAG] 诊断打印辅助 Lambda ────────────────────────────────────────
-    // 打印最终会发送给模型的所有内容（system prompt + 压缩后的 messages）
-    // 包括：user/assistant/tool 消息的完整内容、assistant 的 tool_calls、tool 的返回结果
-    // 每条消息附带 token 数和字符数，便于分析哪部分占用 tokens 较多
     auto print_diag_dump = [&](const json& final_msgs) {
-        // 1. 打印 system prompt（一次性完整打印）
+
         My_Log{My_Log::Level::kWarning}
             << "[PreFilter] [DIAG] ========== System Prompt ("
             << system_tokens << " tok, " << system_prompt_for_token_calc.size() << " chars) ==========\n"
             << system_prompt_for_token_calc << std::endl;
 
-        // 2. 逐条打印所有 messages（含 content + tool_calls）
         My_Log{My_Log::Level::kWarning}
             << "[PreFilter] [DIAG] ========== Messages (" << final_msgs.size() << " total) ==========" << std::endl;
 
@@ -2299,11 +2293,8 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
             const auto& diag_msg = final_msgs[diag_i];
             std::string diag_role = get_json_value(diag_msg, "role", BLANK_STRING);
 
-            // 跳过 system 消息：system prompt 已在上方单独打印（优化后版本），
-            // 此处打印的是原始客户端发送的 system 消息，内容不同且冗余
             if (diag_role == "system") continue;
 
-            // 提取 content（可能为空，如 assistant tool_call 消息）
             std::string diag_content;
             if (diag_msg.contains("content") && !diag_msg["content"].is_null()) {
                 if (diag_msg["content"].is_string()) {
@@ -2313,14 +2304,12 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
                 }
             }
 
-            // 提取 tool_calls（assistant 发起工具调用时）
             std::string diag_tool_calls;
             if (diag_msg.contains("tool_calls") && !diag_msg["tool_calls"].is_null() &&
                 diag_msg["tool_calls"].is_array() && !diag_msg["tool_calls"].empty()) {
                 diag_tool_calls = diag_msg["tool_calls"].dump(2);
             }
 
-            // 计算 token 数（content + tool_calls 合并计算）
             std::string diag_full = diag_content;
             if (!diag_tool_calls.empty()) {
                 if (!diag_full.empty()) diag_full += "\n";
@@ -2328,7 +2317,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
             }
             size_t diag_tok = handle->TokenLength(diag_full);
 
-            // 打印消息头（role、token 数、字符数）
             std::string diag_header = "[PreFilter] [DIAG] --- msg[" + std::to_string(diag_i)
                 + "] role=" + diag_role
                 + " (" + std::to_string(diag_tok) + " tok, " + std::to_string(diag_full.size()) + " chars)";
@@ -2336,11 +2324,10 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
             diag_header += " ---";
             My_Log{My_Log::Level::kWarning} << diag_header << "\n";
 
-            // 打印 content（非空时）
             if (!diag_content.empty()) {
                 My_Log{My_Log::Level::kWarning} << diag_content << std::endl;
             }
-            // 打印 tool_calls（非空时）
+
             if (!diag_tool_calls.empty()) {
                 My_Log{My_Log::Level::kWarning} << "[tool_calls]:\n" << diag_tool_calls << std::endl;
             }
@@ -2350,32 +2337,26 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
             << "[PreFilter] [DIAG] ========== End of Diagnostic Dump ==========" << std::endl;
     };
 
-    // 当 system prompt 已占满或超出 context 时，直接跳过所有 Phase，由 FitMessagesToContext 处理
     if (available_tokens == 0) {
         My_Log{My_Log::Level::kWarning}
             << "[PreFilter] System prompt (" << system_tokens
             << " tok) exceeds context size (" << contextSize
             << " tok), skipping all phases, FitMessagesToContext will handle" << std::endl;
-        // 打印诊断信息（system prompt 超出时，messages 尚未压缩，但仍有参考价值）
+
         print_diag_dump(filtered_msg);
         CaptureDroppedMessages(msg, filtered_msg);
         StripRawIdx(filtered_msg);
         return filtered_msg;
     }
 
-    // ── 辅助 Lambda ──────────────────────────────────────────────────────
-    // calc_msg_tokens 已提前到 Step 1 之前定义（供 token 预算感知裁剪复用），此处不再重复定义。
-
     auto within_budget = [&](const json& messages) -> bool {
         return calc_msg_tokens(messages) <= available_tokens;
     };
 
-    // 预计算各类消息的最后索引（O(n)），供 is_protected / is_truncate_protected 使用
-    // 返回值：{last_user, last_asst_final, last_asst_toolcall, last_tool}
     auto compute_protection_indices = [&](const json& messages)
         -> std::array<size_t, 4>
     {
-        // [0]=last_user, [1]=last_asst_final, [2]=last_asst_toolcall, [3]=last_tool
+
         std::array<size_t, 4> idx = {
             std::string::npos, std::string::npos,
             std::string::npos, std::string::npos
@@ -2394,7 +2375,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         return idx;
     };
 
-    // 判断消息是否受"丢弃保护"（不可被 Phase 1/5 删除）
     std::array<size_t, 4> current_prot_idx = compute_protection_indices(filtered_msg);
 
     auto is_protected = [&](const json& messages, size_t idx) -> bool {
@@ -2409,7 +2389,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         return false;
     };
 
-    // 判断消息是否受"截断保护"（不可被 Phase 2/3/4 截断内容）
     auto is_truncate_protected = [&](const json& messages, size_t idx) -> bool {
         const auto& element = messages[idx];
         auto role = get_json_value(element, "role", BLANK_STRING);
@@ -2422,7 +2401,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         return false;
     };
 
-    // 预计算每条消息是否是"旧消息"的标志数组
     auto precompute_old_flags = [&](const json& messages) -> std::vector<bool> {
         size_t non_system_count = 0;
         for (const auto& e : messages) {
@@ -2477,20 +2455,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         }
     };
 
-    // 保真截断（ContentCondenser）：高信号行提取 + 头尾双保留，取代旧的"只保留前缀/仅保头弃尾"
-    // 策略——报错行、退出码、汇总结论多出现在内容尾部，不应被整段丢弃。
-    //
-    // Step 4：预算单位改为 token 口径（cfg.fidelity.budget_unit=="tokens"，默认）——现有字符
-    // 阈值（max_len，即 old/recent/tool_compress_len）按 4 字符≈1 token 的保守估算换算为
-    // token 预算；字符阈值本身继续原样传入 budget.max_chars，充当 Condense 内部第 1 步"长度
-    // 快筛"的判据与最终硬上限，不产生新魔数。budget_unit=="chars" 时 token_len_ptr 为
-    // nullptr、max_tokens=0，逐字节回退到 Step 3（纯字符模式，不接入 tokenizer）。
-    //
-    // 性能护栏：token_len_fn 绑定到 CountTokens()（与 FitMessagesToContext 同一套 per-model
-    // handle 优先、无 handle 时粗略估算的逻辑），只有 Condense 内部快筛判定"内容明显超预算、
-    // 需要收敛"时才会被调用，且二分探测次数不超过 cfg.fidelity.max_token_probe_per_message
-    // （CondenseBudget::max_token_probe）——短消息（长度 ≤ 字符预算）在第 1 步即原样返回，
-    // 完全不触发 tokenizer 调用。
     const auto& fidelity_cfg = cfg.fidelity;
     const bool use_token_budget = (fidelity_cfg.budget_unit == "tokens");
     std::function<size_t(const std::string&)> token_len_fn = [this](const std::string& text) {
@@ -2498,13 +2462,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
     };
     const std::function<size_t(const std::string&)>* token_len_ptr = use_token_budget ? &token_len_fn : nullptr;
 
-    // 统一构造 CondenseBudget：preserve_tail=false 时 tail_ratio 强制为 0（等价于仅保留头部，
-    // 逐字节回退到该特性引入之前的行为），extract_high_signal/json_head_items/json_tail_items/
-    // max_token_probe 均直接来自 cfg.fidelity，关闭对应开关即整段回退。
-    // P1：max_len -> max_tokens 的换算不再统一按 4:1（该比例只对纯 ASCII 文本成立），而是按
-    // content 内实际 CJK 字节占比推算有效 bytes/token
-    // （EstimateCjkAwareBytesPerToken，utils.h）；budget 本身也带上这两个比例，供
-    // ContentCondenser::Condense 内部的硬截断兜底复用同一口径。
     auto make_condense_budget = [&](const std::string& content, size_t max_len) -> CondenseBudget {
         CondenseBudget budget;
         budget.max_chars = max_len;
@@ -2532,9 +2489,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         return condensed.text;
     };
 
-    // JSON 感知的 tool 消息截断函数：tool 消息通常是 JSON 格式的搜索结果、文件内容或 API 响应。
-    // ContentCondenser 内部会判断内容是否为 JSON 数组，命中则保留首 N + 尾 M 项（不再是旧版
-    // "只保留前缀元素"的二分逻辑），未命中则回退到高信号行提取 + 头尾双保留的通用文本路径。
     auto truncate_tool_content = [&](const std::string& content, size_t max_len) -> std::string {
         if (content.length() <= max_len + cfg.min_compress_threshold) return content;
 
@@ -2543,7 +2497,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         return condensed.text;
     };
 
-    // 初始 token 统计
     size_t initial_tokens = calc_msg_tokens(filtered_msg);
     My_Log{My_Log::Level::kInfo} << "[PreFilter] Budget: "
                                   << "sys_prompt=" << system_tokens << " tok"
@@ -2557,9 +2510,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
 
     bool budget_satisfied = false;
 
-    // ── Phase 0: 无损清理（始终执行）──────────────────────────────────────────────
-    // 冗余安全警告（SECURITY NOTICE: ... <<<EXTERNAL_UNTRUSTED_CONTENT>>>）是外部工具
-    // 注入的格式噪声，无论预算是否充足，都应清理
     size_t after_phase0_tokens = initial_tokens;
     {
         size_t cleaned_count = 0;
@@ -2629,12 +2579,47 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
     if (prefix_cache_active && contextSize > 0) {
         const size_t cap_tokens = std::min(tool_entry_cap_tokens,
             static_cast<size_t>(static_cast<float>(contextSize) * kToolEntryHardCapRatio));
+        std::unordered_map<std::string, std::string> call_id_to_path;
+        std::unordered_set<std::string> full_dump_paths;
+        for (size_t i = 0; i < filtered_msg.size(); i++) {
+            const std::string role_i = get_json_value(filtered_msg[i], "role", BLANK_STRING);
+            if (role_i == "assistant" && filtered_msg[i].contains("tool_calls") && filtered_msg[i]["tool_calls"].is_array()) {
+                for (const auto& tc : filtered_msg[i]["tool_calls"]) {
+                    if (!tc.is_object() || !tc.contains("id") || !tc["id"].is_string()) continue;
+                    const std::string path_arg = ExtractJsonPathArgFromToolCall(tc);
+                    if (!path_arg.empty()) call_id_to_path[tc["id"].get<std::string>()] = path_arg;
+                }
+            } else if (role_i == "tool") {
+                const std::string saved_path = ExtractFullOutputSavedPath(
+                    get_json_value(filtered_msg[i], "content", BLANK_STRING));
+                if (!saved_path.empty()) full_dump_paths.insert(saved_path);
+            }
+        }
         size_t capped_count = 0;
         for (size_t i = 0; i < filtered_msg.size(); i++) {
             if (get_json_value(filtered_msg[i], "role", BLANK_STRING) != "tool") continue;
             std::string content = get_json_value(filtered_msg[i], "content", BLANK_STRING);
-            if (content.size() <= cap_tokens) continue;
-            std::string capped = CapToolResultHeadTail(content, CountTokens(content), cap_tokens);
+            if (task_memo_scan::IsBinaryContent(content)) {
+                filtered_msg[i]["content"] = task_memo_scan::BinaryResultStub(content.size());
+                capped_count++;
+                continue;
+            }
+            size_t entry_cap_tokens = cap_tokens;
+            if (filtered_msg[i].contains("tool_call_id") && filtered_msg[i]["tool_call_id"].is_string()) {
+                auto path_it = call_id_to_path.find(filtered_msg[i]["tool_call_id"].get<std::string>());
+                if (path_it != call_id_to_path.end() && full_dump_paths.count(path_it->second))
+                    entry_cap_tokens = tool_entry_cap_tokens;
+            }
+            if (content.size() <= entry_cap_tokens) continue;
+            std::string tool_name = get_json_value(filtered_msg[i], "name", BLANK_STRING);
+            if (tool_name.empty() && filtered_msg[i].contains("tool_call_id") &&
+                filtered_msg[i]["tool_call_id"].is_string() && tool_call_id_to_name) {
+                auto name_it = tool_call_id_to_name->find(filtered_msg[i]["tool_call_id"].get<std::string>());
+                if (name_it != tool_call_id_to_name->end()) tool_name = name_it->second;
+            }
+            std::string capped = IsGrepToolName(tool_name)
+                ? CapGrepResultByMatches(content, CountTokens(content), entry_cap_tokens)
+                : CapToolResultHeadTail(content, CountTokens(content), entry_cap_tokens);
             if (capped.size() < content.size()) {
                 filtered_msg[i]["content"] = capped;
                 capped_count++;
@@ -2649,11 +2634,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         }
     }
 
-    // ── Phase 1: 旧消息处理（recent_window 之外）──────────────────────────
-    // 按以下子步骤顺序执行，优先使用破坏性最小的手段：
-    //   Step A：压缩旧 user/assistant 消息内容（old_compress_len）
-    //   Step B：若仍超预算，删除旧消息（DropOldMessagesBatch）
-    //   Step C：若仍超预算，压缩旧 tool 响应内容（old_compress_len）
     size_t compress_current_tokens = after_phase0_tokens;
     const float high_water_ratio = prefix_cache_active ? kEvictionHighWaterRatio : 1.0f;
     const float low_water_ratio = prefix_cache_active ? kEvictionLowWaterRatio : 1.0f;
@@ -2680,7 +2660,10 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
                              [&]() { current_prot_idx = compute_protection_indices(working); });
         My_Log{My_Log::Level::kInfo} << "[PreFilter] Eviction low-water: target=" << evict_low_water
                                       << ", recent_growth=" << recent_growth
-                                      << ", available=" << available_tokens << std::endl;
+                                      << ", available=" << available_tokens
+                                      << ", trigger_tokens=" << tokens_before_evict
+                                      << ", high_water=" << evict_high_water
+                                      << ", after_drop=" << evict_tokens << std::endl;
         evict_tokens = calc_msg_tokens(working);
         if (evict_tokens <= available_tokens) {
             filtered_msg = std::move(working);
@@ -2697,7 +2680,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
                                            << cfg.recent_window << ")..." << std::endl;
         }
 
-        // ── Phase 1 Step A: 压缩旧 user/assistant 消息内容 ──────────────
         {
             if (model_config_.getenablePromptDebug()) {
                 My_Log{My_Log::Level::kInfo} << "[PreFilter] Phase 1 Step A: Compressing old user/assistant messages (max "
@@ -2709,9 +2691,9 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
             size_t compressed_count = CompressMessages(
                 filtered_msg, old_flags_1a, within_budget, is_truncate_protected, truncate_content,
                 "user_assistant", /*only_old=*/true, cfg.old_compress_len,
-                /*tool_min_length=*/0, "Phase 1A",
+                                    0, "Phase 1A",
                 handle, &compress_current_tokens, available_tokens,
-                /*is_harmony=*/is_harmony);
+                               is_harmony);
             if (model_config_.getenablePromptDebug()) {
                 My_Log{My_Log::Level::kInfo} << "[PreFilter] Phase 1 Step A: Compressed " << compressed_count << " messages" << std::endl;
             }
@@ -2721,7 +2703,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
             }
         }
 
-        // ── Phase 1 Step B: 删除旧消息（仍超预算时）────────────────────
         if (!budget_satisfied) {
             if (model_config_.getenablePromptDebug()) {
                 My_Log{My_Log::Level::kInfo} << "[PreFilter] Phase 1 Step B: Dropping old messages (batch mode, low-water)..." << std::endl;
@@ -2743,7 +2724,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
             }
         }
 
-        // ── Phase 1 Step C: 压缩旧 tool 响应（仍超预算时）──────────────
         if (!budget_satisfied) {
             if (model_config_.getenablePromptDebug()) {
                 My_Log{My_Log::Level::kInfo} << "[PreFilter] Phase 1 Step C: Compressing old tool responses (max="
@@ -2755,11 +2735,11 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
             size_t compressed_count = CompressMessages(
                 filtered_msg, old_flags_1c, within_budget, is_truncate_protected,
                 truncate_tool_content,
-                /*target_role=*/"tool", /*only_old=*/true,
-                /*max_len=*/cfg.old_compress_len,
-                /*tool_min_length=*/0, "Phase 1C",
+                                "tool", /*only_old=*/true,
+                            cfg.old_compress_len,
+                                    0, "Phase 1C",
                 handle, &compress_current_tokens, available_tokens,
-                /*is_harmony=*/is_harmony);
+                               is_harmony);
             if (model_config_.getenablePromptDebug()) {
                 My_Log{My_Log::Level::kInfo} << "[PreFilter] Phase 1 Step C: Compressed " << compressed_count << " old tool messages" << std::endl;
             }
@@ -2782,16 +2762,11 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         }
     }
 
-    // ── Phase 2: 新消息处理（recent_window 之内）──────────────────────────
-    // 按以下子步骤顺序执行：
-    //   Step A：压缩新 user/assistant 消息内容（recent_compress_len）
-    //   Step B：压缩新 tool 响应内容（tool_compress_len）
     if (!budget_satisfied) {
         if (model_config_.getenablePromptDebug()) {
             My_Log{My_Log::Level::kInfo} << "[PreFilter] Phase 2: Processing recent messages..." << std::endl;
         }
 
-        // ── Phase 2 Step A: 压缩新 user/assistant 消息内容 ──────────────
         {
             if (model_config_.getenablePromptDebug()) {
                 My_Log{My_Log::Level::kInfo} << "[PreFilter] Phase 2 Step A: Compressing recent user/assistant messages (max "
@@ -2803,9 +2778,9 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
             size_t compressed_count = CompressMessages(
                 filtered_msg, old_flags_2a, within_budget, is_truncate_protected, truncate_content,
                 "user_assistant", /*only_old=*/false, cfg.recent_compress_len,
-                /*tool_min_length=*/0, "Phase 2A",
+                                    0, "Phase 2A",
                 handle, &compress_current_tokens, available_tokens,
-                /*is_harmony=*/is_harmony);
+                               is_harmony);
             if (model_config_.getenablePromptDebug()) {
                 My_Log{My_Log::Level::kInfo} << "[PreFilter] Phase 2 Step A: Compressed " << compressed_count << " messages" << std::endl;
             }
@@ -2815,7 +2790,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
             }
         }
 
-        // ── Phase 2 Step B: 压缩新 tool 响应（仍超预算时）──────────────
         if (!budget_satisfied) {
             if (model_config_.getenablePromptDebug()) {
                 My_Log{My_Log::Level::kInfo} << "[PreFilter] Phase 2 Step B: Compressing recent tool responses (max="
@@ -2827,11 +2801,11 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
             size_t compressed_count = CompressMessages(
                 filtered_msg, old_flags_2b, within_budget, is_truncate_protected,
                 truncate_tool_content,
-                /*target_role=*/"tool", /*only_old=*/false,
-                /*max_len=*/cfg.tool_compress_len,
-                /*tool_min_length=*/cfg.tool_min_length, "Phase 2B",
+                                "tool", /*only_old=*/false,
+                            cfg.tool_compress_len,
+                                    cfg.tool_min_length, "Phase 2B",
                 handle, &compress_current_tokens, available_tokens,
-                /*is_harmony=*/is_harmony);
+                               is_harmony);
             if (model_config_.getenablePromptDebug()) {
                 My_Log{My_Log::Level::kInfo} << "[PreFilter] Phase 2 Step B: Compressed " << compressed_count << " recent tool messages" << std::endl;
             }
@@ -2842,7 +2816,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         }
     }
 
-    // ── Phase 3: 丢弃新消息（最后手段，跳过保护集）──────────────────────
     if (!budget_satisfied) {
         if (model_config_.getenablePromptDebug()) {
             My_Log{My_Log::Level::kWarning} << "[PreFilter] Phase 3: Dropping recent messages (last resort, batch mode)..." << std::endl;
@@ -2864,7 +2837,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         }
     }
 
-    // ── 最终统计 ──────────────────────────────────────────────────────────
     {
         size_t final_tokens = compress_current_tokens;
         size_t total_after = system_tokens + final_tokens;
@@ -2878,7 +2850,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
                                       << ", msgs=" << filtered_msg.size() << std::endl;
     }
 
-    // ── 步骤 4: 验证工具调用序列的完整性 ──────────────────────────────────
     json validated_msg = ValidateToolCallSequence(filtered_msg);
     if (model_config_.getenablePromptDebug()) {
         if (validated_msg.size() < filtered_msg.size()) {
@@ -2890,7 +2861,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         }
     }
 
-    // ── 步骤 5: 最终验证 - 确保至少有一条 user 消息 ──────────────────────
     bool has_final_user = false;
     for (const auto& element : validated_msg) {
         if (element["role"] == "user") { has_final_user = true; break; }
@@ -2915,9 +2885,6 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         }
     }
 
-    // ── [DIAG] 打印最终压缩后的完整内容（system prompt + 所有 messages）──────
-    // 触发条件：仍超出预算（budget_satisfied == false），即将进入 FitMessagesToContext 处理
-    // 目的：帮助分析哪部分内容占用 tokens 较多，用于决策进一步删减和压缩
     if (!budget_satisfied) {
         print_diag_dump(validated_msg);
     }

@@ -38,4 +38,4 @@ private:
     EnterpriseCloudModelConfig enterprise_cloud_config_;
 };
 
-#endif // MODEL_ROUTER_H
+#endif

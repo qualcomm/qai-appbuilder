@@ -15,7 +15,6 @@
 
 #include <nlohmann/json.hpp>
 
-
 using json = nlohmann::ordered_json;
 
 #include <filesystem>
@@ -36,14 +35,13 @@ public:
             kArrayString
         } check_type_;
         bool optional_{};
-        bool additional_{false};  // for string will set to model_root, for bool valye is true or false
+        bool additional_{false};
     };
 
     explicit ConfigFixer(const ModelInstanceConfig &model_config) : model_config_{model_config}
     {
         const std::string &config_path = model_config_.i_model_config_.get_config_path();
 
-        // Trim leading whitespace to check if it's JSON
         std::string trimmed_config = config_path;
         size_t start = trimmed_config.find_first_not_of(" \t\n\r");
         if (start != std::string::npos)
@@ -51,10 +49,9 @@ public:
             trimmed_config = trimmed_config.substr(start);
         }
 
-        // Check if config_path is a JSON string (starts with '{')
         if (!trimmed_config.empty() && trimmed_config[0] == '{')
         {
-            // Parse JSON string directly
+
             try
             {
                 j_ = json::parse(config_path);
@@ -67,7 +64,7 @@ public:
         }
         else
         {
-            // Read from file
+
             std::ifstream file(config_path);
             if (!file.good())
             {
@@ -87,10 +84,6 @@ public:
         My_Log{My_Log::Level::kInfo} << j_.dump(4) << "\n";
     }
 
-    // watermark_callback_name 非空时,把 /dialog/sampler 段改写为 type:"custom" +
-    // 该 callback-name,并剔除 SDK 明确禁止与 custom 共存的 temp/top-k/top-p/greedy 键
-    // (custom 与 callback-name 是互相强制的一对,详见 genie.md)。为空(默认,含
-    // GENIE_WATERMARK_ENABLE 未开启/插件未声明 token hook 能力两种情形)时该段完全不变。
     json FixConfig(const std::string &watermark_callback_name = "");
 
     json FixSampler() const
@@ -128,20 +121,19 @@ using ConfigFixer = GenieContext::ConfigFixer;
 
 inline json ConfigFixer::FixConfig(const std::string &watermark_callback_name)
 {
-    /* @formatter:off */
+
     std::vector<FixedInfo> global_items{
             {"tokenizer", json::json_pointer("/dialog/tokenizer/path"), FixedInfo::kString, false},
             {"forecast", json::json_pointer("/dialog/ssd-q1/forecast-prefix-name"), FixedInfo::kString, true, true},
             {"lut-path", json::json_pointer("/dialog/embedding/lut-path"), FixedInfo::kString, true, false}
     };
-    // pointers below are relative to a single engine object; applied per-engine.
+
     std::vector<FixedInfo> engine_items{
             {"extensions", json::json_pointer("/backend/extensions"), FixedInfo::kString, true},
             {"ctx-bins", json::json_pointer("/model/binary/ctx-bins"), FixedInfo::kArrayString, false},
             {"poll", json::json_pointer("/backend/QnnHtp/poll"), FixedInfo::kBool, true, false},
             {"draft-token-map", json::json_pointer("/model/draft-token-map"), FixedInfo::kString, true, false}
     };
-    /* @formatter:on */
 
     for (auto &fixed_item: global_items)
     {
@@ -190,8 +182,7 @@ inline json ConfigFixer::FixConfig(const std::string &watermark_callback_name)
 
     if (!watermark_callback_name.empty())
     {
-        // 见 FixConfig() 声明处注释：初始 config JSON 阶段直接写入 custom + callback-name，
-        // 不依赖运行期 applyConfig 切换（该路径是否真的生效尚未证实，见 genie.md）。
+
         auto sampler_jp = json::json_pointer("/dialog/sampler");
         json sampler = j_.contains(sampler_jp) ? j_.at(sampler_jp) : json::object();
         for (const char *incompatible_key: {"temp", "top-k", "top_k", "top-p", "top_p", "greedy"})
@@ -311,4 +302,4 @@ inline bool ConfigFixer::FixedPath(json &j, ConfigFixer::FixedInfo &info)
     return true;
 }
 
-#endif //CONFIG_FIXER_H
+#endif

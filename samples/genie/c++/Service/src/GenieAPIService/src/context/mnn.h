@@ -13,6 +13,8 @@
 
 #include "context_base.h"
 
+#include <atomic>
+
 class MNNContext : public ContextBase
 {
 public:
@@ -27,14 +29,10 @@ public:
 
     json HandleProfile() override;
 
-    // 基类默认实现返回 text.size()（字符数），对中文等多字节字符不准确
     size_t TokenLength(const std::string &text) override;
 
-    bool was_stopped_by_output_limit() const override { return stopped_by_output_limit_; }
+    bool was_stopped_by_output_limit() const override { return last_stopped_by_output_limit_; }
 
-    // 加载前内存预检查：估算模型目录下权重文件所需内存，与系统当前可用物理内存比较。
-    // 用于在 MNNContext 构造（进而触发 Llm::createLLM/load()）之前拦截明显会导致
-    // 原生硬崩溃（OOM）的超大模型加载请求。
     static uint64_t EstimateMnnMemoryRequirement(const std::string &model_path);
 
     static uint64_t GetAvailablePhysicalMemoryBytes();
@@ -42,8 +40,11 @@ public:
 private:
     class Impl;
     Impl* impl_;
-    bool m_stop = false;
-    bool stopped_by_output_limit_ = false;
+    std::atomic<bool> m_stop = false;
+    std::atomic<bool> stopped_by_output_limit_{false};
+    std::atomic<bool> last_stopped_by_output_limit_{false};
+    std::mutex profile_cache_mutex_;
+    json last_profile_;
 };
 
 #endif

@@ -52,20 +52,16 @@ void QInterfaceImpl::QInterface::GenieCallBack(const char *response,
 
     std::lock_guard guard(context->m_stream_lock);
     context->m_stream_answer += response;
-    context->m_stream_cond.notify_one();  // Notify waiting thread that new data is available
-    self->cur_length_ += context->TokenLength(response);
+    context->m_stream_cond.notify_one();
+    self->cur_length_ += context->TokenLengthUnlocked(response);
 
     if (self->cur_length_ >= self->kContextSize_)
     {
-        // 我们自己按分词估算主动喊停(区别于 genie.cpp 里 SDK 自己报告
-        // GENIE_STATUS_WARNING_CONTEXT_EXCEEDED 的那一条 [MODEL_DEFECT] 日志:
-        // 那条是 SDK 内部真实上下文耗尽,这一条是我们自己的估算提前达到上限)。
-        // 同样以 error 级别打一条带 [MODEL_DEFECT] 标记、reason 字段不同的日志,
-        // 供 test_service.py 侧区分识别、归类为模型缺陷诊断信息。
+
         My_Log{My_Log::Level::kError} << "[MODEL_DEFECT] reason=self_estimated_limit_exceeded token_size="
                                       << self->cur_length_ << " is over and will stop self" << std::endl;
         context->stopped_by_output_limit_ = true;
-        context->Stop();
+        context->AbortInference();
     }
 }
 
@@ -88,12 +84,7 @@ IEmbedding *IEmbedding::CreateInterface(GenieContext *context)
 bool IEmbedding::set_content(ModelInput &model_input)
 {
     My_Log{} << model_input.image_.empty() << " " << model_input.audio_.empty() << "\n";
-    // [修复] 上一轮若带图/带音频，img_inferred_buffers_/deepstack_buffers_/embedded_bin_ 等
-    // 视觉/音频状态只在那条分支末尾的 Clean() 里被清空；但下面的纯文字快速路径
-    // （goto ahead）从未调用过 Clean()。同一个模型实例被多轮对话复用时，一旦某轮带图请求
-    // 之后紧跟一轮纯文字请求，Qwen3VL::MergeEmbedding() 等虚函数仍会看到非空的残留视觉状态，
-    // 把陈旧的视觉嵌入错误拼接进本轮纯文字的 embedding 缓冲区，导致 embeddingQuery 必然失败。
-    // 在两条分支之前统一先清理上一轮遗留状态，防止其污染本轮（无论本轮是否带图/音频）。
+
     Clean();
     auto model_type = qnn_embedding_info_.model_types_;
     if (model_input.image_.empty() && model_input.audio_.empty())
@@ -214,7 +205,7 @@ std::string QInterfaceImpl::IEmbedding::GeneratePaddingPrompt(const std::string 
 {
     std::string prompt;
     int needed = times * repeated.length() + bos.length() + eos.length();
-    prompt.reserve(needed + 1); // for \0
+    prompt.reserve(needed + 1);
     prompt.append(bos);
     for (int i = 0; i < times; ++i)
     {

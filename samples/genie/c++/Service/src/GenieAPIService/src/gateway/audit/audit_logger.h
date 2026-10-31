@@ -111,4 +111,4 @@ private:
     std::chrono::steady_clock::time_point last_summary_time_;
 };
 
-#endif // AUDIT_LOGGER_H
+#endif

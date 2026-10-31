@@ -24,14 +24,15 @@ list(APPEND SERVICE_SOURCES
         src/chat_request_handler/long_text_summarizer.cpp
         src/chat_request_handler/task_memo_store.cpp
         src/chat_request_handler/task_memo_builder.cpp
+        src/chat_request_handler/task_memo_doc_scan.cpp
         src/chat_request_handler/tool_call_circuit_breaker_store.cpp
-        src/chat_request_handler/tool_call_circuit_breaker_store_selftest.cpp
         src/chat_request_handler/tool_call_repetition_store.cpp
-        src/chat_request_handler/tool_call_repetition_store_selftest.cpp
         src/chat_history/chat_history.cpp
         src/model/model_manager.cpp
         src/context/llama_speculative_config.cpp
         src/context/llama_runtime_planner.cpp
+        src/context/degenerate_repeat_guard.cpp
+        src/context/think_budget_floor.cpp
         src/context/qnn/genie.cpp
         src/context/qnn/genie_interface.cpp
         src/context/qnn/phi4mm/phi4mm.cpp
@@ -44,9 +45,10 @@ list(APPEND SERVICE_SOURCES
         src/processor/harmony.cpp
         src/processor/general.cpp
         src/response/response_tools.cpp
-        src/response/response_tools_layer1_selftest.cpp
-        src/response/response_tools_sanitization_selftest.cpp
+        src/response/tool_call_repair.cpp
         src/response/response_dispatcher.cpp
+        src/response/response_dispatcher_aux.cpp
+        src/response/repeat_gate.cpp
         ${CMAKE_SOURCE_DIR}/src/common/utils.cpp
         src/gateway/gateway/gateway.cpp
         src/gateway/gateway/gateway_routing.cpp
@@ -82,6 +84,7 @@ if (MSVC AND USE_GGUF)
     add_definitions(-DUSE_GGUF)
     list(APPEND SERVICE_SOURCES
             src/context/llama_cpp.cpp
+            src/context/llama_watermark_sampler.cpp
     )
 endif ()
 

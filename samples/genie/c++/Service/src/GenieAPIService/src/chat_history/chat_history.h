@@ -27,7 +27,7 @@ class ChatHistory
 {
 public:
     explicit ChatHistory(ModelInstanceConfig &model_config);
-    
+
     explicit ChatHistory(IModelConfig &model_config);
 
     ~ChatHistory();
@@ -58,4 +58,4 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-#endif //CHAT_HISTORY_H
+#endif
