@@ -1,3 +1,7 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
 """Legacy ``models`` / ``default_model`` stripping for ``service_config.json``.
 
 GenieAPIService still loads every enabled ``models[*]`` entry and lets
