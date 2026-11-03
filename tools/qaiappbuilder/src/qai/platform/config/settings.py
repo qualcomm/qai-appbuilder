@@ -1037,6 +1037,16 @@ class AppBuilderSettings(BaseModel):
             "S9 PR-094 §17.5 #11."
         ),
     )
+    voice_warmup_enabled: bool = Field(
+        default=True,
+        description=(
+            "Warm-load the preferred voice ASR model (whisper-base / zipformer-zh) "
+            "into the sticky worker at startup. Loading may download the model "
+            "weights on first use; set to false "
+            "(QAI_APP_BUILDER__VOICE_WARMUP_ENABLED=false) for hermetic runs "
+            "such as the e2e suite."
+        ),
+    )
 
 
 class ChannelsSettings(BaseModel):

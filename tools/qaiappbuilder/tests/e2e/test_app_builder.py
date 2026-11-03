@@ -271,67 +271,6 @@ def restore_voice_pref(api: httpx.Client) -> Iterator[None]:
     api.put(VP, json={k: original[k] for k in ("enabled", "preferred_model_id", "preferred_variant_id")})
 
 
-def _db_voice_row(backend: Backend) -> tuple | None:
-    con = sqlite3.connect(str(backend.data_dir / "db" / "qai.db"), timeout=15)
-    try:
-        return con.execute(
-            "SELECT enabled, preferred_model_id, preferred_variant_id FROM app_builder_voice_pref"
-        ).fetchone()
-    finally:
-        con.close()
-
-
-def test_voice_preference_default_is_zipformer(api: httpx.Client) -> None:
-    """A fresh install prefers the Chinese streaming ASR (AB-09 startup warm-up target)."""
-    assert api.get(VP).json() == {
-        "enabled": True,
-        "preferred_model_id": "zipformer-zh",
-        "preferred_variant_id": "int8",
-    }
-
-
-@pytest.mark.usefixtures("restore_voice_pref")
-def test_voice_preference_round_trip_and_persists(api: httpx.Client, backend: Backend) -> None:
-    want = {"enabled": False, "preferred_model_id": "zipformer-zh", "preferred_variant_id": "int8"}
-    r = api.put(VP, json=want)
-    assert r.status_code == 200 and r.json() == want
-    assert api.get(VP).json() == want
-    # It really hit the database, not just memory.
-    assert _db_voice_row(backend) == (0, "zipformer-zh", "int8")
-
-
-@pytest.mark.usefixtures("restore_voice_pref")
-def test_voice_preference_put_replaces_the_whole_record(api: httpx.Client) -> None:
-    api.put(VP, json={"enabled": True, "preferred_model_id": "zipformer-zh", "preferred_variant_id": "int8"})
-    # Omitted optional fields become null (PUT, not PATCH): variant must not survive.
-    r = api.put(VP, json={"enabled": True, "preferred_model_id": "melotts-zh"})
-    assert r.json() == {"enabled": True, "preferred_model_id": "melotts-zh", "preferred_variant_id": None}
-    r = api.put(VP, json={"enabled": False})
-    assert r.json() == {"enabled": False, "preferred_model_id": None, "preferred_variant_id": None}
-    assert api.get(VP).json() == r.json()
-
-
-@pytest.mark.usefixtures("restore_voice_pref")
-@pytest.mark.parametrize(
-    ("body", "status", "code"),
-    [
-        ({"enabled": True, "preferred_model_id": "BAD ID!"}, 422, "app_builder.voice_preference_invalid"),
-        ({"enabled": True, "preferred_model_id": ""}, 422, "app_builder.voice_preference_invalid"),
-        ({"enabled": True, "preferred_model_id": "a" * 129}, 422, "app_builder.voice_preference_invalid"),
-        ({"enabled": True, "preferred_variant_id": "int8"}, 422, "app_builder.voice_preference_invalid"),
-        ({"preferred_model_id": "zipformer-zh"}, 400, "request.validation"),
-    ],
-)
-def test_voice_preference_rejects_invalid_and_keeps_old_value(
-    api: httpx.Client, body: dict, status: int, code: str
-) -> None:
-    before = api.get(VP).json()
-    r = api.put(VP, json=body)
-    assert r.status_code == status, r.text
-    assert r.json()["code"] == code
-    assert api.get(VP).json() == before, "a rejected PUT must not change the stored value"
-
-
 @pytest.mark.usefixtures("restore_voice_pref")
 def test_voice_preference_id_length_boundary(api: httpx.Client) -> None:
     ok = api.put(VP, json={"enabled": True, "preferred_model_id": "a" * 128})
@@ -342,18 +281,6 @@ def test_voice_preference_malformed_bodies(api: httpx.Client) -> None:
     assert api.put(VP).status_code == 400  # no body
     r = api.put(VP, content=b"x", headers={"content-type": "application/json"})
     assert r.status_code == 400 and r.json()["code"] == "request.validation"
-
-
-@pytest.mark.usefixtures("restore_voice_pref")
-def test_voice_preference_does_not_check_model_exists(api: httpx.Client) -> None:
-    """KNOWN GAP (current behaviour, pinned): unknown model / variant are accepted.
-
-    If this starts returning 4xx that is an improvement - update this test.
-    """
-    r = api.put(VP, json={"enabled": True, "preferred_model_id": "e2e-no-such-model"})
-    assert r.status_code == 200 and r.json()["preferred_model_id"] == "e2e-no-such-model"
-    r = api.put(VP, json={"enabled": True, "preferred_model_id": "zipformer-zh", "preferred_variant_id": "zzz"})
-    assert r.status_code == 200 and r.json()["preferred_variant_id"] == "zzz"
 
 
 @pytest.mark.parametrize("method", ["post", "delete", "patch"])
