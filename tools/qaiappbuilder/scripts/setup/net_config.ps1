@@ -4,7 +4,7 @@
 # ---------------------------------------------------------------------
 <#
 .SYNOPSIS
-    Network preflight + proxy/mirror resolution for setup_env.bat.
+    Network preflight + proxy/mirror resolution for _setup_env.bat.
 
 .DESCRIPTION
     Probes the hosts the installer needs, decides proxy + mirror settings and
@@ -20,7 +20,7 @@
                                              (first candidate that really serves a file;
                                              an existing QAI_GITHUB_MIRROR env wins)
       NPM_CONFIG_REGISTRY / COREPACK_NPM_REGISTRY   npm registry mirror (pnpm, corepack)
-      QAI_NODE_MIRROR                        Node.js dist mirror (build_frontend.bat)
+      QAI_NODE_MIRROR                        Node.js dist mirror (Setup.bat --frontend)
       QAI_NET_PROFILE                        official | cn
 
     Every probe is retried (DNS failures and timeouts are often transient on home
@@ -47,7 +47,7 @@
 .PARAMETER Need
     Comma list of probe groups: core,browser,builder,frontend. Default core.
 .PARAMETER ProbeAll
-    GUI mode (setup_gui.ps1 step 1): probe EVERY source, official AND cn mirror,
+    GUI mode (setup GUI, removed): probe EVERY source, official AND cn mirror,
     print a table and write the result as JSON to -Json. Then exit;
     -Emit / -Mirror / -Need are ignored. JSON shape:
       { proxy, proxySource, recommend: official|cn|blocked, reason, log,
@@ -61,7 +61,7 @@
     Detailed log path. Default data\logs\net_<mode>_<timestamp>.log
 .PARAMETER PickGitHubProxy
     Only select a GitHub download proxy (Range-probe the candidates, no other probes) and write
-    `set "QAI_GITHUB_MIRROR=<prefix>"` to -Emit. setup_env.bat uses it when a direct github.com
+    `set "QAI_GITHUB_MIRROR=<prefix>"` to -Emit. _setup_env.bat uses it when a direct github.com
     download failed although the preflight said github.com was reachable.
 #>
 param(
@@ -387,7 +387,7 @@ function Select-GitHubMirror {
 }
 
 # ---- -PickGitHubProxy: only choose a GitHub download proxy, write QAI_GITHUB_MIRROR to -Emit -------
-# Called by setup_env.bat when a direct github.com download failed although the preflight said github.com
+# Called by _setup_env.bat when a direct github.com download failed although the preflight said github.com
 # was reachable. Exit 0 = a proxy was written; exit 3 = none works (the caller then keeps the direct URL).
 if ($PickGitHubProxy) {
     Write-EnvDiag @($GhTestAsset)
@@ -524,12 +524,12 @@ $pypiOk = $true
 if (-not $NoProbe) {
     Write-Host '[NET] connectivity probe (HEAD; github.com = ranged file GET; retried on DNS/timeout errors):'
     $list = @()
-    # -Need may list a group twice (setup_env.bat builds "core,browser,browser,builder" for --builder with --with-browser): probe each group once.
+    # -Need may list a group twice (_setup_env.bat builds "core,browser,browser,builder" for --builder with --with-browser): probe each group once.
     $seenGroups = @{}
     foreach ($g in ($Need -split ',')) { $g = $g.Trim(); if ($groups.ContainsKey($g) -and -not $seenGroups.ContainsKey($g)) { $seenGroups[$g] = $true; $list += $groups[$g] } }
     Write-EnvDiag @($list | ForEach-Object { $_[1] } | Where-Object { $_ }) 
     Show-Probes $list
-    # Only judge a group that was actually probed (build_frontend probes frontend only).
+    # Only judge a group that was actually probed (frontend-only probes).
     # github.com is not needed to pick the profile: uv comes from a PyPI wheel. It IS needed later (x64 qai_appbuilder
     # wheel, aria2c, guard); the cn profile then selects a GitHub proxy below, so a failing probe here is not fatal.
     if ($results.ContainsKey('pypi.org (PyPI)')) { $pypiOk = $results['pypi.org (PyPI)'].ok -and $results['files.pythonhosted.org'].ok }
@@ -541,7 +541,7 @@ if (-not $NoProbe) {
 # ---- profile decision ------------------------------------------------------
 # Official sources reachable -> still compare with the cn mirror and switch only when the official
 # PyPI is clearly slower: > 300 ms AND more than 2x the mirror's latency. Same rule as the GUI's
-# Get-NetRecommend (setup_gui.ps1), so the command line and the window pick the same profile.
+# Get-NetRecommend (setup GUI, removed), so the command line and the window pick the same profile.
 # Latency here is the HEAD round trip, not download bandwidth.
 function Select-AutoProfile([bool]$OfficialOk, $OfficialMs, $CnOk, $CnMs) {
     if ($OfficialOk) {
@@ -610,14 +610,14 @@ if ($proxyUrl) {
     foreach ($n in 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY') { $lines.Add("set `"$n=$proxyUrl`"") }
     $lines.Add('set "NO_PROXY=localhost,127.0.0.1,::1"')
 }
-# QAI_GITHUB_MIRROR is read on its own by :dl (setup_env.bat) and build_frontend.bat, independent of the profile.
+# QAI_GITHUB_MIRROR is read on its own by :dl (_setup_env.bat) and Setup.bat, independent of the profile.
 if ($ghPrefix) { $lines.Add("set `"QAI_GITHUB_MIRROR=$ghPrefix`"") }
 if ($profile -eq 'cn') {
     $lines.Add("set `"UV_DEFAULT_INDEX=$($CN.PyPI)`"")
     $lines.Add("set `"PIP_INDEX_URL=$($CN.PyPI)`"")
     $lines.Add("set `"UV_PYTHON_INSTALL_MIRROR=$($CN.PyStandalone)`"")
     $lines.Add("set `"PLAYWRIGHT_DOWNLOAD_HOST=$($CN.Playwright)`"")
-    # npm / pnpm / corepack read these; QAI_NODE_MIRROR is used by build_frontend.bat
+    # npm / pnpm / corepack read these; QAI_NODE_MIRROR is used by Setup.bat --frontend
     $lines.Add("set `"NPM_CONFIG_REGISTRY=$($CN.Npm)`"")
     $lines.Add("set `"COREPACK_NPM_REGISTRY=$($CN.Npm)`"")
     $lines.Add("set `"QAI_NODE_MIRROR=$($CN.Node)`"")

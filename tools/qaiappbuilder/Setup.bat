@@ -1549,7 +1549,7 @@ echo.
 echo -- Step 0c: Native FileGuard DLLs ^(guard.zip^) ------------------------------
 
 REM The guard.zip release is pinned independently of the qai_appbuilder version: it is not republished on every
-REM release (v2.51.40 has none). Keep in sync with QAI_GUARD_RELEASE_TAG in setup_env.bat.
+REM release (v2.51.40 has none). Keep in sync with QAI_GUARD_RELEASE_TAG in _setup_env.bat.
 set "GUARD_URL=https://github.com/qualcomm/qai-appbuilder/releases/download/v2.48.40/guard.zip"
 set "GUARD_ZIP=%DL_DIR%\guard.zip"
 set "GUARD_TMP=%DL_DIR%\_guard_tmp"

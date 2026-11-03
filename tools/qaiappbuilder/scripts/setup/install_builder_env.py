@@ -2,7 +2,7 @@
 # Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
-r"""Model-conversion environment installer (standalone, no setup_env.bat).
+r"""Model-conversion environment installer (standalone, no _setup_env.bat).
 
 Installs what ONNX -> DLC -> .bin conversion needs, and nothing else:
 
@@ -59,7 +59,7 @@ SDK_MARKER_REL = Path("bin") / "aarch64-windows-msvc" / "qnn-context-binary-gene
 # Written into the SDK root ONLY when this script extracted that SDK itself. The uninstaller offers to delete an SDK
 # ONLY when this file is present: an SDK the user (or another tool) installed is never touched.
 OWNER_MARKER_NAME = ".installed_by_qai_modelbuilder"
-SDK_MIN_ZIP_BYTES = 1_500_000_000  # same floor as setup_env.bat (a smaller file is truncated)
+SDK_MIN_ZIP_BYTES = 1_500_000_000  # same floor as _setup_env.bat (a smaller file is truncated)
 UA = "qai-builder-env-installer/1"
 # Below this a transfer counts as stalled: no speed, no ETA. Above MAX_ETA_SECONDS an ETA is not shown.
 MIN_ETA_SPEED = 1024.0  # bytes / s

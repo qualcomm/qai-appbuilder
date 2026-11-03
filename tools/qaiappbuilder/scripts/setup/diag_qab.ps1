@@ -52,7 +52,7 @@ function Safe([scriptblock]$b) { try { & $b } catch { Out-Rep ('  (failed: ' + $
 
 Out-Rep ('qai_appbuilder import diagnosis   ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'))
 if (-not $Python -or -not (Test-Path -LiteralPath $Python)) {
-    Out-Rep "No venv python found under $env:LOCALAPPDATA\QAIModelBuilder\envs. Run setup_env.bat first."
+    Out-Rep "No venv python found under $env:LOCALAPPDATA\QAIModelBuilder\envs. Re-run the installer or use the Start-menu Repair shortcut."
     exit 2
 }
 Out-Rep "python: $Python"
