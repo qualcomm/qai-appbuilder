@@ -54,7 +54,7 @@ const builderEnv = {
   error: {
     network: "下载时网络出错。请检查网络、下载源或代理后重试。",
     disk_space: "磁盘可用空间不足。",
-    uv_missing: "缺少 uv 工具，请先运行 setup_env.bat。",
+    uv_missing: "缺少 uv 工具，请重新运行安装程序，或使用开始菜单里的「修复」快捷方式。",
     python_install: "无法安装 Python 3.10。",
     venv: "无法创建 Python 3.10 环境。",
     deps: "安装 Python 依赖包失败。",

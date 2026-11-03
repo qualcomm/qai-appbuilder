@@ -72,7 +72,7 @@
 - 正常退出:先 `POST /api/system/exit`(后端要求 CSRF 双提交:先 `GET /api/system/health` 取 `qai_csrf` cookie,再带同值的 `X-QAI-CSRF` 头),等后端的 supervisor 自行退出(最多 15 秒);超时才 `taskkill /T /F` 整个进程树。
 - 壳被任务管理器强杀:后端放在带 `KILL_ON_JOB_CLOSE` 的 Job Object 里,系统会一起回收,不会残留 Python 进程。
 - 后端中途崩溃或被外部杀掉:窗口回到错误页,显示退出码和日志路径,并把窗口调到前台。
-- 找不到安装目录或 venv:窗口里直接提示怎么修复(重新安装,或运行 `setup_env.bat` / "修复"快捷方式)。
+- 找不到安装目录或 venv:窗口里直接提示怎么修复(重新安装,或运行 `_setup_env.bat` / "修复"快捷方式)。
 
 ### 链接与弹窗
 
