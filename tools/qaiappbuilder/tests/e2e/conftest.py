@@ -183,6 +183,9 @@ def _backend_env(data_dir: Path, *, auth_enabled: bool, pycache: Path) -> dict[s
     env["QAI_DATA__DATA_DIR"] = str(data_dir)
     env["QAI_AUTH__SESSION_SECRET"] = E2E_SESSION_SECRET
     env["QAI_AUTH__ENABLED"] = "true" if auth_enabled else "false"
+    # Hermetic: the startup voice warm-up would load zipformer-zh, whose runner auto-downloads
+    # ~165 MB of weights into the repo's models/ directory.
+    env["QAI_APP_BUILDER__VOICE_WARMUP_ENABLED"] = "false"
     env["PYTHONUNBUFFERED"] = "1"
     return env
 

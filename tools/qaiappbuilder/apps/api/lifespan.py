@@ -2602,8 +2602,15 @@ def _spawn_voice_warmup(container: Container) -> None:
     no-op (``skipped``). The heavy ``qai_appbuilder`` / NPU import happens
     in the worker subprocess, so a host without the SDK / NPU degrades
     gracefully (no crash, no eager import here).
+
+    Disabled by ``settings.app_builder.voice_warmup_enabled = False``: the
+    warm-load may download the model weights, which hermetic runs (e2e)
+    must not do.
     """
     try:
+        if not container.settings.app_builder.voice_warmup_enabled:
+            _log.info("lifespan.voice_warmup_disabled_by_setting")
+            return
         _ab = getattr(container, "app_builder", None)
         _preload_uc = (
             getattr(_ab, "preload_voice_input_use_case", None) if _ab else None
