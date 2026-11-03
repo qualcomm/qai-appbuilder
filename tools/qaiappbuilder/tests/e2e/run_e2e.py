@@ -191,7 +191,7 @@ def check_mapping() -> list[str]:
 # plain product venv and never sees the runner venv.
 # ---------------------------------------------------------------------------
 RUNNER_VENV = Path(os.environ.get("QAI_E2E_RUNNER_VENV") or PROJECT / "data" / "e2e-runner-venv")
-RUNNER_REQS = ["pytest>=8.3,<10.0", "pytest-asyncio>=0.23,<2.0"]   # same pins as pyproject [dev]
+RUNNER_REQS = ["pytest>=8.3,<10.0", "pytest-asyncio>=1.0,<2.0"]   # same pins as pyproject [dev]
 _BOOT = ("import os,sys,runpy;p=os.environ.get('QAI_E2E_DEPS');"
          "p and os.path.isdir(p) and sys.path.append(p);"
          "runpy.run_module('pytest',run_name='__main__',alter_sys=True)")
@@ -475,6 +475,13 @@ def run_category(cat: str, test_py: str, env: dict, out: Path, extra: list[str],
     log = out / "logs" / f"{cat}.log"
     files = [str(TESTS / f) for f in files_of(cat)]
     cmd = [*pytest_cmd(test_py), *files, f"--junitxml={junit}", *extra]
+    # Short basetemp: sys.pycache_prefix (data/caches/pycache) re-roots every .pyc under the
+    # source's full path, so the default %TEMP%\pytest-of-<user>\pytest-N\... overflows
+    # Windows' 260-char MAX_PATH during py_compile (mb_system export tests).
+    if os.name == "nt" and not any(a.startswith("--basetemp") for a in extra):
+        _bt = Path(os.environ.get('SystemDrive', 'C:') + '\\') / 'qai-e2e' / cat
+        _bt.parent.mkdir(parents=True, exist_ok=True)
+        cmd.append(f"--basetemp={_bt}")
     res = {"name": cat, "description": CATEGORIES[cat][0], "files": files_of(cat),
            "command": cmd, "returncode": None, "status": "ERROR", "duration": 0.0,
            "note": "", "log": str(log), "junit": str(junit), "leaks": []}

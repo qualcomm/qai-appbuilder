@@ -17,7 +17,7 @@
     4. run ISCC.exe  ->  dist\installer\QAIModelBuilder-<version>-qairt<A.B.C>-<arch>-setup.exe
        (A.B.C = first three parts of the QAIRT SDK version, e.g. qairt2.48.40)
 
-    The installer copies the files, then runs setup_env.bat (no --builder: QAIRT is NOT installed).
+    The installer copies the files, then runs _setup_env.bat (no --builder: QAIRT is NOT installed).
 
 .PARAMETER Arch          x64 | arm64 | both (default both)
 .PARAMETER SkipFrontend  do not run Build.bat; use the existing frontend\dist
@@ -176,7 +176,7 @@ foreach ($da in $desktopArches) {
 $Dirs = @('src', 'apps', 'factory', 'scripts', 'interfaces', 'skills', 'tools')
 $Files = @(
     'pyproject.toml', 'build_info.json',
-    'setup_env.bat', 'Start.bat', 'qai.bat', 'Console.bat', 'Uninstall.bat', 'clean_env.bat',
+    'installer\_setup_env.bat', 'Start.bat', 'qai.bat', 'Console.bat', 'Uninstall.bat', 'clean_env.bat',
     'README.md', 'README.zh-CN.md', 'QUICK-START.md', 'QUICK-START.zh-CN.md'
 )
 $ExcludeDirs = @('__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', 'node_modules', 'tests', '.git')
@@ -202,8 +202,12 @@ function Stage-Arch([string]$a) {
 
     foreach ($f in $Files) {
         $p = Join-Path $Root $f
-        if (Test-Path $p) { Copy-Item $p (Join-Path $stage $f) -Force }
-        elseif ($f -in @('pyproject.toml', 'setup_env.bat', 'Start.bat')) { Fail "required file missing: $f" }
+        if (Test-Path $p) {
+            $dst = Join-Path $stage $f
+            New-Item -ItemType Directory -Force (Split-Path $dst -Parent) | Out-Null
+            Copy-Item $p $dst -Force
+        }
+        elseif ($f -in @('pyproject.toml', 'installer\_setup_env.bat', 'Start.bat')) { Fail "required file missing: $f" }
     }
 
     # The desktop shell (Tauri/WebView2 window around the local backend), built per architecture by desktop\build.ps1.
@@ -218,7 +222,7 @@ function Stage-Arch([string]$a) {
         New-Item -ItemType Directory -Force (Join-Path $stage 'data\bin\aria2c') | Out-Null
         Copy-Item $aria (Join-Path $stage 'data\bin\aria2c\aria2c.exe') -Force
     } else {
-        Info 'aria2c.exe not in data\bin - setup_env.bat will download it at install time.'
+        Info 'aria2c.exe not in data\bin - _setup_env.bat will download it at install time.'
     }
 
     # uv must match the TARGET arch, so fetch it from PyPI instead of copying the local one.
@@ -229,16 +233,16 @@ function Stage-Arch([string]$a) {
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $Root 'scripts\setup\fetch_pypi_exe.ps1') `
         -Package uv -Platform $plat -Exe 'uv.exe,uvx.exe' -OutDir $uvDir -WorkDir $work *>&1 | Out-Host
     if ($LASTEXITCODE -ne 0 -or -not (Test-Path (Join-Path $uvDir 'uv.exe'))) {
-        Info 'uv not bundled (PyPI fetch failed); setup_env.bat will fetch it at install time.'
+        Info 'uv not bundled (PyPI fetch failed); _setup_env.bat will fetch it at install time.'
         $global:LASTEXITCODE = 0
     }
 
     # guard64.dll (+ the ARM64 injector) from the release's guard.zip, ONLY this arch's files: ~0.7 MB per package
-    # (the whole zip is 30 MB because it also carries both ast-grep builds). setup_env.bat skips its own download when
+    # (the whole zip is 30 MB because it also carries both ast-grep builds). _setup_env.bat skips its own download when
     # vendor\bin\guard.source holds exactly the URL it would fetch, so write that URL. guard.zip is pinned to its own
-    # release (QAI_GUARD_RELEASE_TAG in setup_env.bat), NOT to the qai_appbuilder tag: newer releases do not carry it.
-    $guardTag = (Select-String -Path (Join-Path $Root 'setup_env.bat') -Pattern 'set "QAI_GUARD_RELEASE_TAG=([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
-    if (-not $guardTag) { Fail 'QAI_GUARD_RELEASE_TAG not found in setup_env.bat' }
+    # release (QAI_GUARD_RELEASE_TAG in _setup_env.bat), NOT to the qai_appbuilder tag: newer releases do not carry it.
+    $guardTag = (Select-String -Path (Join-Path $Root 'installer\_setup_env.bat') -Pattern 'set "QAI_GUARD_RELEASE_TAG=([^"]+)"' | Select-Object -First 1).Matches[0].Groups[1].Value
+    if (-not $guardTag) { Fail 'QAI_GUARD_RELEASE_TAG not found in _setup_env.bat' }
     $guardUrl = "https://github.com/qualcomm/qai-appbuilder/releases/download/v$guardTag/guard.zip"
     $guardZip = Join-Path $Root '.build\installer\_dl\guard.zip'
     if (-not (Test-Path $guardZip)) {
@@ -266,7 +270,7 @@ function Stage-Arch([string]$a) {
             $guardOk = $true
         }
     }
-    if (-not $guardOk) { Info 'guard.zip not bundled - setup_env.bat will download it at install time.' }
+    if (-not $guardOk) { Info 'guard.zip not bundled - _setup_env.bat will download it at install time.' }
     # vendor\tiktoken: the two BPE vocab files the token estimator reads offline (~5.3 MB). They are NOT in the
     # tiktoken wheel. Source order: cache -> official URL -> Downloads\vendor-deps.7z (tar.exe). tiktoken names the cache
     # file sha1(url); download_bpe_files.py documents sha256(url), so both names are written (same bytes).

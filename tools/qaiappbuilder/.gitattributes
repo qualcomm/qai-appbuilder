@@ -19,7 +19,7 @@
 
 # cmd.exe parses .bat/.cmd labels (goto / call :label) by seeking through the
 # file; with LF-only line endings it mis-locates labels and jumps into the
-# wrong branch (seen: build_frontend.bat --no-pause landing in :opt_mirror).
+# wrong branch (seen: Setup.bat --no-pause landing in :opt_mirror).
 # Force CRLF on checkout regardless of the user's core.autocrlf setting.
 *.bat text eol=crlf
 *.cmd text eol=crlf

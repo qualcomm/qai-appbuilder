@@ -55,7 +55,7 @@ const builderEnv = {
   error: {
     network: "Network error while downloading. Check the connection, the mirror or the proxy, then retry.",
     disk_space: "Not enough free disk space.",
-    uv_missing: "The uv tool is missing. Run setup_env.bat first.",
+    uv_missing: "The uv tool is missing. Please re-run the installer, or use the Repair shortcut in the Start menu.",
     python_install: "Python 3.10 could not be installed.",
     venv: "The Python 3.10 environment could not be created.",
     deps: "Installing the Python packages failed.",

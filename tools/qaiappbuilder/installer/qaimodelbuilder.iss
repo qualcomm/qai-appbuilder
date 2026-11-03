@@ -7,9 +7,9 @@
 ;   /DAppVersion=3.1.0  /DArch=x64|arm64  /DQairtTag=2.48.40  /DStageDir=<staged tree>  /DOutDir=<output dir>
 ;
 ; What it does: copies the staged tree (pre-built frontend, backend source, uv, aria2c),
-; then runs  setup_env.bat --arch <arch> --no-pause --with-browser --with-astgrep  (no --builder: QAIRT is NOT
+; then runs  _setup_env.bat --arch <arch> --no-pause --with-browser --with-astgrep  (no --builder: QAIRT is NOT
 ; installed here). --with-browser = the search extra (playwright/selectolax/lxml/browserforge) + Chromium;
-; --with-astgrep = ast-grep.exe/sg.exe from the ast-grep-cli PyPI wheel. Both are non-fatal in setup_env.bat.
+; --with-astgrep = ast-grep.exe/sg.exe from the ast-grep-cli PyPI wheel. Both are non-fatal in _setup_env.bat.
 
 #ifndef AppVersion
   #error Pass /DAppVersion=x.y.z
@@ -28,7 +28,7 @@
 #endif
 
 #define AppName "QAI ModelBuilder"
-; Optional components the installer ALWAYS asks setup_env.bat for (setup and the Start-menu repair shortcut use the
+; Optional components the installer ALWAYS asks _setup_env.bat for (setup and the Start-menu repair shortcut use the
 ; same list, so a repair completes them too). Both come from PyPI (uv pip / the ast-grep-cli wheel); Chromium from
 ; `python -m playwright install chromium` (cdn.playwright.dev, or npmmirror with the cn profile). Non-fatal.
 #define SetupComponents "--with-browser --with-astgrep"
@@ -36,7 +36,7 @@
 [Setup]
 ; Inno 6.7 turns RedirectionGuard on by default and child processes inherit it. That blocks traversal of NTFS junctions
 ; made by non-elevated processes, and `uv python install` creates exactly such a junction (cpython-3.13-...-none ->
-; cpython-3.13.17-...), failing with os error 448 "untrusted mount point". setup_env.bat must run unrestricted.
+; cpython-3.13.17-...), failing with os error 448 "untrusted mount point". _setup_env.bat must run unrestricted.
 RedirectionGuard=no
 ; Same AppId for both architectures: one install location, a later install upgrades the earlier one.
 AppId={{6E3B1F52-8C0A-4D57-9B1E-3A7C5D2F8E14}
@@ -62,7 +62,7 @@ OutputBaseFilename=QAIModelBuilder-{#AppVersion}-qairt{#QairtTag}-{#Arch}-setup
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
-; setup_env.bat (without --builder) creates the runtime venv (~0.75 GB, measured) plus download caches
+; _setup_env.bat (without --builder) creates the runtime venv (~0.75 GB, measured) plus download caches
 ; (+ ~0.2 GB vendor wheels on ARM64), + Chromium (~0.4 GB unpacked, in %LOCALAPPDATA%\ms-playwright) and
 ; ast-grep (~0.1 GB). The converter venv (.venv_x64_310) and the QAIRT SDK are NOT installed here.
 ExtraDiskSpaceRequired=3000000000
@@ -86,7 +86,7 @@ Source: "{#StageDir}\*"; DestDir: "{app}\app"; Flags: recursesubdirs createallsu
 Name: "{group}\{#AppName}"; Filename: "{app}\app\desktop\QAIModelBuilder.exe"; WorkingDir: "{app}\app"; Comment: "Open QAI ModelBuilder (desktop window)"
 ; The browser edition stays available through Start.bat in the install folder; it is no longer a shortcut.
 ; Repair goes through cmd.exe for the same reason as Uninstall below: a shortcut straight to the .bat with arguments is not listed.
-Name: "{group}\{cm:RepairName}"; Filename: "{sys}\cmd.exe"; Parameters: "/c """"{app}\app\setup_env.bat"" --arch {#Arch} {#SetupComponents}"""; WorkingDir: "{app}\app"
+Name: "{group}\{cm:RepairName}"; Filename: "{sys}\cmd.exe"; Parameters: "/c """"{app}\app\installer\_setup_env.bat"" --arch {#Arch} {#SetupComponents}"""; WorkingDir: "{app}\app"
 ; Not a direct {uninstallexe} link: the shell hides a Start-menu shortcut that points straight at the registered uninstaller
 ; from the apps list. Going through cmd.exe keeps it listed (verified in an isolated install).
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{sys}\cmd.exe"; Parameters: "/c start """" ""{uninstallexe}"""; Flags: runminimized
@@ -186,7 +186,7 @@ chinesesimp.SdkRemoveFailed=未能完全删除 QAIRT SDK 文件夹:%n%1%n%n其�
 function GetTickCount: DWORD;
   external 'GetTickCount@kernel32.dll stdcall';
 // A WM_TIMER callback keeps the wizard's UI thread free (a polling loop here froze the window: Sleep() does not
-// pump messages, so the bar never moved and the window was "Not responding" until setup_env.bat finished).
+// pump messages, so the bar never moved and the window was "Not responding" until _setup_env.bat finished).
 function SetTimer(hWnd, nIDEvent, uElapse, lpTimerFunc: Longword): Longword;
   external 'SetTimer@user32.dll stdcall';
 function KillTimer(hWnd, nIDEvent: Longword): Longword;
@@ -245,7 +245,7 @@ begin
   Result := '';
   // An older build installed straight into this folder (it holds that build's uninstaller): not upgradable.
   if FileExists(AddBackslash(Dir) + 'unins000.dat') or
-     (FileExists(AddBackslash(Dir) + 'setup_env.bat') and FileExists(AddBackslash(Dir) + 'Start.bat')) then
+     (FileExists(AddBackslash(Dir) + 'installer\_setup_env.bat') and FileExists(AddBackslash(Dir) + 'Start.bat')) then
   begin
     Result := FmtMessage(CustomMessage('OldLayout'), [Dir]);
     Exit;
@@ -491,7 +491,7 @@ begin
   end;
 end;
 
-// Runs setup_env.bat hidden and returns only when it has finished (so Setup cannot jump to the Finished page
+// Runs _setup_env.bat hidden and returns only when it has finished (so Setup cannot jump to the Finished page
 // early). A generated wrapper .bat redirects the output to the log. Exec(ewWaitUntilTerminated) keeps Inno's
 // message loop running while it waits, so the WM_TIMER callback above repaints the wizard.
 procedure RunEnvironmentSetup;
@@ -506,7 +506,7 @@ begin
 
   Cmd := '@echo off' + #13#10 +
          'cd /d "' + ExpandConstant('{app}\app') + '"' + #13#10 +
-         'call "' + ExpandConstant('{app}\app\setup_env.bat') + '" ' + SetupArgs + ' > "' + SetupLog + '" 2>&1' + #13#10 +
+         'call "' + ExpandConstant('{app}\app\installer\_setup_env.bat') + '" ' + SetupArgs + ' > "' + SetupLog + '" 2>&1' + #13#10 +
          'exit /b %ERRORLEVEL%' + #13#10;
   SaveStringToFile(SetupBat, Cmd, False);
 
@@ -547,7 +547,7 @@ end;
 
 procedure CancelButtonClick(CurPageID: Integer; var Cancel, Confirm: Boolean);
 begin
-  // Closing the window mid-install would orphan the hidden setup_env.bat; refuse until it is finished.
+  // Closing the window mid-install would orphan the hidden _setup_env.bat; refuse until it is finished.
   if SetupRunning then Cancel := False;
 end;
 
@@ -681,7 +681,7 @@ begin
   DelBrowser := False;
   EnvDir := ExpandConstant('{localappdata}\QAIModelBuilder\envs');
   DataDir := ExpandConstant('{app}\app\data');
-  // setup_env.bat --with-browser: `playwright install chromium` puts the browser in this per-user cache
+  // _setup_env.bat --with-browser: `playwright install chromium` puts the browser in this per-user cache
   BrowserDir := ExpandConstant('{localappdata}\ms-playwright');
   SdkPath := SdkToOffer;
   if not (DirExists(EnvDir) or DirExists(DataDir) or DirExists(BrowserDir) or (SdkPath <> '')) then Exit;

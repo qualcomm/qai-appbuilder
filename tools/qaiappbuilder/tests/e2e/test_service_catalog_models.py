@@ -30,6 +30,7 @@ Verified NOT to be a problem (kept as regression tests): no path traversal throu
 
 from __future__ import annotations
 
+import json
 import shutil
 import socket
 import subprocess
@@ -210,35 +211,34 @@ def test_delete_model_bad_query_value(api: httpx.Client) -> None:
 
 
 def test_delete_model_deletes_directories_that_merely_start_with_the_id(api: httpx.Client, backend: Backend, models: Path) -> None:
-    """KNOWN GAP (current behaviour, pinned) - SVC-ISS-08: the id is also matched as a PREFIX followed by
-    ``-``, ``_`` or ``.``, so deleting ``qwen3`` removes unrelated models whose names start with it.
-    A name that continues with any other character (``qwen30``) is safe. If this is fixed the unrelated
-    directories survive - update this test then."""
+    """SVC-ISS-08 (fixed): a prefix-matched directory (``qwen3-8b`` for id ``qwen3``) is only deleted when its
+    ``.qai-install.json`` marker proves it was installed under that model_id. These fixtures carry no marker,
+    so only the exact-name directory goes and every unrelated model survives."""
     for n in ("qwen3", "qwen3-8b", "qwen3-vl-8b", "qwen3_x", "qwen3.y", "qwen30", "qwen", "other", "qwen3-8b.bak"):
         _mkdir(models, n)
     (models / "qwen3-file").write_text("a file, not a directory")
     r = _delete(api, "qwen3")
     assert r.status_code == 200
-    assert sorted(Path(p).name for p in r.json()["deleted_install_dirs"]) == ["qwen3", "qwen3-8b", "qwen3-vl-8b", "qwen3.y", "qwen3_x"]
-    assert _models(backend) == ["other", "qwen", "qwen3-8b.bak", "qwen3-file", "qwen30"], \
-        "'.bak' directories, plain files and names that do not continue with a separator are left alone"
+    assert sorted(Path(p).name for p in r.json()["deleted_install_dirs"]) == ["qwen3"]
+    assert _models(backend) == ["other", "qwen", "qwen3-8b", "qwen3-8b.bak", "qwen3-file", "qwen3-vl-8b", "qwen3.y", "qwen30", "qwen3_x"], \
+        "unconfirmed prefix matches, '.bak' directories, plain files and longer names are left alone"
 
 
-def test_delete_a_model_that_is_a_prefix_of_other_models_removes_them_all(api: httpx.Client, backend: Backend, models: Path) -> None:
-    """KNOWN GAP (current behaviour, pinned) - SVC-ISS-08: a concrete case with realistic names."""
+def test_delete_a_model_that_is_a_prefix_of_other_models_keeps_the_others(api: httpx.Client, backend: Backend, models: Path) -> None:
+    """SVC-ISS-08 (fixed): realistic names; only the exact-name directory is removed."""
     for n in ("llama", "llama-2-7b", "llama-3-8b", "llama-3-8b-instruct"):
         _mkdir(models, n)
     assert _delete(api, "llama").status_code == 200
-    assert _models(backend) == []
+    assert _models(backend) == ["llama-2-7b", "llama-3-8b", "llama-3-8b-instruct"]
 
 
-def test_deleting_a_base_model_also_deletes_its_instruct_variant(api: httpx.Client, backend: Backend, models: Path) -> None:
-    """KNOWN GAP (current behaviour, pinned) - SVC-ISS-08."""
+def test_deleting_a_base_model_keeps_its_unconfirmed_instruct_variant(api: httpx.Client, backend: Backend, models: Path) -> None:
+    """SVC-ISS-08 (fixed): the ``-instruct`` directory has no marker tying it to ``llama-3-8b``, so it survives."""
     _mkdir(models, "llama-3-8b")
     _mkdir(models, "llama-3-8b-instruct")
     _mkdir(models, "llama-3-70b")
     assert _delete(api, "llama-3-8b").status_code == 200
-    assert _models(backend) == ["llama-3-70b"]
+    assert _models(backend) == ["llama-3-70b", "llama-3-8b-instruct"]
 
 
 def test_delete_model_without_a_separator_does_not_match_longer_names(api: httpx.Client, backend: Backend, models: Path) -> None:
@@ -332,14 +332,20 @@ def test_install_requires_a_save_path(api: httpx.Client, save_path: str) -> None
     assert r.status_code == 400 and "save_path" in r.json()["details"]["field_errors"]
 
 
-def test_install_rejects_missing_and_non_zip_paths_without_side_effects(api: httpx.Client, backend: Backend, tmp_path: Path) -> None:
-    txt = tmp_path / "x.txt"
-    txt.write_text("x")
-    for path in (tmp_path / "nope.zip", txt):
-        r = _install(api, path)
-        assert r.status_code == 422 and r.json()["code"] == "service_release.install_failed"
-        assert "invalid save_path" in r.json()["message"]
-    assert _models(backend) == [] and txt.exists()
+def test_install_rejects_a_missing_path_without_side_effects(api: httpx.Client, backend: Backend, tmp_path: Path) -> None:
+    r = _install(api, tmp_path / "nope.zip")
+    assert r.status_code == 422 and r.json()["code"] == "service_release.install_failed"
+    assert "invalid save_path" in r.json()["message"]
+    assert _models(backend) == []
+
+
+def test_install_moves_a_raw_non_zip_file_into_the_model_dir(api: httpx.Client, models: Path, tmp_path: Path) -> None:
+    """A non-.zip source is no longer rejected: GGUF models install as a raw file moved into the model dir."""
+    raw = tmp_path / "x.gguf"
+    raw.write_text("x")
+    r = _install(api, raw, install_dir="raw")
+    assert r.status_code == 200, r.text
+    assert (models / "raw" / "x.gguf").read_text() == "x" and not raw.exists()
 
 
 def test_install_corrupt_zip_is_422_and_leaves_nothing(api: httpx.Client, backend: Backend, tmp_path: Path) -> None:
@@ -357,14 +363,14 @@ def test_install_extracts_flattens_and_deletes_the_source_zip(api: httpx.Client,
     body = r.json()
     assert body["ok"] is True and body["model_id"] == "qwen3-8b" and body["zip_deleted"] is True
     assert body["install_path"] == str(models / "qwen3-8b")
-    assert sorted(p.name for p in (models / "qwen3-8b").iterdir()) == ["config.json", "weights"]
+    assert sorted(p.name for p in (models / "qwen3-8b").iterdir()) == [".qai-install.json", "config.json", "weights"]
     assert not z.exists() and not z.parent.exists(), "the empty download folder is removed too"
 
 
 def test_install_keeps_multiple_top_level_entries(api: httpx.Client, models: Path, tmp_path: Path) -> None:
     z = _mkzip(tmp_path / "dl" / "m.zip", {"a/x.txt": "1", "b.txt": "2"})
     assert _install(api, z, install_dir="m").status_code == 200
-    assert sorted(p.name for p in (models / "m").iterdir()) == ["a", "b.txt"]
+    assert sorted(p.name for p in (models / "m").iterdir()) == [".qai-install.json", "a", "b.txt"]
 
 
 def test_install_defaults_the_directory_name_to_the_zip_stem(api: httpx.Client, models: Path, tmp_path: Path) -> None:
@@ -374,13 +380,13 @@ def test_install_defaults_the_directory_name_to_the_zip_stem(api: httpx.Client, 
     assert r.json()["model_id"] == "my-model", "an empty model_id falls back to the directory name"
 
 
-def test_install_writes_the_platform_marker_only_when_a_variant_is_given(api: httpx.Client, models: Path, tmp_path: Path) -> None:
+def test_install_always_writes_the_model_id_marker_and_the_variant_only_when_given(api: httpx.Client, models: Path, tmp_path: Path) -> None:
     z1 = _mkzip(tmp_path / "d1" / "a.zip", {"f.txt": "x"})
     z2 = _mkzip(tmp_path / "d2" / "b.zip", {"f.txt": "x"})
     _install(api, z1, install_dir="with-variant", variant_id="x2-elite")
     _install(api, z2, install_dir="no-variant")
-    assert (models / "with-variant" / ".qai-install.json").read_text() == '{"variant_id": "x2-elite"}'
-    assert not (models / "no-variant" / ".qai-install.json").exists()
+    assert json.loads((models / "with-variant" / ".qai-install.json").read_text()) == {"model_id": "m", "variant_id": "x2-elite"}
+    assert json.loads((models / "no-variant" / ".qai-install.json").read_text()) == {"model_id": "m"}, "model_id only; no variant_id"
 
 
 @pytest.mark.parametrize(

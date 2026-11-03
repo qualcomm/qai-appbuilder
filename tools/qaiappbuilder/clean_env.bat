@@ -3,7 +3,7 @@ REM ---------------------------------------------------------------------
 REM Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 REM SPDX-License-Identifier: BSD-3-Clause
 REM ---------------------------------------------------------------------
-REM clean_env.bat - remove what setup_env.bat installed.
+REM clean_env.bat - remove what _setup_env.bat installed.
 REM
 REM Default (safe): the runtime venv for the selected arch AND the x64 Python 3.10 converter venv
 REM   (.venv_x64_310, created by --builder), install-time downloads
@@ -22,7 +22,7 @@ REM   --all-envs         remove every venv under %LOCALAPPDATA%\QAIModelBuilder\
 REM   --purge-qairt      also remove the QAIRT SDK installed by --builder: C:\Qualcomm\AIStack\QAIRT\<ver>
 REM                      (only the version pinned in scripts\qairt_release.json), the kept SDK zip
 REM                      data\sdk\qairt, the script backup data\sdk\qairt-scripts, data\config\qairt_env.json
-REM   --purge-frontend   also remove what build_frontend.bat installed: portable Node
+REM   --purge-frontend   also remove what Setup.bat --frontend installed: portable Node
 REM                      (%LOCALAPPDATA%\QAIModelBuilder\node), corepack cache, pnpm shim,
 REM                      frontend\node_modules and data\pnpm-virtual-store.
 REM                      frontend\dist (the built UI) is KEPT; add --purge-dist for it.

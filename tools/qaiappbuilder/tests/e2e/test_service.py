@@ -468,7 +468,7 @@ def test_models_scan_detects_format_and_skips_unusable_dirs(
     model_dirs("e2e-no-config", {"model.gguf": b"x"})
     model_dirs("e2e-nested/deep/e2e-inner", {"config.json": "{}", "a.gguf": b"x"})
     got = _models(api)
-    assert got["e2e-qnn"]["format"] == "qnn" and got["e2e-qnn"]["context_length"] == 4096
+    assert got["e2e-qnn"]["format"] == "qnn" and got["e2e-qnn"]["context_length"] is None, "context comes from <install>/config/<name>/, not the model dir"
     assert got["e2e-gguf"]["format"] == "gguf", "suffix match is case-insensitive"
     assert got["e2e-mnn"]["format"] == "mnn"
     assert got["e2e-inner"]["format"] == "gguf", "model dirs are found at any depth"
@@ -488,20 +488,44 @@ def test_models_gguf_wins_over_mnn_and_genie_config_wins_over_config(
     })
     model_dirs("e2e-all-formats", {"config.json": "{}", "a.mnn": b"x", "b.gguf": b"x", "c.bin": b"x", "tokenizer.json": "{}"})
     got = _models(api)
-    assert got["e2e-both"]["context_length"] == 111
+    assert got["e2e-both"]["context_length"] is None, "model-dir configs no longer feed context_length"
     assert got["e2e-both"]["config_path"].endswith("genie_config.json")
     assert got["e2e-all-formats"]["format"] == "gguf"
 
 
 def test_models_context_length_sources(api: httpx.Client, model_dirs: Callable[[str, dict], Path]) -> None:
+    # prompt.json / config.json inside the MODEL dir are no longer a context source (a8f99c8): only the release
+    # ``<install_dir>/config/<name>/`` dir is, covered by test_models_context_length_comes_from_the_release_config_dir.
     model_dirs("e2e-ctx-prompt", {"config.json": "{}", "a.gguf": b"x", "prompt.json": json.dumps({"context_size": 6000})})
     model_dirs("e2e-ctx-none", {"config.json": "{}", "a.gguf": b"x"})
     model_dirs("e2e-ctx-bad", {"config.json": "{not json", "a.gguf": b"x"})
     got = _models(api)
-    assert got["e2e-ctx-prompt"]["context_length"] == 6000
+    assert got["e2e-ctx-prompt"]["context_length"] is None
     assert got["e2e-ctx-none"]["context_length"] is None
     assert got["e2e-ctx-bad"]["context_length"] is None, "a malformed config must not break the listing"
 
+
+def test_models_context_length_comes_from_the_release_config_dir(
+    api: httpx.Client, install: Callable[..., Path], model_dirs: Callable[[str, dict], Path]
+) -> None:
+    """a8f99c8: context_length is read from ``<install_dir>/config/<model name>/`` (matched case-insensitively):
+    QNN from ``config.json`` ``dialog.context.size``, GGUF from ``prompt.json`` ``context_size``."""
+    require_not_installed(api)
+    d = install("e2e-ctx-install", None)
+    cfg = d / "config"
+    (cfg / "E2E-Qnn").mkdir(parents=True)
+    (cfg / "E2E-Qnn" / "config.json").write_text(json.dumps({"dialog": {"context": {"size": 1024}}}), encoding="utf-8")
+    (cfg / "e2e-gguf").mkdir()
+    (cfg / "e2e-gguf" / "config.json").write_text("{}", encoding="utf-8")
+    (cfg / "e2e-gguf" / "prompt.json").write_text(json.dumps({"context_size": 32768}), encoding="utf-8")
+    model_dirs("e2e-qnn", {"config.json": "{}", "w.bin": b"x", "tokenizer.json": "{}"})
+    model_dirs("e2e-gguf", {"config.json": "{}", "a.gguf": b"x"})
+    model_dirs("e2e-orphan", {"config.json": "{}", "a.gguf": b"x"})
+    _set_root(api, str(d))
+    got = _models(api)
+    assert got["e2e-qnn"]["context_length"] == 1024
+    assert got["e2e-gguf"]["context_length"] == 32768
+    assert got["e2e-orphan"]["context_length"] is None, "no matching config/<name>/ dir"
 
 def test_models_listing_ignores_stray_files(api: httpx.Client, backend: Backend, model_dirs: Callable[[str, dict], Path]) -> None:
     model_dirs("e2e-ok", {"config.json": "{}", "a.gguf": b"x"})
@@ -730,7 +754,7 @@ def test_config_search_depth_below_the_root_is_three_levels(api: httpx.Client, i
     assert _cfg(api)["config"]["default_model"] == "L3"
     install("e2e-deeper", {"default_model": "L4"}, exe=False, nested="l1/l2/l3/l4")
     _set_root(api, str(d.parent / "e2e-deeper"))
-    assert _cfg(api)["config"]["default_model"] != "L4", "a file four levels down is not found"
+    assert _cfg(api)["config"].get("default_model") != "L4", "a file four levels down is not found"
 
 
 @pytest.mark.parametrize("kind", ["missing-dir", "relative", "dir-without-config", "a-file"])

@@ -3,7 +3,7 @@ REM ---------------------------------------------------------------------
 REM Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 REM SPDX-License-Identifier: BSD-3-Clause
 REM ---------------------------------------------------------------------
-REM setup_env.bat - lean, network-tolerant environment setup for QAI ModelBuilder.
+REM _setup_env.bat - lean, network-tolerant environment setup for QAI ModelBuilder.
 REM
 REM Differences from Setup.bat (which is left untouched):
 REM   * network preflight + proxy / mirror profile (scripts\setup\net_config.ps1)
@@ -15,10 +15,11 @@ REM     work on the result unchanged:
 REM       venv        %LOCALAPPDATA%\QAIModelBuilder\envs\.venv_<arch>_313
 REM       data        <repo>\data   (uv, aria2c, 7zr, config\host_arch, qai.db ...)
 REM
-REM Usage: setup_env.bat [options]     (setup_env.bat --help for the list)
+REM Usage: installer\_setup_env.bat [options]     (--help for the list)
 
 setlocal EnableExtensions
-set "ROOT_DIR=%~dp0"
+REM This script lives in <root>\installer\ ; the project root is its parent directory.
+for %%I in ("%~dp0..") do set "ROOT_DIR=%%~fI\"
 cd /d "%ROOT_DIR%"
 set "PYTHONPYCACHEPREFIX=%ROOT_DIR%data\caches\pycache"
 REM Python output goes to a log file in the GUI; unbuffered keeps it in order with the uv output.
@@ -362,14 +363,13 @@ if errorlevel 1 goto :fail_builder
 :builder_done
 
 call :timing_summary "OK"
-REM The setup GUI chains build_frontend.bat right after this script and sets QAI_DIST_WARN_OFF=1,
-REM so the "dist is missing" hint would be stale (dist gets built a few seconds later).
+REM QAI_DIST_WARN_OFF=1 suppresses the "dist is missing" hint (for callers that build it afterwards).
 if "%QAI_DIST_WARN_OFF%"=="1" goto :dist_warn_done
 if not exist "frontend\dist\index.html" (
     echo.
     echo [WARN] frontend\dist is missing ^(it is git-ignored, so a fresh clone has no WebUI^).
     echo [WARN] Start.bat will serve the API only and GET / returns 404. Build it once with:
-    echo [WARN]     build_frontend.bat     ^(installs Node.js + pnpm if needed, ~1-2 min^)
+    echo [WARN]     Setup.bat --frontend  ^(portable Node.js + pnpm^), then  Build.bat
 )
 :dist_warn_done
 REM A failed qai_appbuilder install is easy to miss in a long log: repeat it where the user is looking.
@@ -380,7 +380,7 @@ if defined QAB_MISSING (
     echo   Everything else is set up and the Model Builder UI starts normally.
     echo   Cause : its download/install failed ^(see the [WARN] lines above; for x64 the wheel
     echo           comes from github.com^).
-    echo   Fix   : check the proxy / GitHub access, then run setup_env.bat again - it only
+    echo   Fix   : check the proxy / GitHub access, then re-run the installer ^(or the Start-menu Repair shortcut^) - it only
     echo           fetches what is missing.
     echo  ################################################################
 )
@@ -388,7 +388,6 @@ echo.
 echo  ================================================================
 echo      setup_env finished ^(arch=%HOST_ARCH%, profile=%QAI_NET_PROFILE%^)
 echo  ================================================================
-echo   Build the WebUI:  build_frontend.bat   ^(only if frontend\dist is missing^)
 echo   Run the server :  Start.bat
 echo   CLI            :  qai.bat --help
 echo   Python shell   :  Console.bat
@@ -401,7 +400,7 @@ REM ===========================================================================
 REM  Failure exits
 REM ===========================================================================
 :fail_uv
-echo [ERROR] Could not obtain uv. If github.com is blocked try:  setup_env.bat --mirror cn   or   --proxy http://host:port
+echo [ERROR] Could not obtain uv. If github.com is blocked try:  _setup_env.bat --mirror cn   or   --proxy http://host:port
 goto :fail
 :fail_python
 echo [ERROR] uv could not install %PY_SPEC% ^(see the uv message above^).
@@ -410,15 +409,15 @@ goto :fail
 :fail_venv
 echo [ERROR] Could not create the Python virtual environment ^(see the uv message above^).
 echo [ERROR] If it is a download error ^(HTTP 403 / 404 / timeout^): check the network, then try --mirror cn / --mirror official, or --proxy http://host:port
-echo [ERROR] Re-running setup_env.bat is safe: it only fetches what is missing.
+echo [ERROR] Re-running _setup_env.bat is safe: it only fetches what is missing.
 goto :fail
 :fail_vendor
 echo [ERROR] The ARM64 vendor bundle ^(vendor-deps.7z^) could not be downloaded or unpacked, so the install is stopped:
 echo [ERROR] ARM64 needs its wheels ^(aiohttp, cryptography, numpy, qai_appbuilder ...^) and they are not on PyPI.
-echo [ERROR]   * Just run setup_env.bat again ^(a damaged archive is deleted automatically^).
+echo [ERROR]   * Just run _setup_env.bat again ^(a damaged archive is deleted automatically^).
 echo [ERROR]   * Slow or blocked link: use --proxy http://host:port
 echo [ERROR]   * Manual download: %VDEPS_URL%
-echo [ERROR]     save it as  %ROOT_DIR%%DL_DIR%\vendor-deps.7z  and run setup_env.bat again.
+echo [ERROR]     save it as  %ROOT_DIR%%DL_DIR%\vendor-deps.7z  and run _setup_env.bat again.
 goto :fail
 :fail_install
 echo [ERROR] dependency install failed. Re-run is safe ^(resumes^). Try --mirror cn or --proxy http://host:port
@@ -436,7 +435,7 @@ if "%NO_PAUSE%"=="0" pause
 endlocal & exit /b 1
 
 :help
-echo Usage: setup_env.bat [options]
+echo Usage: _setup_env.bat [options]
 echo.
 echo   --arch arm64^|x64       force architecture ^(default: host_arch file, else detect^)
 echo   --proxy URL            HTTP proxy for every download, e.g. http://127.0.0.1:7890
@@ -979,7 +978,7 @@ if /i "%_QMOD%"=="qai_appbuilder" (
     set "QAB_MISSING=1"
     echo [WARN] qai_appbuilder is NOT INSTALLED in %VENV_DIR% ^(NPU inference unavailable; Model Builder UI still starts^).
     echo [WARN] Its install step failed earlier - see the lines above ^(the wheel comes from the GitHub release^).
-    echo [WARN] Fix the network ^(proxy / GitHub access^) and run setup_env.bat again: it only fetches what is missing.
+    echo [WARN] Fix the network ^(proxy / GitHub access^) and run _setup_env.bat again: it only fetches what is missing.
     echo [WARN] Or install the wheel by hand: download %RELEASE_BASE%/%QAI_AB_WHL_FILE%
     echo [WARN]     then  "%UV_EXE%" pip install --python "%VPY%" --no-deps ^<that file^>
     del /f /q "%_QF%" 2>nul

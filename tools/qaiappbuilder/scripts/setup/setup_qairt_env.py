@@ -1170,7 +1170,7 @@ def install_inference_deps(root):
     # which only invokes `--install-inference-deps` — automatically gets
     # the merged Pack deps without any .bat edits. The aggregator is
     # best-effort and never fails this function.
-    # setup_env.bat --builder sets QAI_SKIP_PACK_DEPS=1: there Pack deps are a
+    # _setup_env.bat --builder sets QAI_SKIP_PACK_DEPS=1: there Pack deps are a
     # separate opt-in (--with-apps), so the builder must not pull them in.
     if os.environ.get("QAI_SKIP_PACK_DEPS") == "1":
         _print_info("App Builder Pack deps skipped (QAI_SKIP_PACK_DEPS=1; use --with-apps).")

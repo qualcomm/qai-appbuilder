@@ -55,6 +55,8 @@ from tests.e2e.test_chat_stream import Turn, _set_env, run_turn
 pytestmark = pytest.mark.e2e
 
 DEFAULT_OFF = {"code-assist", "ppt-gen"}
+# The two first-party product skills default to ON for both cloud and local turns (DEFAULT_SKILL_MODES).
+DEFAULT_BOTH = {"model-builder", "model-hub"}
 # Skills that must always ship; guards against a skill being deleted by mistake (the full list is discovered from disk below).
 CORE_SKILLS = {"app-builder", "model-builder", "model-hub", "weather"}
 SKILL_KEYS = {"skill_id", "name", "description", "icon", "tags", "use_for", "skill_path", "npu_optimized", "mode", "enabled", "pinned", "display_name"}
@@ -204,7 +206,8 @@ def test_default_modes_are_cloud_except_the_two_that_must_be_opted_into(sk: tupl
     _ob, cl = sk
     modes = _modes(cl)
     assert {k for k, v in modes.items() if v == "off"} == DEFAULT_OFF
-    assert {k for k, v in modes.items() if v == "cloud"} == set(BUILTIN) - DEFAULT_OFF
+    assert {k for k, v in modes.items() if v == "both"} == DEFAULT_BOTH & set(BUILTIN)
+    assert {k for k, v in modes.items() if v == "cloud"} == set(BUILTIN) - DEFAULT_OFF - DEFAULT_BOTH
     assert {k: s["enabled"] for k, s in _skills(cl).items()} == {k: k not in DEFAULT_OFF for k in BUILTIN}
 
 
