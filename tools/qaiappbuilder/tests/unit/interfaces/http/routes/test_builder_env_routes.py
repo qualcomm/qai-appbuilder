@@ -116,6 +116,8 @@ def test_install_starts_a_job_and_progress_is_visible(tmp_path):
     job = body["job"]
     assert job["job_id"] == job_id and job["overall"] == 100.0 and job["error_code"] == ""
     assert (job["step"], job["done"], job["total"]) == ("deps", 5, 10)
+    assert job["log_file"].startswith("data/audit/builder_env/builder_env_install_")
+    assert not Path(job["log_file"]).is_absolute()
 
 
 def test_install_without_body_uses_defaults(tmp_path):

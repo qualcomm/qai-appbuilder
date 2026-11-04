@@ -75,6 +75,10 @@ async def test_successful_job_reports_progress_and_result(tmp_path):
     assert list(job.log_tail) == ["Installing onnx"]
     assert [s["id"] for s in job.steps] == ["deps", "sdk_download"]
     assert job.finished_at is not None
+    assert job.log_path is not None and job.log_path.is_file()
+    assert job.log_file.startswith("data/audit/builder_env/")
+    captured = job.log_path.read_text(encoding="utf-8")
+    assert '"event": "start"' in captured and "Installing onnx" in captured
 
 
 async def test_overall_never_moves_backwards(tmp_path):
@@ -181,16 +185,20 @@ async def test_new_start_replaces_finished_job(tmp_path):
 
 async def test_non_json_and_oversized_lines_do_not_break_the_reader(tmp_path):
     svc = make(tmp_path, """
-        import json
+        import json, sys
         print("plain text line")
         print("[1, 2, 3]")
-        print("x" * 300000)
+        print("x" * 1_100_000)
+        print("stderr details", file=sys.stderr)
         print(json.dumps({"event": "result", "ok": True}), flush=True)
     """)
     job = svc.start()
     await wait_done(svc)
     assert job.state is InstallState.SUCCEEDED
     assert "plain text line" in job.log_tail and all(len(l) <= 300 for l in job.log_tail)
+    assert job.log_path is not None
+    captured = job.log_path.read_text(encoding="utf-8")
+    assert "stderr details" in captured and "x" * 1_100_000 in captured
 
 
 async def test_unicode_output(tmp_path):
