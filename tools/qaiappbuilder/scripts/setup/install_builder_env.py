@@ -1005,6 +1005,9 @@ def step_deps(ctx: Ctx) -> None:
                 [ctx.venv_python, "-m", "pip", "install", "--progress-bar", "off", *normal],
                 tool_env(ctx, ctx.profile),
             )
+            if rc == _STATUS_ACCESS_VIOLATION and any(l.startswith("Successfully installed") for l in last):
+                rep.log("deps", "warning: pip exited with 0xC0000005 after 'Successfully installed'; treating as success")
+                rc = 0
         if rc != 0:
             raise StepError("deps", "package install failed: " + " | ".join(last[-5:]))
         done_phases += 1
