@@ -465,7 +465,7 @@ def run_with_fallback(
         elif i == 2:
             ctx.rep.log(step, f"still failing on the {first} source - switching to {prof}")
         rc, tail = run_stream(ctx, step, build_cmd(prof), tool_env(ctx, prof))
-        if rc == _STATUS_ACCESS_VIOLATION and tail:
+        if rc == _STATUS_ACCESS_VIOLATION and tail and not any(l.lstrip().lower().startswith("error") for l in tail):
             # Seen on one ARM64 machine: uv finishes its work, then crashes on exit (0xC0000005). The callers
             # verify the result themselves (venv exists, packages import), so do not fail on the exit code alone.
             ctx.rep.log(step, "warning: process exited with 0xC0000005 after producing output; treating as success")
@@ -996,6 +996,15 @@ def step_deps(ctx: Ctx) -> None:
         rc, last = run_with_fallback(
             ctx, "deps", lambda prof: [uv, "pip", "install", "--python", ctx.venv_python, *normal]
         )
+        if rc != 0:
+            # uv could not inspect/run the venv's python (seen: the x64 python.exe exits with 0xC0000005 when uv
+            # queries it on ARM64). pip runs inside that same python and works, so use it instead.
+            rep.log("deps", "uv pip install failed - falling back to 'python -m pip install'")
+            rc, last = run_stream(
+                ctx, "deps",
+                [ctx.venv_python, "-m", "pip", "install", "--progress-bar", "off", *normal],
+                tool_env(ctx, ctx.profile),
+            )
         if rc != 0:
             raise StepError("deps", "package install failed: " + " | ".join(last[-5:]))
         done_phases += 1
