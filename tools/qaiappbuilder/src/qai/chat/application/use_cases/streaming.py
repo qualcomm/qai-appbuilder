@@ -777,6 +777,33 @@ def _build_local_env_facts() -> str:
     )
 
 
+# User-facing notice shown by the main agent when a plain-text reply was cut off
+# by the output cap AND auto-continuation is not (or no longer) going to run.
+# Same wording as ``qai.chat.infrastructure.notice_text.make_truncation_notice``
+# (plain-text variant); duplicated as a literal because the application layer
+# must not import the infrastructure layer.
+_LENGTH_TRUNCATION_NOTICE_ZH: str = (
+    "\n\n⚠️ **生成被截断**（达到单次**输出**的 token 上限，并非历史上下文超限）。"
+    "本轮回复尚未完整结束。"
+    "\n\n可尝试：调高该模型的 `max_tokens`、让回复更简短，或把任务拆小后重试。"
+    "`/compact` 压缩的是输入历史，仅在历史确实过长时才有帮助。"
+)
+
+
+def _defers_length_notice(model_hint: str | None) -> bool:
+    """Whether the main agent takes over the plain-text truncation notice.
+
+    True for ordinary cloud turns (the only ones whose transport honours
+    ``__defer_length_notice__`` and whose truncation the main agent
+    auto-continues). False for local on-device models (never "exhaust"
+    continuation, adapter keeps its notice) and self-contained ``query::``
+    agents (own adapter, own notices).
+    """
+    return not _is_local_model_hint(model_hint) and not _is_self_contained_agent(
+        model_hint
+    )
+
+
 def _is_local_model_hint(model_hint: str | None) -> bool:
     """Return True when ``model_hint`` targets a local (on-device) model.
 
@@ -2060,6 +2087,18 @@ class StreamChatUseCase:
         # provides it.  ``None`` (unit stubs) keeps the direct repository
         # call, byte-for-byte the pre-queue behaviour.
         conversation_write_queue: "Any | None" = None,
+        # ---- Per-family max_tokens override table (Q2, 2026-11) ----
+        # Same process-wide table ``ProviderRoutingLLMStream`` gets from the
+        # DI composition root (loaded once from
+        # ``config/model_family_overrides.json``). ``_apply_sampling_params``
+        # below duplicates ``provider_routing_stream._inject_family_sampling_
+        # defaults`` for the tool_params-carried-sampling-params path (sub-
+        # agent / discussion speaker/social/validator turns), so it needs the
+        # SAME override table or a sub-agent turn keeps getting the stale
+        # hardcoded family default while a main-agent turn gets the retuned
+        # one. ``None`` (legacy callers / unit stubs) keeps this a no-op —
+        # identical to the pre-override behaviour.
+        family_max_tokens_overrides: dict[str, Any] | None = None,
     ) -> None:
         self._conversations = conversations
         self._tabs = tabs
@@ -2089,6 +2128,7 @@ class StreamChatUseCase:
         # are constructed.
         self._chat_stream_broadcaster: Any = None
         self._conversation_write_queue = conversation_write_queue
+        self._family_max_tokens_overrides = family_max_tokens_overrides or {}
         # PR-401c
         self._retry_policy = retry_policy
         self._guardrail_factory = guardrail_factory
@@ -3118,6 +3158,34 @@ class StreamChatUseCase:
                         text_len=len(_partial_text),
                     )
                     break
+                # Retry budget exhausted (or not applicable): the transport
+                # withheld its in-stream "generation truncated" notice because
+                # we asked it to defer (see ``_defers_length_notice``), so show
+                # it now, right before the final END, so the user still learns
+                # the reply was cut off.
+                if (
+                    bool(frame.payload.get("truncated"))
+                    and not state.tc_frames
+                    and _defers_length_notice(request.model_hint)
+                ):
+                    _notice_frame = StreamFrame.chunk(
+                        frame_id=f"r0-trunc-notice-{frame.sequence}",
+                        sequence=frame.sequence,
+                        text=_LENGTH_TRUNCATION_NOTICE_ZH,
+                    )
+                    state.frame_count += 1
+                    await self._publish(
+                        ChatStreamFrameEvent(
+                            tab_id=tab.id,
+                            conversation_id=conv.id,
+                            frame=_notice_frame,
+                        ),
+                    )
+                    yield _notice_frame
+                    state.assistant_text_parts.append(
+                        _LENGTH_TRUNCATION_NOTICE_ZH
+                    )
+                    frame = replace(frame, sequence=frame.sequence + 1)
                 _pub_u = frame.payload.get("usage")
                 if isinstance(_pub_u, dict):
                     _pub_end_usage = self._append_display_usage_fields(
@@ -8735,6 +8803,16 @@ class StreamChatUseCase:
                 messages=dump_messages,
             )
 
+        # The main agent auto-continues a plain-text ``finish_reason=length``
+        # reply (round 0: ``_drain_main_stream``; later rounds:
+        # ``_on_round_end``), so ask the transport NOT to inject the
+        # "generation truncated" notice into the answer; it is shown here only
+        # when the continuation budget is exhausted. Local on-device models and
+        # self-contained agents never exhaust / use this path, so they keep the
+        # adapter-emitted notice. Other ``llm.stream`` callers do not set it.
+        if _defers_length_notice(request.model_hint):
+            extra["__defer_length_notice__"] = True
+
         return LLMStreamRequest(
             conversation_id=conv.id,
             tab_id=tab.id,
@@ -8843,7 +8921,16 @@ class StreamChatUseCase:
         #    cloud payload matches V1.  Best-effort: a profile lookup never
         #    breaks a turn.
         try:
-            profile = get_model_profile(model_hint or "")
+            # 2026-11 (external-skill max_tokens bug, Q2): thread the same
+            # per-family override table the main-agent path gets from the DI
+            # root (``ProviderRoutingLLMStream``), so a sub-agent / discussion
+            # turn whose sampling params arrive via ``tool_params`` gets the
+            # identical, retuned family default instead of the stale
+            # hardcoded one.
+            profile = get_model_profile(
+                model_hint or "",
+                family_overrides=self._family_max_tokens_overrides,
+            )
         except Exception as exc:  # noqa: BLE001 — never crash a turn
             _log.warning("chat.sampling_profile_failed", error=str(exc))
             return
