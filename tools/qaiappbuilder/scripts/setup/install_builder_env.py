@@ -424,6 +424,9 @@ _NETWORK_MARKERS = (
 )
 
 
+_STATUS_ACCESS_VIOLATION = 0xC0000005
+
+
 def is_network_failure(lines: Sequence[str]) -> bool:
     text = " ".join(lines).lower()
     return any(m in text for m in _NETWORK_MARKERS)
@@ -462,6 +465,11 @@ def run_with_fallback(
         elif i == 2:
             ctx.rep.log(step, f"still failing on the {first} source - switching to {prof}")
         rc, tail = run_stream(ctx, step, build_cmd(prof), tool_env(ctx, prof))
+        if rc == _STATUS_ACCESS_VIOLATION and tail:
+            # Seen on one ARM64 machine: uv finishes its work, then crashes on exit (0xC0000005). The callers
+            # verify the result themselves (venv exists, packages import), so do not fail on the exit code alone.
+            ctx.rep.log(step, "warning: process exited with 0xC0000005 after producing output; treating as success")
+            rc = 0
         if rc == 0:
             ctx.profile = prof
             return rc, tail
