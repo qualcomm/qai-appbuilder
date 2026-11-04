@@ -575,6 +575,7 @@ def _build_builder_env_service(container: "Container") -> "BuilderEnvService | N
         python_exe=Path(sys.executable),
         app_root=container.repo_root,
         arch=arch,
+        log_dir=container.data_paths.audit_dir / "builder_env",
     )
 
 

@@ -71,6 +71,8 @@ class JobDto(BaseModel):
     failed_step: str
     started_at: float
     finished_at: float | None
+    # Relative reference only; never expose an absolute host filesystem path.
+    log_file: str
 
 
 class BuilderEnvResponse(BaseModel):
@@ -124,6 +126,7 @@ def _job_dto(job: InstallJob) -> JobDto:
         failed_step=job.failed_step,
         started_at=job.started_at,
         finished_at=job.finished_at,
+        log_file=job.log_file,
     )
 
 

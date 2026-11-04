@@ -118,6 +118,10 @@ class InstallJob:
     exit_code: int | None = None
     # ("ok" | error code, message, step) from the script's ``result`` line, until the exit settles it
     verdict: tuple[str, str, str] | None = None
+    # Persistent raw stdout/stderr capture. ``log_file`` is a safe, relative
+    # reference for API/UI use; the absolute filesystem path remains private.
+    log_path: Path | None = None
+    log_file: str = ""
 
 
 class BuilderEnvService:
@@ -130,12 +134,19 @@ class BuilderEnvService:
         python_exe: Path | str,
         app_root: Path,
         arch: str,
+        log_dir: Path | None = None,
+        log_reference_dir: str = "data/audit/builder_env",
         no_window: Callable[[], int] = no_window_creationflags,
     ) -> None:
         self._script = Path(script_path)
         self._python = str(python_exe)
         self._root = Path(app_root)
         self._arch = arch
+        # Keep complete installer output outside the ephemeral UI tail. The
+        # default makes the service usable in standalone/test contexts; DI
+        # supplies the canonical DataPaths audit directory in production.
+        self._log_dir = Path(log_dir) if log_dir is not None else self._root / "data" / "audit" / "builder_env"
+        self._log_reference_dir = log_reference_dir.strip("/\\")
         self._no_window = no_window
         self._job: InstallJob | None = None
         self._task: asyncio.Task[None] | None = None
@@ -186,7 +197,13 @@ class BuilderEnvService:
             raise ValueError("proxy must start with http://, https:// or socks5://")
         if not self._script.is_file():
             raise ScriptMissingError(f"installer script not found: {self._script}")
-        job = InstallJob(job_id=uuid.uuid4().hex[:12])
+        job_id = uuid.uuid4().hex[:12]
+        filename = f"builder_env_install_{job_id}.log"
+        job = InstallJob(
+            job_id=job_id,
+            log_path=self._log_dir / filename,
+            log_file=f"{self._log_reference_dir}/{filename}",
+        )
         self._job = job
         self._cancel_requested = False
         self._task = asyncio.get_running_loop().create_task(
@@ -227,6 +244,15 @@ class BuilderEnvService:
     # ── the reader ─────────────────────────────────────────────────────────
 
     async def _run(self, job: InstallJob, argv: list[str]) -> None:
+        log_handle = None
+        if job.log_path is not None:
+            try:
+                job.log_path.parent.mkdir(parents=True, exist_ok=True)
+                # Binary append preserves the child stream exactly, including
+                # tracebacks and lines that are too large for the UI tail.
+                log_handle = job.log_path.open("ab")
+            except OSError as exc:
+                _LOGGER.warning("builder_env.log_open_failed", path=str(job.log_path), error=repr(exc))
         try:
             proc = await asyncio.create_subprocess_exec(
                 *argv,
@@ -238,18 +264,55 @@ class BuilderEnvService:
                 creationflags=self._no_window() if sys.platform == "win32" else 0,
             )
         except (OSError, ValueError) as exc:
-            self._finish(job, InstallState.FAILED, code="spawn_failed", message=f"{type(exc).__name__}: {exc}")
+            message = f"{type(exc).__name__}: {exc}"
+            if log_handle is not None:
+                with contextlib.suppress(OSError):
+                    log_handle.write((message + "\n").encode("utf-8", errors="replace"))
+                    log_handle.flush()
+            self._finish(job, InstallState.FAILED, code="spawn_failed", message=message)
+            if log_handle is not None:
+                with contextlib.suppress(OSError):
+                    log_handle.close()
             return
         self._proc = proc
         try:
             if self._cancel_requested:  # cancel() ran before the child existed: honour it now
                 await asyncio.shield(_kill_tree(proc))
             assert proc.stdout is not None
+            # Read chunks rather than ``readline()``: a broken child can emit
+            # a traceback or diagnostic line larger than StreamReader's limit.
+            # Capture every byte first, then reconstruct ordinary JSONL lines
+            # for the UI/status protocol without letting such output kill the
+            # reader task.
+            pending = bytearray()
             while True:
-                raw = await proc.stdout.readline()
+                raw = await proc.stdout.read(64 * 1024)
                 if not raw:
                     break
-                self._ingest(job, raw.decode("utf-8", errors="replace"))
+                if log_handle is not None:
+                    try:
+                        log_handle.write(raw)
+                        log_handle.flush()
+                    except OSError as exc:
+                        _LOGGER.warning("builder_env.log_write_failed", path=str(job.log_path), error=repr(exc))
+                        with contextlib.suppress(OSError):
+                            log_handle.close()
+                        log_handle = None
+                pending.extend(raw)
+                while True:
+                    newline = pending.find(b"\n")
+                    if newline < 0:
+                        break
+                    line = bytes(pending[:newline + 1])
+                    del pending[:newline + 1]
+                    self._ingest(job, line.decode("utf-8", errors="replace"))
+                # Bound protocol-parser memory only. The complete raw record
+                # above is already safely on disk even when it lacks a newline.
+                if len(pending) > _STREAM_LIMIT:
+                    self._ingest(job, bytes(pending).decode("utf-8", errors="replace"))
+                    pending.clear()
+            if pending:
+                self._ingest(job, bytes(pending).decode("utf-8", errors="replace"))
             rc = await proc.wait()
             job.exit_code = rc
             self._conclude(job, rc)
@@ -263,6 +326,9 @@ class BuilderEnvService:
             self._finish(job, InstallState.FAILED, code="internal", message=f"{type(exc).__name__}: {exc}")
         finally:
             self._proc = None
+            if log_handle is not None:
+                with contextlib.suppress(OSError):
+                    log_handle.close()
 
     def _conclude(self, job: InstallJob, rc: int) -> None:
         """Settle the final state once the process has exited (exit_code is known).

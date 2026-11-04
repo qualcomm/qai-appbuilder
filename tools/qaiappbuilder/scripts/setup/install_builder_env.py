@@ -501,21 +501,85 @@ _CHILD: Optional[subprocess.Popen] = None
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
+def _log_spawn_diagnostics(ctx: Ctx, step: str, argv: Sequence[str]) -> None:
+    """One-shot facts about *this* process, to explain a WinError 5 on CreateProcess."""
+    def emit(msg: str) -> None:
+        ctx.rep.log(step, "diag: " + msg[:900])
+
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        emit(f"pid={os.getpid()} ppid={os.getppid()} self={sys.executable} machine={os.environ.get('PROCESSOR_ARCHITECTURE')}")
+        emit("argv0=%r argc=%d argv=%r" % (argv[0], len(argv), list(argv)[1:]))
+        injob = wintypes.BOOL()
+        k32.IsProcessInJob(k32.GetCurrentProcess(), None, ctypes.byref(injob))
+        emit(f"in_job={bool(injob.value)}")
+        # ProcessChildProcessPolicy = 13 ; ProcessSystemCallDisablePolicy = 4 ; ProcessSignaturePolicy = 8
+        for name, cls in (("child_process", 13), ("signature", 8), ("dynamic_code", 2)):
+            buf = ctypes.c_uint32(0)
+            ok = k32.GetProcessMitigationPolicy(k32.GetCurrentProcess(), cls, ctypes.byref(buf), 4)
+            emit(f"mitigation[{name}] ok={bool(ok)} flags={buf.value:#x}")
+        adv = ctypes.WinDLL("advapi32", use_last_error=True)
+        tok = wintypes.HANDLE()
+        if adv.OpenProcessToken(k32.GetCurrentProcess(), 0x8, ctypes.byref(tok)):
+            elev = wintypes.DWORD()
+            ret = wintypes.DWORD()
+            adv.GetTokenInformation(tok, 20, ctypes.byref(elev), 4, ctypes.byref(ret))  # TokenElevation
+            il = ctypes.create_string_buffer(64)
+            adv.GetTokenInformation(tok, 25, il, 64, ctypes.byref(ret))  # TokenIntegrityLevel
+            emit(f"token elevated={elev.value} integrity_raw={il.raw[:16].hex()}")
+        for p in (argv[0], str(Path(argv[0]).parent.parent / "pyvenv.cfg")):
+            try:
+                with open(p, "rb") as fh:
+                    fh.read(16)
+                emit(f"open-read OK: {p}")
+            except OSError as e:
+                emit(f"open-read FAIL: {p}: {e}")
+        emit("handle_inheritable_stdio=%r" % ([os.get_inheritable(i) for i in (0, 1, 2)],))
+    except Exception as e:  # noqa: BLE001 - diagnostics must never mask the real error
+        emit(f"diagnostics failed: {type(e).__name__}: {e}")
+
+
 def run_stream(
     ctx: Ctx, step: str, cmd: Sequence[str], env: dict, *, cwd: Optional[Path] = None
 ) -> tuple[int, list[str]]:
     """Run *cmd*, forward each output line as a ``log`` event, return (rc, last lines)."""
     global _CHILD
     tail: Deque[str] = deque(maxlen=20)
-    proc = subprocess.Popen(
-        [str(c) for c in cmd],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        stdin=subprocess.DEVNULL,
-        env=env,
-        cwd=str(cwd) if cwd else None,
-        creationflags=_NO_WINDOW,
-    )
+    argv = [str(c) for c in cmd]
+    proc = None
+    # A freshly created venv's python.exe can be briefly denied (AV / EDR scan, handle still held):
+    # retry WinError 5 / 32 with a short back-off, and log exactly what was being started so a
+    # persistent failure is diagnosable from the install log.
+    for attempt in range(1, 7):
+        try:
+            proc = subprocess.Popen(
+                argv,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                env=env,
+                cwd=str(cwd) if cwd else None,
+                creationflags=_NO_WINDOW,
+            )
+            break
+        except OSError as exc:
+            exe = Path(argv[0])
+            ctx.rep.log(
+                step,
+                f"cannot start process (attempt {attempt}/6): {type(exc).__name__}: {exc}; "
+                f"exe={argv[0]!r} exists={exe.exists()} is_dir={exe.is_dir()} "
+                f"cwd={str(cwd) if cwd else os.getcwd()!r} argv={argv!r}",
+            )
+            winerr = getattr(exc, "winerror", None)
+            if attempt == 1 and winerr == 5:
+                _log_spawn_diagnostics(ctx, step, argv)
+            if attempt >= 6 or winerr not in (5, 32):
+                raise
+            time.sleep(min(0.5 * 2 ** (attempt - 1), 8.0))
+    assert proc is not None
     _CHILD = proc
     try:
         assert proc.stdout is not None
@@ -807,7 +871,18 @@ def step_python310(ctx: Ctx) -> None:
         lambda prof: [uv, "python", "install", "--no-bin", "--no-registry", PY310_SPEC],
     )
     if rc != 0:
-        raise StepError("python_install", "uv could not install " + PY310_SPEC + ": " + " | ".join(tail[-5:]))
+        # Some uv versions exit non-zero with "... is already installed" (or the first `find` raced with a
+        # half-written install). Whatever the message, the question that matters is: does the interpreter resolve now?
+        said_installed = any("already installed" in line.lower() for line in tail)
+        rc2, _ = run_stream(ctx, "python310", [uv, "python", "find", "--no-project", PY310_SPEC], env)
+        if rc2 == 0:
+            rep.log("python310", "uv python install returned %d but the interpreter resolves - continuing" % rc)
+            rep.end("python310", skipped=True, message="interpreter already installed")
+            return
+        raise StepError(
+            "python_install",
+            "uv could not install " + PY310_SPEC + (" (uv says it is installed, but `uv python find` cannot resolve it)" if said_installed else "") + ": " + " | ".join(tail[-5:]),
+        )
     rep.end("python310")
 
 
@@ -834,8 +909,11 @@ def step_venv(ctx: Ctx) -> None:
         raise StepError("venv", "could not create the 3.10 venv: " + " | ".join(tail[-5:]))
     helper = ctx.root / "scripts" / "setup" / "install_pycache_pth.py"
     if helper.exists():  # best effort: redirect __pycache__ out of the source tree
-        run_stream(ctx, "venv", [ctx.venv_python, helper, "--venv", ctx.venv310, "--repo-root", ctx.root],
-                   os.environ.copy())
+        try:
+            run_stream(ctx, "venv", [ctx.venv_python, helper, "--venv", ctx.venv310, "--repo-root", ctx.root],
+                       {**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
+        except OSError as exc:  # optional step: never fail the install because of it
+            rep.log("venv", f"skipping optional pycache setup: {type(exc).__name__}: {exc}")
     rep.end("venv")
 
 
