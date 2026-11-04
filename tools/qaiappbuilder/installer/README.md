@@ -97,6 +97,7 @@ Test-Path "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"    # True
 
 ```powershell
 .\installer\build_installer.ps1 -Arch x64                # 只出 x64(桌面版也只编译 x64)
+.\installer\build_installer.ps1 -Arch arm64              # 只出 arm64(桌面版也只编译 arm64)
 .\installer\build_installer.ps1 -SkipFrontend            # 沿用现有 frontend\dist,不跑 Build.bat
 .\installer\build_installer.ps1 -SkipDesktop             # 不编译桌面版,直接用 dist\desktop\<arch>\ 里现有的 exe
 .\installer\build_installer.ps1 -KeepStage               # 保留 .build\installer\stage_<arch>\ 便于检查
@@ -104,6 +105,30 @@ Test-Path "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"    # True
 .\installer\build_installer.ps1 -QairtVersion 2.51.40.260930   # 按指定的 QAIRT SDK 版本打包(默认取 scripts\qairt_release.json)
 .\installer\build_installer.ps1 -Help                      # 显示用法后退出(-h 也可以)
 ```
+
+参数可以组合。例如前端没变、只想重打某个架构的包:
+
+```powershell
+.\installer\build_installer.ps1 -Arch arm64 -SkipFrontend   # 重编 arm64 桌面版并打 arm64 包,沿用现有前端
+.\installer\build_installer.ps1 -Arch x64 -SkipFrontend     # 同上,x64
+```
+
+> 改了前端代码或版本号(`build_info.json`、`frontend\package.json`)后,第一次打包**不要**加 `-SkipFrontend`,让它重新构建前端;之后再打另一个架构时才可以加。
+
+### 输出位置
+
+安装包输出到 `dist\installer\`,文件名为:
+
+```
+QAIModelBuilder-<版本>-qairt<A.B.C>-<架构>-setup.exe
+例: QAIModelBuilder-3.2.0-qairt2.48.40-arm64-setup.exe
+    QAIModelBuilder-3.2.0-qairt2.48.40-x64-setup.exe
+```
+
+- `<版本>` 取自 `build_info.json` 的 `version`(可用 `-Version` 覆盖);`<A.B.C>` 取自 `scripts\qairt_release.json` 里 QAIRT 版本的前三段。
+- 桌面版 exe 在 `dist\desktop\<arch>\QAIModelBuilder.exe`,暂存目录在 `.build\installer\stage_<arch>\`(默认打完即删,`-KeepStage` 保留)。
+- `dist\installer\` 里旧版本的安装包不会被清理,发布前注意挑对版本。
+- 包里不含 `aria2c.exe`(`data\bin` 里没有时),安装时 `_setup_env.bat` 会联网下载。
 
 `-SkipDesktop` 用在**没有 Rust / VS C++ 工具的机器**上:把别处编好的 `dist\desktop\<arch>\QAIModelBuilder.exe` 拷过来,再加这个参数。对应的 exe 不存在时,在开始整理文件之前就报错。也可以单独编译桌面版:`.\desktop\build.ps1 -Arch both`(细节见 [`desktop/README.md`](../desktop/README.md))。
 
