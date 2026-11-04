@@ -102,6 +102,10 @@ from qai.chat.adapters.mcp_client import (
     McpServerRegistry,
     McpToolInvocationAdapter,
 )
+from qai.chat.adapters.mcp_manage_tool import (
+    MCP_MANAGE_TOOL_SCHEMA,
+    McpManageToolHandler,
+)
 from qai.chat.adapters.mode_template_repository import (
     SqliteModeTemplateRepository,
 )
@@ -177,6 +181,8 @@ __all__ = [
     "ToolHandler",
     "McpServerRegistry",
     "McpToolInvocationAdapter",
+    "McpManageToolHandler",
+    "MCP_MANAGE_TOOL_SCHEMA",
     "InMemoryStreamAbortRegistry",
     "InMemorySubAgentAbortRegistry",
     # harness control tools (V2 enhancement): todowrite + blocking question

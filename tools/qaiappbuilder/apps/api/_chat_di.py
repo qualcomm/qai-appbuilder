@@ -95,6 +95,8 @@ from qai.chat.adapters import (
     LlmFeatureItemExtractor,
     LlmIntentClassifier,
     LocalModelStreamAdapter,
+    MCP_MANAGE_TOOL_SCHEMA,
+    McpManageToolHandler,
     McpServerRegistry,
     OfflinePromptEnhancer,
     OfflineTitleGenerator,
@@ -2491,6 +2493,21 @@ def build_chat_services(container: Container) -> ChatServices:
         ssl_verify=container.settings.ssl_verify,
         ssl_verify_provider=_ssl_verify_provider,
         edition=getattr(container.settings, "edition", "internal"),
+    )
+    # ``mcp_manage``: lets the main agent install / register / test MCP servers
+    # (incl. a local ``.whl`` -> dedicated venv) with deterministic actions
+    # instead of hand-rolling exec + raw HTTP. Registered HERE (right after the
+    # registry exists, onto the same shared ``tools`` registry the registry
+    # itself registers MCP tools on) so the handler can hold the registry
+    # directly. It never flips the ``chat_mcp_enabled`` gate on its own -- see
+    # ``mcp_manage_tool`` for the security stance.
+    tools.register(
+        "mcp_manage",
+        McpManageToolHandler(
+            registry=mcp_server_registry,
+            data_dir=container.data_paths.root,
+        ).execute,
+        schema=MCP_MANAGE_TOOL_SCHEMA,
     )
 
     # Promote-ready turn-end detection (migration 057): adapt App Builder's
