@@ -863,6 +863,7 @@ def step_python310(ctx: Ctx) -> None:
     uv = need_uv(ctx)
     env = tool_env(ctx, ctx.profile)
     rc, _ = run_stream(ctx, "python310", [uv, "python", "find", "--no-project", PY310_SPEC], env)
+    rep.log("python310", f"uv python find exit code: {rc}")
     if rc == 0:
         rep.end("python310", skipped=True, message="interpreter already installed")
         return
@@ -874,7 +875,9 @@ def step_python310(ctx: Ctx) -> None:
         # Some uv versions exit non-zero with "... is already installed" (or the first `find` raced with a
         # half-written install). Whatever the message, the question that matters is: does the interpreter resolve now?
         said_installed = any("already installed" in line.lower() for line in tail)
+        rep.log("python310", f"uv python install exit code: {rc}")
         rc2, _ = run_stream(ctx, "python310", [uv, "python", "find", "--no-project", PY310_SPEC], env)
+        rep.log("python310", f"uv python find (after install) exit code: {rc2}")
         if rc2 == 0:
             rep.log("python310", "uv python install returned %d but the interpreter resolves - continuing" % rc)
             rep.end("python310", skipped=True, message="interpreter already installed")
