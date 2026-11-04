@@ -424,9 +424,6 @@ _NETWORK_MARKERS = (
 )
 
 
-_STATUS_ACCESS_VIOLATION = 0xC0000005
-
-
 def is_network_failure(lines: Sequence[str]) -> bool:
     text = " ".join(lines).lower()
     return any(m in text for m in _NETWORK_MARKERS)
@@ -465,11 +462,6 @@ def run_with_fallback(
         elif i == 2:
             ctx.rep.log(step, f"still failing on the {first} source - switching to {prof}")
         rc, tail = run_stream(ctx, step, build_cmd(prof), tool_env(ctx, prof))
-        if rc == _STATUS_ACCESS_VIOLATION and tail and not any(l.lstrip().lower().startswith("error") for l in tail):
-            # Seen on one ARM64 machine: uv finishes its work, then crashes on exit (0xC0000005). The callers
-            # verify the result themselves (venv exists, packages import), so do not fail on the exit code alone.
-            ctx.rep.log(step, "warning: process exited with 0xC0000005 after producing output; treating as success")
-            rc = 0
         if rc == 0:
             ctx.profile = prof
             return rc, tail
@@ -862,19 +854,6 @@ def need_uv(ctx: Ctx) -> Path:
     return uv
 
 
-def _printed_python_exists(lines: Sequence[str]) -> bool:
-    """True when *lines* contain a path to a python.exe that exists on disk.
-
-    Seen on one machine: ``uv python find`` printed the right interpreter but its exit code was not 0, so the exit
-    code alone cannot be trusted. The question that matters is whether the interpreter is really there.
-    """
-    for line in lines:
-        s = line.strip().strip('"')
-        if s.lower().endswith("python.exe") and os.path.isabs(s) and os.path.isfile(s):
-            return True
-    return False
-
-
 def step_python310(ctx: Ctx) -> None:
     rep = ctx.rep
     rep.begin("python310", "x86_64 Python 3.10")
@@ -883,9 +862,8 @@ def step_python310(ctx: Ctx) -> None:
         return
     uv = need_uv(ctx)
     env = tool_env(ctx, ctx.profile)
-    rc, out = run_stream(ctx, "python310", [uv, "python", "find", "--no-project", PY310_SPEC], env)
-    rep.log("python310", f"diag: uv python find rc={rc}")
-    if rc == 0 or _printed_python_exists(out):
+    rc, _ = run_stream(ctx, "python310", [uv, "python", "find", "--no-project", PY310_SPEC], env)
+    if rc == 0:
         rep.end("python310", skipped=True, message="interpreter already installed")
         return
     rc, tail = run_with_fallback(
@@ -896,10 +874,8 @@ def step_python310(ctx: Ctx) -> None:
         # Some uv versions exit non-zero with "... is already installed" (or the first `find` raced with a
         # half-written install). Whatever the message, the question that matters is: does the interpreter resolve now?
         said_installed = any("already installed" in line.lower() for line in tail)
-        rep.log("python310", f"diag: uv python install rc={rc}")
-        rc2, out2 = run_stream(ctx, "python310", [uv, "python", "find", "--no-project", PY310_SPEC], env)
-        rep.log("python310", f"diag: uv python find (after install) rc={rc2}")
-        if rc2 == 0 or _printed_python_exists(out2):
+        rc2, _ = run_stream(ctx, "python310", [uv, "python", "find", "--no-project", PY310_SPEC], env)
+        if rc2 == 0:
             rep.log("python310", "uv python install returned %d but the interpreter resolves - continuing" % rc)
             rep.end("python310", skipped=True, message="interpreter already installed")
             return
@@ -996,18 +972,6 @@ def step_deps(ctx: Ctx) -> None:
         rc, last = run_with_fallback(
             ctx, "deps", lambda prof: [uv, "pip", "install", "--python", ctx.venv_python, *normal]
         )
-        if rc != 0:
-            # uv could not inspect/run the venv's python (seen: the x64 python.exe exits with 0xC0000005 when uv
-            # queries it on ARM64). pip runs inside that same python and works, so use it instead.
-            rep.log("deps", "uv pip install failed - falling back to 'python -m pip install'")
-            rc, last = run_stream(
-                ctx, "deps",
-                [ctx.venv_python, "-m", "pip", "install", "--progress-bar", "off", *normal],
-                tool_env(ctx, ctx.profile),
-            )
-            if rc == _STATUS_ACCESS_VIOLATION and any(l.startswith("Successfully installed") for l in last):
-                rep.log("deps", "warning: pip exited with 0xC0000005 after 'Successfully installed'; treating as success")
-                rc = 0
         if rc != 0:
             raise StepError("deps", "package install failed: " + " | ".join(last[-5:]))
         done_phases += 1
