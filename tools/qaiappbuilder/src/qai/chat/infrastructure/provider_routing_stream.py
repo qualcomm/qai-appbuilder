@@ -225,6 +225,8 @@ def _inject_family_sampling_defaults(
     *,
     model_id: str,
     is_local: bool,
+    explicit_params: dict[str, Any] | None = None,
+    family_overrides: dict[str, Any] | None = None,
 ) -> None:
     """Backfill the family **lock / default** sampling params in place.
 
@@ -266,6 +268,16 @@ def _inject_family_sampling_defaults(
     the helper **idempotent**: if the main agent already populated these top
     level keys, re-resolving with the same values is a no-op.
 
+    ``explicit_params`` / ``family_overrides`` (2026-11, external-skill
+    max_tokens bug, Q2): both are forwarded verbatim to
+    :func:`get_model_profile` as the per-model / per-family override layers
+    documented there. ``explicit_params`` is the resolved model's own catalog
+    ``params`` dict (the same one the caller already threads onto
+    ``extra["__model_params__"]`` for ``_build_payload``); ``family_overrides``
+    is the process-wide table loaded once from
+    ``config/model_family_overrides.json``. Neither does any I/O here — this
+    function stays a plain dict-in, dict-mutate-out helper.
+
     Local-model gate (parity with the prior sub-agent ``_is_local_model_hint``
     skip): local on-device models self-manage their generation window, so a
     cloud family ``max_tokens`` default (e.g. 4096) would mis-limit them — skip
@@ -278,7 +290,11 @@ def _inject_family_sampling_defaults(
         return
 
     try:
-        profile = get_model_profile(model_id or "")
+        profile = get_model_profile(
+            model_id or "",
+            explicit_params=explicit_params,
+            family_overrides=family_overrides,
+        )
     except Exception as exc:  # noqa: BLE001 — a profile lookup never breaks a turn
         _log.warning("chat.sampling_profile_failed", error=str(exc))
         return
@@ -312,6 +328,19 @@ def _inject_family_sampling_defaults(
     )
     if resolved_max_tokens is not None and resolved_max_tokens > 0:
         extra["max_tokens"] = resolved_max_tokens
+        # 2026-11: tell the transport how high a one-shot retry may raise
+        # ``max_tokens`` when a tool call is cut off by ``finish_reason=length``
+        # (see ``HttpOpenAICompatibleLLMStream._iter_with_tool_truncation_retry``).
+        # Adapter-internal ``__`` key (never sent on the wire). Absent when no
+        # ceiling is known -> the transport simply does not retry.
+        ceilings: list[int] = []
+        if profile.max_tokens_max is not None and profile.max_tokens_max > 0:
+            ceilings.append(int(profile.max_tokens_max))
+        explicit_max = _as_int(profile.explicit_overrides.get("max"))
+        if explicit_max is not None and explicit_max > 0:
+            ceilings.append(explicit_max)
+        if ceilings:
+            extra["__max_tokens_ceiling__"] = min(ceilings)
 
 
 class ProviderRoutingLLMStream:
@@ -345,6 +374,14 @@ class ProviderRoutingLLMStream:
       ``infrastructure`` module, so it is injected rather than imported).
       ``None`` keeps the legacy behaviour where local models also go through
       the cloud HTTP transport (used by tests that don't wire local routing).
+    * ``family_max_tokens_overrides`` — optional per-family ``max_tokens``
+      override table (keyed by family name from
+      ``qai.chat.domain.model_profiles``), loaded once at startup from
+      ``config/model_family_overrides.json`` by the DI composition root.
+      Forwarded to :func:`get_model_profile` on every routed request so an
+      operator can retune (or, via an explicit ``null`` default, disable)
+      a family's ``max_tokens`` default/ceiling without a code change
+      (2026-11, external-skill max_tokens bug).
 
     Satisfies :class:`LLMStreamPort`.
     """
@@ -362,6 +399,7 @@ class ProviderRoutingLLMStream:
         "_local_stream_factory",
         "_local_cache",
         "_query_stream_factory",
+        "_family_max_tokens_overrides",
     )
 
     def __init__(
@@ -379,6 +417,7 @@ class ProviderRoutingLLMStream:
         | None = None,
         query_stream_factory: Callable[[str], LLMStreamPort | None]
         | None = None,
+        family_max_tokens_overrides: dict[str, Any] | None = None,
     ) -> None:
         self._default = default_stream
         self._resolver = model_resolver
@@ -405,6 +444,13 @@ class ProviderRoutingLLMStream:
         self._runtime_limit_store = runtime_limit_store
         self._local_stream_factory = local_stream_factory
         self._query_stream_factory = query_stream_factory
+        # 2026-11 (external-skill max_tokens bug, Q2): process-wide,
+        # read-once-at-startup family-name → {"max_tokens_default"/"max_tokens_max"}
+        # override table, loaded from config/model_family_overrides.json by
+        # the DI composition root (_chat_di.py). Plain dict — unlike
+        # ``runtime_limit_store`` this never mutates at runtime, so no
+        # Port/lock abstraction is needed.
+        self._family_max_tokens_overrides = family_max_tokens_overrides or {}
         # ``(base_url, api_key, model_id) -> HttpOpenAICompatibleLLMStream``.
         self._cache: dict[
             tuple[str, str, str], HttpOpenAICompatibleLLMStream
@@ -602,6 +648,8 @@ class ProviderRoutingLLMStream:
             merged_extra,
             model_id=target_model_hint or "",
             is_local=bool(resolved.is_local),
+            explicit_params=model_params,
+            family_overrides=self._family_max_tokens_overrides,
         )
         effective_request = LLMStreamRequest(
             conversation_id=request.conversation_id,

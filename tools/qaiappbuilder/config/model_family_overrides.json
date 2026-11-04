@@ -1,0 +1,23 @@
+{
+  "_comment": "Per-family max_tokens override table (external-skill max_tokens bug, 2026-11). Loaded once at process start by apps/api/_chat_di.py::_load_family_max_tokens_overrides and forwarded into qai.chat.domain.model_profiles.get_model_profile(family_overrides=...). Hand-edit and restart the service to apply -- no UI, no code change, no redeploy needed. Keys are family NAMES from qai/chat/domain/model_profiles.py's _MODEL_FAMILIES table (not model ids): claude_opus, claude_sonnet, claude_haiku, gpt_5, gpt_4o, gpt_4_legacy, doubao, gemini, deepseek_reasoner, deepseek, qwen_reasoner, qwen, glm, unknown. A family entry may set max_tokens_default and/or max_tokens_max; omit a key to keep the hardcoded value, or set max_tokens_default to null to deliberately stop sending max_tokens for that family at all (Q1's 'let the model decide' experiment -- verify your vendor's own server-side default before relying on this; e.g. DeepSeek's documented default when the param is omitted is 4096, so omitting does NOT raise DeepSeek's effective ceiling).",
+  "qwen": {
+    "max_tokens_default": 32768,
+    "max_tokens_max": 131072
+  },
+  "qwen_reasoner": {
+    "max_tokens_default": 32768,
+    "max_tokens_max": 131072
+  },
+  "deepseek": {
+    "max_tokens_default": 32768,
+    "max_tokens_max": 65536
+  },
+  "deepseek_reasoner": {
+    "max_tokens_default": 32768,
+    "max_tokens_max": 65536
+  },
+  "glm": {
+    "max_tokens_default": 32768,
+    "max_tokens_max": 131072
+  }
+}

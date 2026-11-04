@@ -64,6 +64,7 @@ is the canonical location for adapter wiring.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1306,6 +1307,12 @@ def build_chat_services(container: Container) -> ChatServices:
         container=container,
         runtime_limit_store=runtime_limit_store,
     )
+    # ----- Per-family max_tokens override table (Q2, 2026-11) -----
+    # Read once here (static config, not a mutable runtime cache) from
+    # config/model_family_overrides.json and threaded into the routing
+    # wrapper below. See ``_load_family_max_tokens_overrides`` for the file
+    # format / robustness contract.
+    family_max_tokens_overrides = _load_family_max_tokens_overrides(container)
     tools = RegistryBackedToolInvocation()
     abort_registry = InMemoryStreamAbortRegistry()
     chat_stream_broadcaster = ChatStreamBroadcaster()
@@ -1440,6 +1447,7 @@ def build_chat_services(container: Container) -> ChatServices:
         runtime_limit_store=runtime_limit_store,
         local_stream_factory=_local_stream_factory,
         query_stream_factory=_query_stream_factory,
+        family_max_tokens_overrides=family_max_tokens_overrides,
         # Forward the configured cloud stream base timeout so per-provider
         # transports built by ``_transport_for`` use the SAME (long, idle-gap)
         # read window as ``default_llm`` instead of falling back to the
@@ -2531,6 +2539,11 @@ def build_chat_services(container: Container) -> ChatServices:
         prompt_snapshot_store=prompt_snapshot_store,
         provider_cache_registry=provider_cache_registry,
         context_windows=_provider_lookup,
+        # Same per-family override table threaded into ``ProviderRoutingLLMStream``
+        # above, so ``_apply_sampling_params``'s tool_params-driven path (sub-
+        # agent / discussion speaker/social/validator) gets the identical,
+        # retuned family default (Q2, 2026-11).
+        family_max_tokens_overrides=family_max_tokens_overrides,
         budget_tracker=enforcement_tracker,
         budget_raise_pct=int(
             getattr(chat_settings, "chat_budget_raise_pct", 20)
@@ -3208,6 +3221,43 @@ def _build_llm_stream(
 # infrastructure module's private ``_DEFAULT_TIMEOUT_SECONDS``) so the wiring
 # layer does not reach into another module's private constants.
 _CLOUD_STREAM_TIMEOUT_FALLBACK: float = 120.0
+
+
+def _load_family_max_tokens_overrides(container: Container) -> dict[str, Any]:
+    """Load the per-family ``max_tokens`` override table (Q2, 2026-11).
+
+    Reads ``<data.config_dir>/model_family_overrides.json`` (default
+    ``config/model_family_overrides.json``), e.g.::
+
+        {"qwen": {"max_tokens_default": 16384, "max_tokens_max": 32768},
+         "deepseek": {"max_tokens_default": 8192, "max_tokens_max": 16384}}
+
+    A family's ``max_tokens_default`` may be set to ``null`` to explicitly
+    stop sending ``max_tokens`` for that family (Q1's "let the model decide"
+    experiment), without any code change.
+
+    Mirrors ``Settings._legacy_config_read``'s robustness contract: a
+    missing, unreadable, or malformed file (or a non-dict JSON root) never
+    raises — it silently yields ``{}``, which makes every family fall back
+    to its hardcoded default in ``qai.chat.domain.model_profiles``. Read
+    ONCE here at process start (this is static config, not a mutable
+    runtime-learned cache, so — unlike ``RuntimeLimitStorePort`` — no
+    Port/lock abstraction is needed, just a plain dict threaded into
+    :class:`ProviderRoutingLLMStream`).
+    """
+    config_dir = getattr(getattr(container.settings, "data", None), "config_dir", None)
+    if not isinstance(config_dir, Path):
+        config_dir = Path("config")
+    path = config_dir / "model_family_overrides.json"
+    try:
+        if path.is_file():
+            with path.open("r", encoding="utf-8") as fh:
+                data = json.load(fh)
+            if isinstance(data, dict):
+                return data
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {}
 
 
 def _resolve_cloud_stream_timeout(chat_settings: Any) -> float:

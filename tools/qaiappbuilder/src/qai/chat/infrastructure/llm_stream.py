@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import errno
 import json
 import re
@@ -1081,7 +1082,62 @@ class HttpOpenAICompatibleLLMStream:
         request: LLMStreamRequest,
     ) -> AsyncIterator[StreamFrame]:
         """Open the upstream stream and yield :class:`StreamFrame` values."""
-        return self._iter(request)
+        return self._iter_with_tool_truncation_retry(request)
+
+    async def _iter_with_tool_truncation_retry(
+        self, request: LLMStreamRequest
+    ) -> AsyncIterator[StreamFrame]:
+        """Run :meth:`_iter`, retrying ONCE when a tool call is cut by ``length``.
+
+        2026-11 (external-skill max_tokens bug): when the model's output hits
+        ``max_tokens`` in the middle of a tool call's JSON arguments (typically
+        a large ``write``), the incomplete call is unusable and used to be
+        discarded with only a "truncated" notice, forcing the user to re-ask.
+        Here we instead re-issue the SAME request once with a larger
+        ``max_tokens`` (2x, capped at the family ceiling the routing layer
+        passes as ``extra["__max_tokens_ceiling__"]``).
+
+        Mechanics: ``_iter`` is given a per-call ``probe`` dict through the
+        adapter-internal ``__tool_trunc_probe__`` key. When (and only when) a
+        retry is possible, ``_finalize_sse`` records the truncation in the
+        probe and withholds the notice + END frame instead of emitting them;
+        this wrapper then runs the second attempt (no probe, so a second
+        truncation falls back to the old notice) with frame sequence numbers
+        continuing from the first. When no retry is possible (no ceiling
+        known, already at the ceiling, no max_tokens sent) the probe is never
+        armed and behaviour is byte-for-byte what it was before.
+
+        Known cosmetic trade-offs: text the model streamed before the
+        truncated call ("lead-in") was already shown and may be repeated by
+        the retry; the first attempt's partial "generating arguments" card is
+        not cancelled (it was equally orphaned before this change).
+        """
+        probe: dict[str, Any] = {}
+        first_extra = dict(request.extra or {})
+        first_extra["__tool_trunc_probe__"] = probe
+        last_sequence = -1
+        async for frame in self._iter(
+            dataclasses.replace(request, extra=first_extra)
+        ):
+            last_sequence = max(last_sequence, frame.sequence)
+            yield frame
+        retry_max_tokens = probe.get("retry_max_tokens")
+        if not (probe.get("tool_calls_truncated") and retry_max_tokens):
+            return
+        _log.warning(
+            "chat.llm_stream.tool_calls_truncated_retry",
+            model_id=probe.get("model_id"),
+            tool_names=probe.get("tool_names"),
+            max_tokens_before=probe.get("max_tokens_sent"),
+            max_tokens_retry=retry_max_tokens,
+        )
+        retry_extra = dict(request.extra or {})
+        retry_extra["max_tokens"] = int(retry_max_tokens)
+        retry_extra["__start_sequence__"] = last_sequence + 1
+        async for frame in self._iter(
+            dataclasses.replace(request, extra=retry_extra)
+        ):
+            yield frame
 
     # ------------------------------------------------------------------
     # H-3 — runtime max_tokens learning
@@ -1125,7 +1181,26 @@ class HttpOpenAICompatibleLLMStream:
     async def _iter(
         self, request: LLMStreamRequest
     ) -> AsyncIterator[StreamFrame]:
-        sequence = 0
+        # Retry attempt (see ``_iter_with_tool_truncation_retry``): continue the
+        # frame sequence from where the first attempt stopped.
+        _start_seq = (request.extra or {}).get("__start_sequence__")
+        sequence = (
+            _start_seq
+            if isinstance(_start_seq, int) and not isinstance(_start_seq, bool)
+            else 0
+        )
+        _trunc_probe = (request.extra or {}).get("__tool_trunc_probe__")
+        if not isinstance(_trunc_probe, dict):
+            _trunc_probe = None
+        # Opt-in (main agent only): the caller auto-continues a plain-text
+        # ``finish_reason=length`` reply, so the "generation truncated" notice
+        # must not be injected into the answer mid-stream; the caller shows it
+        # itself if its continuation budget runs out. Every other caller
+        # (sub-agents, discussion, summaries ...) leaves this unset and keeps
+        # getting the notice as their only truncation signal.
+        _defer_length_notice = bool(
+            (request.extra or {}).get("__defer_length_notice__")
+        )
         if self._base_url is None:
             yield StreamFrame.chunk(
                 frame_id=self._ids.new_id(),
@@ -1186,6 +1261,27 @@ class HttpOpenAICompatibleLLMStream:
         payload = self._build_payload(request)
         headers = self._build_headers(traffic_class=traffic_class)
         model_id = payload.get("model", self._model) or self._model
+
+        # Arm the tool-call-truncation retry only when a retry could actually
+        # help: tools were offered, a max_tokens was sent, and the routing
+        # layer told us a strictly higher ceiling exists.
+        _armed_probe: dict[str, Any] | None = None
+        if _trunc_probe is not None:
+            _sent = payload.get("max_tokens")
+            _ceiling = (request.extra or {}).get("__max_tokens_ceiling__")
+            if (
+                payload.get("tools")
+                and isinstance(_sent, int)
+                and not isinstance(_sent, bool)
+                and _sent > 0
+                and isinstance(_ceiling, int)
+                and not isinstance(_ceiling, bool)
+                and _ceiling > _sent
+            ):
+                _trunc_probe["retry_max_tokens"] = min(_sent * 2, _ceiling)
+                _trunc_probe["max_tokens_sent"] = _sent
+                _trunc_probe["model_id"] = model_id
+                _armed_probe = _trunc_probe
 
         # D5 (V1 chat_handler.py:1668-1681): track whether any content has
         # already streamed to the client. If the upstream closes a chunked
@@ -1380,6 +1476,8 @@ class HttpOpenAICompatibleLLMStream:
                         # pause (see _CONTENT_STALL_* docs); a no-tools turn is
                         # plain text and held to the tight budget.
                         has_tools=bool(payload.get("tools")),
+                        trunc_probe=_armed_probe,
+                        defer_length_notice=_defer_length_notice,
                     ):
                         if frame.frame_type == StreamFrameType.CHUNK:
                             emitted_content = True
@@ -1588,6 +1686,8 @@ class HttpOpenAICompatibleLLMStream:
         request_messages: list[dict[str, Any]] | None = None,
         model_id: str | None = None,
         has_tools: bool = False,
+        trunc_probe: dict[str, Any] | None = None,
+        defer_length_notice: bool = False,
     ) -> AsyncIterator[StreamFrame]:
         sequence = start_sequence
         accumulated_tool_calls: dict[int, dict[str, Any]] = {}
@@ -1962,6 +2062,8 @@ class HttpOpenAICompatibleLLMStream:
             request_messages=request_messages,
             model_id=model_id,
             started_ts=progress_started_ts,
+            trunc_probe=trunc_probe,
+            defer_length_notice=defer_length_notice,
         ):
             yield frame
 
@@ -1978,6 +2080,8 @@ class HttpOpenAICompatibleLLMStream:
         request_messages: list[dict[str, Any]] | None = None,
         model_id: str | None = None,
         started_ts: dict[int, float] | None = None,
+        trunc_probe: dict[str, Any] | None = None,
+        defer_length_notice: bool = False,
     ) -> AsyncIterator[StreamFrame]:
         """Terminal handling shared by the [DONE] and clean-close exits.
 
@@ -2022,6 +2126,13 @@ class HttpOpenAICompatibleLLMStream:
                     num_calls=len(accumulated_tool_calls),
                     tool_names=names,
                 )
+                if trunc_probe is not None:
+                    # Retry armed (see ``_iter_with_tool_truncation_retry``):
+                    # record the truncation and withhold the notice + END; the
+                    # wrapper re-issues the request with a larger max_tokens.
+                    trunc_probe["tool_calls_truncated"] = True
+                    trunc_probe["tool_names"] = names
+                    return
                 yield StreamFrame.chunk(
                     frame_id=self._ids.new_id(),
                     sequence=sequence,
@@ -2051,12 +2162,15 @@ class HttpOpenAICompatibleLLMStream:
             # (V1 chat_handler.py:1618-1648).  Unknown finish_reasons are
             # silent (forward compatibility).
             if last_finish_reason == "length":
-                yield StreamFrame.chunk(
-                    frame_id=self._ids.new_id(),
-                    sequence=sequence,
-                    text=make_truncation_notice(tool_name=None, language="zh"),
-                )
-                sequence += 1
+                if not defer_length_notice:
+                    yield StreamFrame.chunk(
+                        frame_id=self._ids.new_id(),
+                        sequence=sequence,
+                        text=make_truncation_notice(tool_name=None, language="zh"),
+                    )
+                    sequence += 1
+                # Still counts as "handled" when deferred, so the empty-response
+                # health check below does not mis-fire on a text-less truncation.
                 emitted_notice = True
                 plain_text_length_truncated = True
             elif last_finish_reason == "content_filter":

@@ -168,11 +168,19 @@ _MODEL_FAMILIES: list[dict[str, Any]] = [
         "top_p_fixed": None,
     },
     # ── 9. DeepSeek Reasoner (R1) — temp/top_p locked ────────────────────────
+    # 2026-11 (external-skill max_tokens bug): 4096/8192 were sized for the
+    # older DeepSeek-R1 generation and are far below DeepSeek-V3.x's real
+    # output ceiling — a single large tool-call argument (e.g. a long
+    # ``write``) blows past 4096 and gets discarded as a truncated tool call
+    # (see ``llm_stream.py::chat.llm_stream.tool_calls_truncated``). Raised to
+    # a safer baseline; tune further via ``config/model_family_overrides.json``
+    # (``get_model_profile``'s ``family_overrides`` param) without a code
+    # change once the real qai-service/vendor ceiling is confirmed.
     {
         "name": "deepseek_reasoner",
         "pattern": re.compile(r"deepseek.*reason|deepseek.*r1", re.IGNORECASE),
-        "max_tokens_max": 8192,
-        "max_tokens_default": 4096,
+        "max_tokens_max": 65536,
+        "max_tokens_default": 32768,
         "tool_result_max_chars": 25_000,
         "supports_thinking": True,
         "temperature_fixed": 1.0,
@@ -182,19 +190,20 @@ _MODEL_FAMILIES: list[dict[str, Any]] = [
     {
         "name": "deepseek",
         "pattern": re.compile(r"deepseek", re.IGNORECASE),
-        "max_tokens_max": 8192,
-        "max_tokens_default": 4096,
+        "max_tokens_max": 65536,
+        "max_tokens_default": 32768,
         "tool_result_max_chars": 25_000,
         "supports_thinking": True,
         "temperature_fixed": None,
         "top_p_fixed": None,
     },
     # ── 11. Qwen Reasoner (QwQ/QvQ) — temp/top_p locked ─────────────────────
+    # Same 2026-11 rationale as deepseek_reasoner above.
     {
         "name": "qwen_reasoner",
         "pattern": re.compile(r"qwq|qvq|qwen.*think", re.IGNORECASE),
-        "max_tokens_max": 8192,
-        "max_tokens_default": 4096,
+        "max_tokens_max": 131072,
+        "max_tokens_default": 32768,
         "tool_result_max_chars": 25_000,
         "supports_thinking": True,
         "temperature_fixed": 1.0,
@@ -204,10 +213,26 @@ _MODEL_FAMILIES: list[dict[str, Any]] = [
     {
         "name": "qwen",
         "pattern": re.compile(r"qwen", re.IGNORECASE),
-        "max_tokens_max": 8192,
-        "max_tokens_default": 4096,
+        "max_tokens_max": 131072,
+        "max_tokens_default": 32768,
         "tool_result_max_chars": 25_000,
         "supports_thinking": False,
+        "temperature_fixed": None,
+        "top_p_fixed": None,
+    },
+    # ── GLM / ChatGLM / Zhipu ─────────────────────────────────────────────────
+    # 2026-11: previously unlisted, so every glm* model id silently fell
+    # through to "unknown" (max_tokens omitted entirely). That happened to
+    # avoid the 4096-default bug by accident, not by design — give it an
+    # explicit, deliberate, tunable default instead of leaving it to whatever
+    # the "unknown" fallback (or a future unrelated regex) does.
+    {
+        "name": "glm",
+        "pattern": re.compile(r"glm|chatglm|zhipu", re.IGNORECASE),
+        "max_tokens_max": 131072,
+        "max_tokens_default": 32768,
+        "tool_result_max_chars": 25_000,
+        "supports_thinking": True,
         "temperature_fixed": None,
         "top_p_fixed": None,
     },
@@ -343,13 +368,24 @@ class ModelProfile:
     ) -> int | None:
         """Compute final max_tokens to send to API.
 
-        Priority: user_value > explicit_default > family default > None.
-        All values clamped to min(runtime_learned, config_max, family_max,
-        context).  ``runtime_max_tokens_limit`` is the runtime-learned
-        ceiling (previously read from the in-domain global cache; now
-        passed in by the application layer from
+        Priority: user_value > explicit_default (caller-supplied) >
+        explicit_overrides["default"] (per-model config, e.g. cloud-catalog
+        ``params.max_tokens.default``) > family default > None.  All values
+        clamped to min(runtime_learned, config_max, family_max, context).
+        ``runtime_max_tokens_limit`` is the runtime-learned ceiling
+        (previously read from the in-domain global cache; now passed in by
+        the application layer from
         :class:`~qai.chat.application.ports.RuntimeLimitStorePort` so this
         method stays pure).  Returns None if no value should be sent.
+
+        2026-11 (external-skill max_tokens bug, Q2 follow-up): prior to this
+        fix, ``explicit_overrides["default"]`` was accepted by
+        :func:`get_model_profile` into the profile but never consulted
+        here — a per-model config ``default`` could never actually raise
+        the outgoing value above the family default it was meant to
+        override (only ``explicit_overrides["max"]``, a ceiling, had any
+        effect). This reads it as a genuine 3rd-tier default, matching the
+        four-layer priority this module's docstring already documents.
         """
         caps: list[int] = []
         if runtime_max_tokens_limit is not None and runtime_max_tokens_limit > 0:
@@ -374,6 +410,14 @@ class ModelProfile:
 
         if explicit_default is not None and explicit_default > 0:
             return _clamp(explicit_default)
+
+        if "default" in self.explicit_overrides:
+            try:
+                config_default = int(self.explicit_overrides["default"])
+            except (TypeError, ValueError):
+                config_default = None
+            if config_default is not None and config_default > 0:
+                return _clamp(config_default)
 
         if self.max_tokens_default is not None and self.max_tokens_default > 0:
             return _clamp(self.max_tokens_default)
@@ -472,6 +516,7 @@ def get_model_profile(
     model_id: str,
     context_length: int = 0,
     explicit_params: dict[str, Any] | None = None,
+    family_overrides: dict[str, Any] | None = None,
 ) -> ModelProfile:
     """Get the resolved runtime profile for a model.
 
@@ -480,6 +525,19 @@ def get_model_profile(
         context_length: Context window size from model catalog.
         explicit_params: Override params from model config JSON,
             e.g. {"supported": true, "max": 131072, "default": 16384}.
+        family_overrides: Optional per-FAMILY override table (keyed by
+            family name, e.g. ``"qwen"``/``"deepseek"``), e.g.
+            ``{"qwen": {"max_tokens_default": 16384, "max_tokens_max": 32768}}``.
+            Lets an operator retune a whole family's ``max_tokens`` ceiling
+            without a code change (2026-11, external-skill max_tokens bug,
+            Q2: loaded from ``config/model_family_overrides.json`` by the
+            adapter layer and threaded in here — this function stays a pure
+            dict merge, no I/O). Presence of the key (not truthiness) is
+            what counts, so a family can be explicitly set to
+            ``{"max_tokens_default": None}`` to deliberately stop sending
+            ``max_tokens`` for that family (Q1's "let the model decide"
+            option), distinct from simply omitting the family (which keeps
+            the hardcoded default below).
 
     Returns:
         ModelProfile with all override layers merged.
@@ -492,12 +550,24 @@ def get_model_profile(
         if key in explicit_params:
             overrides[key] = explicit_params[key]
 
+    fam_override = (family_overrides or {}).get(family["name"]) or {}
+    max_tokens_max = (
+        fam_override["max_tokens_max"]
+        if "max_tokens_max" in fam_override
+        else family["max_tokens_max"]
+    )
+    max_tokens_default = (
+        fam_override["max_tokens_default"]
+        if "max_tokens_default" in fam_override
+        else family["max_tokens_default"]
+    )
+
     return ModelProfile(
         model_id=model_id,
         family_name=family["name"],
         context_length=context_length or 0,
-        max_tokens_max=family["max_tokens_max"],
-        max_tokens_default=family["max_tokens_default"],
+        max_tokens_max=max_tokens_max,
+        max_tokens_default=max_tokens_default,
         tool_result_max_chars_base=family["tool_result_max_chars"],
         temperature_fixed=family.get("temperature_fixed"),
         top_p_fixed=family.get("top_p_fixed"),
