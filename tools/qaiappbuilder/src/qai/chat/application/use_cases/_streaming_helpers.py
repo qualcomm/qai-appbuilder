@@ -40,6 +40,33 @@ from qai.platform.logging import get_logger
 
 _log = get_logger(__name__)
 
+def failed_invocation_text(invocation: Any) -> str | None:
+    """Text to show for a tool call that FAILED without producing any output.
+
+    A tool handler that raises is wrapped by ``RegistryBackedToolInvocation`` as
+    ``ToolInvocationResult(ok=False, result=None, error_message=...)``. Callers
+    that read only ``.result`` then stringify ``None`` into the literal ``"None"``:
+    the model is told a failed call "returned None / empty" and the real reason is
+    thrown away, and -- because errors are recognised by the ``[tool_error]`` text
+    prefix (see ``build_tool_call_message``) -- the UI card is marked as a success.
+
+    Returns ``"[tool_error] <reason>"`` for exactly that situation (not ok AND no
+    result text), else ``None`` (leave the result alone: successful calls, and
+    failed calls that did return explanatory text).
+    """
+    if getattr(invocation, "ok", True):
+        return None
+    result = getattr(invocation, "result", None)
+    if result is not None and not (isinstance(result, str) and not result.strip()):
+        return None
+    reason = (
+        getattr(invocation, "error_message", None)
+        or getattr(invocation, "error_code", None)
+        or "tool failed with no message"
+    )
+    return f"[tool_error] {reason}"
+
+
 # Per-conversation turn-count warning thresholds (V1 parity).  Mirrors
 # ``backend/main.py:1326-1344`` (``_compute_webui_turn_warning``): the
 # threshold sequence is ``30, 40, 50, 60, ...``.

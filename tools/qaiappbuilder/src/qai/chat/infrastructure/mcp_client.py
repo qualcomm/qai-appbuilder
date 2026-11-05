@@ -66,6 +66,7 @@ logger = logging.getLogger("qai.chat.mcp_client")
 
 __all__ = [
     "McpConnectionError",
+    "McpResponseTooLargeError",
     "McpTimeoutError",
     "McpTransportClient",
     "discover_tools",
@@ -104,6 +105,16 @@ class McpTimeoutError(McpConnectionError):
     retry logic can tell "the session died" (safe to retry once) from "the
     request ran too long" -- re-running a slow tool is NOT safe: it may already
     have done part (or all) of its work.
+    """
+
+
+class McpResponseTooLargeError(McpConnectionError):
+    """A single stdio reply line exceeded the stream limit and was discarded.
+
+    The tool HAS run -- only its reply could not be read. Not retryable: a retry
+    would repeat the work and hit the same limit. The session is closed before
+    this is raised (the unread remainder of the line would otherwise be parsed as
+    the start of the next reply).
     """
 
 
@@ -431,6 +442,11 @@ class McpTransportClient:
                 cfg.args,
                 cfg.cwd,
             )
+            # ``limit``: asyncio's StreamReader refuses any single line longer than
+            # 64 KiB by default, and an MCP reply is ONE JSON line -- so any tool
+            # result over 64 KiB (e.g. a 75K-character SKILL document) used to
+            # blow up in ``readline()`` and surface as an opaque failure. Allow
+            # up to the same 8 MiB the line-size guard below already assumes.
             self._proc = await asyncio.create_subprocess_exec(
                 launcher,
                 *cfg.args,
@@ -439,6 +455,7 @@ class McpTransportClient:
                 stderr=asyncio.subprocess.PIPE,
                 env=env,
                 cwd=cfg.cwd or None,
+                limit=_MAX_LINE_BYTES,
             )
         except (FileNotFoundError, OSError, NotImplementedError, ValueError) as exc:
             logger.warning(
@@ -575,6 +592,24 @@ class McpTransportClient:
                     )
                     msg_txt = f"timeout after {deadline}s ({diag})".rstrip(" ()")
                     raise McpTimeoutError(msg_txt) from exc
+                except (ValueError, asyncio.LimitOverrunError) as exc:
+                    # One reply line exceeded the stream limit (``readline`` re-raises
+                    # LimitOverrunError as ValueError). The rest of that line is still
+                    # in the pipe, so the session is unusable: close it now (the pool
+                    # respawns on the next call) and report plainly that the tool RAN.
+                    limit_mib = _MAX_LINE_BYTES / (1024 * 1024)
+                    logger.warning(
+                        "chat.mcp.stdio_reply_too_large name=%s limit_mib=%.0f err=%s",
+                        self._config.name,
+                        limit_mib,
+                        exc,
+                    )
+                    await self.aclose()
+                    raise McpResponseTooLargeError(
+                        f"the server's reply was larger than {limit_mib:g} MiB and was "
+                        "discarded. The tool DID run; only its output could not be read. "
+                        "Ask for less data (a narrower query / paging) instead of retrying."
+                    ) from exc
                 if not raw:
                     diag = await self._diagnose_child()
                     logger.warning(
@@ -588,7 +623,8 @@ class McpTransportClient:
                         else "server closed connection"
                     )
                 if len(raw) > _MAX_LINE_BYTES:
-                    raise McpConnectionError("response line too large")
+                    await self.aclose()
+                    raise McpResponseTooLargeError("response line too large")
                 text = raw.decode("utf-8", errors="replace").strip()
                 if not text:
                     continue

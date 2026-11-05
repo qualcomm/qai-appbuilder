@@ -31,6 +31,11 @@ that correctly (own venv, entry-point lookup, registration, connection test).
 4. `mcp_manage(action="install_wheel", name="<server name>", wheel_path="<absolute path to .whl>", args=["--stdio"])`
    - Use the `args` you found in the README (not always `--stdio`); environment variables
      the server needs go in `env={...}`.
+   - **Large results:** results over the model's normal per-result budget (30K characters
+     for qwen/deepseek/glm, 50K for claude/gpt) are cut head+tail and the full text is saved to
+     a file named in the footer (`[full_output_saved] path=...` -> `read` it). For a server whose
+     tools return whole documents, pass `max_result_chars=<n>` (10000-2000000) so they arrive
+     intact; leave it unset otherwise.
    - **Timeout:** the server is registered with `timeout_s=600` (the maximum): each request may
      stay silent that long, so long-running tools are fine. Connecting / listing tools is always
      cut off at 120s, so a server that starts but does not speak MCP (e.g. missing `--stdio`)

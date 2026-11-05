@@ -212,6 +212,7 @@ from qai.chat.application.use_cases._streaming_helpers import (
     classify_error_frame as _classify_error_frame_fn,
     compute_turn_warning_threshold as _compute_turn_warning_threshold_fn,
     detect_effective_mode as _detect_effective_mode_fn,
+    failed_invocation_text as _failed_invocation_text,
     rebuild_history_wire_messages as _rebuild_history_wire_messages,
     repair_orphan_tool_messages as _repair_orphan_tool_messages,
     wire_to_structured_messages as _wire_to_structured_messages,
@@ -11259,6 +11260,14 @@ class StreamChatUseCase:
                     raw_result = invocation.result
                     success = invocation.ok
                     tool_error_code = invocation.error_code
+                    # A handler that RAISED comes back as ok=False with no result
+                    # text; reading only ``.result`` would show the model (and the
+                    # UI card) a bare "None" and hide the real error. Use the
+                    # error message, in the ``[tool_error]`` form the card
+                    # persistence recognises as a failure.
+                    _failed_text = _failed_invocation_text(invocation)
+                    if _failed_text is not None:
+                        raw_result = _failed_text
                     # ``terminal_kind`` (§3.1 tail): the adapter can flag a
                     # semantically distinct successful outcome (today: the
                     # background_process bridge marks ``stop``/``restart`` so
