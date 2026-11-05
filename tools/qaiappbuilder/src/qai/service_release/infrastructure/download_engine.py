@@ -360,7 +360,10 @@ class HttpxDownloadEngine(DownloadEnginePort):
 
         ready = await asyncio.to_thread(daemon.ensure_daemon)
         if not ready:
-            yield frame(DownloadStatus.ERROR, error="aria2c daemon failed to start")
+            yield frame(
+                DownloadStatus.ERROR,
+                error=daemon.start_error or "aria2c daemon failed to start",
+            )
             return
 
         # Deterministic orphan cleanup: if a previous run left the target file
