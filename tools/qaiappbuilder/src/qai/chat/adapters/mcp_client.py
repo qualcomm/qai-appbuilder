@@ -70,6 +70,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import json
 import logging
 import time
@@ -93,8 +94,13 @@ from qai.chat.domain.mcp_server import (
     McpTool,
     McpTransport,
 )
+from qai.chat.domain.mcp_server import (
+    MAX_RESULT_CHARS_MAX,
+    MAX_RESULT_CHARS_MIN,
+)
 from qai.chat.infrastructure.mcp_client import (
     McpConnectionError,
+    McpResponseTooLargeError,
     McpTimeoutError,
     McpTransportClient,
     call_tool as _mcp_call_tool,
@@ -147,6 +153,15 @@ def _human_error(raw: str) -> str:
 #: times. On overflow the OLDEST entries are dropped (most-recently-browsed
 #: kept) — see :meth:`McpServerRegistry._merge_registry_cache`.
 _MAX_REGISTRY_CACHE: int = 500
+
+
+def _coerce_result_cap(raw: object) -> int | None:
+    """``max_result_chars`` from a persisted entry: a valid int, else ``None``."""
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        return None
+    if MAX_RESULT_CHARS_MIN <= raw <= MAX_RESULT_CHARS_MAX:
+        return raw
+    return None
 
 
 class McpToolInvocationAdapter:
@@ -1057,6 +1072,11 @@ class McpServerRegistry(McpServerRegistryPort):
             "headers": headers,
             "timeout_s": cfg.timeout_s,
             "enabled": cfg.enabled,
+            **(
+                {"max_result_chars": cfg.max_result_chars}
+                if cfg.max_result_chars
+                else {}
+            ),
         }
 
     def _externalise_env(self, cfg: McpServerConfig) -> dict[str, str]:
@@ -1178,6 +1198,7 @@ class McpServerRegistry(McpServerRegistryPort):
             # Legacy configs (pre-marketplace) lack the key → default True
             # (backwards compatible: an existing server stays enabled).
             enabled=bool(entry.get("enabled", True)),
+            max_result_chars=_coerce_result_cap(entry.get("max_result_chars")),
         )
 
     # ---- tool registration ----------------------------------------------
@@ -1330,6 +1351,12 @@ class McpServerRegistry(McpServerRegistryPort):
                 "have completed -- do not assume it did, and do not blindly "
                 "re-run it."
             ) from exc
+        except McpResponseTooLargeError:
+            # The tool RAN; only its reply was too big to read (the transport has
+            # already closed the session). Retrying would repeat the work and fail
+            # identically, so surface it to the model as a normal tool error.
+            await self._close_pooled(config.name)
+            raise
         except (McpConnectionError, OSError, BrokenPipeError):
             # Dead session — drop it and retry once with a fresh spawn.
             await self._close_pooled(config.name)
@@ -1455,6 +1482,24 @@ class McpServerRegistry(McpServerRegistryPort):
             error=self._errors.get(cfg.name, ""),
         )
 
+    def result_budget_for_tool(self, tool_name: str) -> int | None:
+        """Per-server result cap (characters) for a registered MCP tool name.
+
+        Tool names are ``{server}__{tool}`` (and ``mcp__{server}__{kind}`` for the
+        resources / prompts helpers). Server names may themselves contain ``_``,
+        so match by LONGEST registered-server prefix instead of splitting. Returns
+        ``None`` when the tool is not an MCP tool or its server has no override;
+        the truncator then applies its normal model-family budget.
+        """
+        best: McpServerConfig | None = None
+        for name, cfg in list(self._servers.items()):
+            if tool_name.startswith((f"{name}__", f"mcp__{name}__")) and (
+                best is None or len(name) > len(best.name)
+            ):
+                best = cfg
+        cap = best.max_result_chars if best is not None else None
+        return cap if cap else None
+
     # ---- port surface ----------------------------------------------------
 
     async def list_servers(self) -> tuple[McpServerStatus, ...]:
@@ -1465,6 +1510,18 @@ class McpServerRegistry(McpServerRegistryPort):
     async def add_server(self, config: McpServerConfig) -> McpServerStatus:
         async with self._lock:
             self._load_from_disk()
+            # ``max_result_chars`` has no UI field, so an edit that re-posts the
+            # server (UI save, re-install) arrives with it UNSET. Keep the value
+            # the operator hand-wrote instead of silently resetting it; an
+            # explicit ``0`` clears it.
+            if config.max_result_chars is None:
+                prior = self._servers.get(config.name)
+                if prior is not None and prior.max_result_chars:
+                    config = dataclasses.replace(
+                        config, max_result_chars=prior.max_result_chars
+                    )
+            elif config.max_result_chars == 0:
+                config = dataclasses.replace(config, max_result_chars=None)
             self._servers[config.name] = config
             self._persist_to_disk()
             if config.transport is McpTransport.STDIO:

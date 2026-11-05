@@ -65,6 +65,11 @@ _MAX_ARG_LENGTH: int = 4096
 _MAX_ENV_ENTRIES: int = 256
 _MAX_HEADER_ENTRIES: int = 128
 
+#: Bounds for ``McpServerConfig.max_result_chars`` (characters of ONE tool
+#: result shown to the model). ``0`` is accepted as "clear the override".
+MAX_RESULT_CHARS_MIN: int = 10_000
+MAX_RESULT_CHARS_MAX: int = 2_000_000
+
 
 class McpTransport(str, Enum):
     """How the chat context talks to an MCP server.
@@ -135,6 +140,13 @@ class McpServerConfig:
     # load / spawn time. A non-listed env key (e.g. a plain endpoint URL) is
     # persisted as-is. Empty for credential-free servers.
     secret_env_keys: tuple[str, ...] = ()
+    # Per-server cap on the size of ONE tool result handed to the model, in
+    # characters (tail-appended -- AGENTS.md §3.1). ``None`` (default) keeps the
+    # model-family budget of the tool-result truncator (30K/50K). Set it for a
+    # server whose tools return whole documents (e.g. a skills library) so they
+    # are not cut head+tail; anything above it is still truncated and persisted
+    # with a ``[full_output_saved]`` recovery footer. ``0`` means "clear".
+    max_result_chars: int | None = None
 
     def __post_init__(self) -> None:
         try:
@@ -175,6 +187,15 @@ class McpServerConfig:
             raise ValueError(str(exc)) from exc
         if self.timeout_s <= 0:
             raise ValueError("timeout_s must be > 0")
+        cap = self.max_result_chars
+        if cap is not None:
+            if isinstance(cap, bool) or not isinstance(cap, int):
+                raise ValueError("max_result_chars must be an integer")
+            if cap != 0 and not (MAX_RESULT_CHARS_MIN <= cap <= MAX_RESULT_CHARS_MAX):
+                raise ValueError(
+                    f"max_result_chars must be 0 (unset) or between "
+                    f"{MAX_RESULT_CHARS_MIN} and {MAX_RESULT_CHARS_MAX}"
+                )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
