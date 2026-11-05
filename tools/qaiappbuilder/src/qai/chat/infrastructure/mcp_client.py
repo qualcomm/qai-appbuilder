@@ -66,6 +66,7 @@ logger = logging.getLogger("qai.chat.mcp_client")
 
 __all__ = [
     "McpConnectionError",
+    "McpTimeoutError",
     "McpTransportClient",
     "discover_tools",
     "call_tool",
@@ -93,6 +94,32 @@ class McpConnectionError(RuntimeError):
     The registry catches this and surfaces the reason via ``McpServerStatus``;
     it never propagates out of the port surface.
     """
+
+
+class McpTimeoutError(McpConnectionError):
+    """A connect / handshake / call exceeded its deadline.
+
+    A subclass (message text unchanged) so existing ``except McpConnectionError``
+    handlers and text-matching error helpers keep working, while the pooled-call
+    retry logic can tell "the session died" (safe to retry once) from "the
+    request ran too long" -- re-running a slow tool is NOT safe: it may already
+    have done part (or all) of its work.
+    """
+
+
+#: stdio requests that are part of connecting / discovering (not doing work).
+#: They get a capped deadline so a server that is alive but not speaking MCP
+#: (e.g. started without its ``--stdio`` flag) fails in minutes, not after the
+#: full -- possibly very long -- per-tool ``timeout_s``.
+_HANDSHAKE_METHODS: frozenset[str] = frozenset(
+    {"initialize", "tools/list", "resources/list", "prompts/list"}
+)
+
+#: Upper bound (seconds) for one handshake-class stdio response. Cold starts of
+#: a freshly installed Python server (AV scan of the new exe + heavy imports)
+#: are tens of seconds; 120s leaves ample headroom. ``tools/call`` and the other
+#: work-doing methods still get the server's full ``timeout_s``.
+_STDIO_HANDSHAKE_CAP_S: float = 120.0
 
 
 class McpTransportClient:
@@ -306,7 +333,7 @@ class McpTransportClient:
             try:
                 await asyncio.wait_for(session.initialize(), timeout=cfg.timeout_s)
             except asyncio.TimeoutError as exc:
-                raise McpConnectionError(
+                raise McpTimeoutError(
                     f"sdk_connect_failed: initialize timed out after {cfg.timeout_s}s"
                 ) from exc
         except McpConnectionError:
@@ -531,6 +558,8 @@ class McpTransportClient:
             # (skip server-initiated notifications / log lines).
             want_id = request["id"]
             deadline = self._config.timeout_s
+            if request.get("method") in _HANDSHAKE_METHODS:
+                deadline = min(deadline, _STDIO_HANDSHAKE_CAP_S)
             while True:
                 try:
                     raw = await asyncio.wait_for(
@@ -545,7 +574,7 @@ class McpTransportClient:
                         diag,
                     )
                     msg_txt = f"timeout after {deadline}s ({diag})".rstrip(" ()")
-                    raise McpConnectionError(msg_txt) from exc
+                    raise McpTimeoutError(msg_txt) from exc
                 if not raw:
                     diag = await self._diagnose_child()
                     logger.warning(
@@ -641,7 +670,7 @@ class McpTransportClient:
                     timeout=timeout,
                 )
             except asyncio.TimeoutError as exc:
-                raise McpConnectionError(
+                raise McpTimeoutError(
                     f"tool call timed out after {timeout}s"
                 ) from exc
             rendered = _render_sdk_tool_result(result)
