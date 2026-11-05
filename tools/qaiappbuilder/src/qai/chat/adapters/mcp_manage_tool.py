@@ -60,6 +60,18 @@ _ACTIONS = (
     "set_global_enabled",
 )
 
+#: Per-server ``timeout_s`` the tool registers with (seconds). It bounds each
+#: stdio request: handshake-class requests are additionally capped at 120s by the
+#: transport (a server that is alive but not speaking MCP fails fast), while every
+#: ``tools/call`` may stay silent for up to this long. A wheel-installed server is
+#: freshly built, cold-starts slowly on Windows and often wraps long-running work,
+#: so it gets the maximum the HTTP layer accepts; a hand-registered server gets the
+#: same value the marketplace uses for remote entries (the 30s domain default was
+#: documented there as "too short").
+_WHEEL_DEFAULT_TIMEOUT_S: float = 600.0
+_ADD_DEFAULT_TIMEOUT_S: float = 120.0
+_TIMEOUT_MAX_S: float = 600.0
+
 _LAUNCH_ARGS_HINT = (
     "Launch arguments: many stdio MCP servers only speak MCP when started with a "
     "flag (very commonly `--stdio`). Check the package's README (usually next to "
@@ -146,6 +158,16 @@ MCP_MANAGE_TOOL_SCHEMA: dict[str, Any] = {
                     "type": "string",
                     "description": "add (sse/http): endpoint URL.",
                 },
+                "timeout_s": {
+                    "type": "number",
+                    "description": (
+                        "install_wheel / add: seconds a server may stay silent "
+                        "during one request (max 600). install_wheel defaults to "
+                        "600, add to 120. Connecting/listing tools never waits "
+                        "longer than 120s regardless. Raise it only if the "
+                        "package README says its tools run very long."
+                    ),
+                },
                 "enabled": {
                     "type": "boolean",
                     "description": "set_global_enabled: the new master-switch state.",
@@ -168,7 +190,7 @@ def _fmt_status(st: McpServerStatus) -> str:
     line = (
         f"- {cfg.name} [{cfg.transport.value}] {state}"
         f"{'' if cfg.enabled else ' (disabled)'}"
-        f" | tools: {st.tool_count} | {where}"
+        f" | tools: {st.tool_count} | timeout {cfg.timeout_s:g}s | {where}"
     )
     if st.tool_names:
         line += "\n    tools: " + ", ".join(st.tool_names[:20])
@@ -177,6 +199,19 @@ def _fmt_status(st: McpServerStatus) -> str:
     if st.error:
         line += f"\n    error: {st.error}"
     return line
+
+
+def _resolve_timeout(value: Any, default: float) -> float:
+    """``timeout_s`` from tool args: junk / non-positive -> default, capped at 600."""
+    if isinstance(value, bool):
+        return default
+    try:
+        t = float(value)
+    except (TypeError, ValueError):
+        return default
+    if t != t or t <= 0:  # NaN or non-positive
+        return default
+    return min(t, _TIMEOUT_MAX_S)
 
 
 def _as_str_dict(value: Any) -> dict[str, str]:
@@ -311,12 +346,15 @@ class McpManageToolHandler:
             command=res.command,
             args=tuple(res.args) + extra_args,
             env=_as_str_dict(args.get("env")),
+            timeout_s=_resolve_timeout(args.get("timeout_s"), _WHEEL_DEFAULT_TIMEOUT_S),
         )
         st = await reg.add_server(cfg)
         gate = reg.global_enabled()
         lines = [
             f"Installed {res.dist_name} {res.version} into {res.venv_dir}",
             f"Registered MCP server '{cfg.name}': {cfg.command} {' '.join(cfg.args)}".rstrip(),
+            f"Per-request timeout: {cfg.timeout_s:g}s (re-run install_wheel with "
+            "timeout_s=... to change it).",
         ]
         if res.entry_is_guess:
             lines.append(
@@ -366,6 +404,7 @@ class McpManageToolHandler:
             args=_as_str_tuple(args.get("args")),
             env=_as_str_dict(args.get("env")),
             url=args.get("url") if isinstance(args.get("url"), str) else None,
+            timeout_s=_resolve_timeout(args.get("timeout_s"), _ADD_DEFAULT_TIMEOUT_S),
         )
         st = await reg.add_server(cfg)
         out = ["Registered MCP server:", _fmt_status(st)]

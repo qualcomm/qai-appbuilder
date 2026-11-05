@@ -95,6 +95,7 @@ from qai.chat.domain.mcp_server import (
 )
 from qai.chat.infrastructure.mcp_client import (
     McpConnectionError,
+    McpTimeoutError,
     McpTransportClient,
     call_tool as _mcp_call_tool,
     discover_prompts as _mcp_discover_prompts,
@@ -1316,6 +1317,19 @@ class McpServerRegistry(McpServerRegistryPort):
         client = await self._acquire_client(config)
         try:
             return await client.call_tool(tool_name, arguments)
+        except McpTimeoutError as exc:
+            # The request RAN TOO LONG -- it did not fail. Do NOT re-run it: the
+            # tool may already have done part or all of its work (and a retry
+            # would repeat side effects and wait out the full timeout again).
+            # Reset the session -- it is stuck on this call and the process may
+            # be wedged -- so the NEXT call starts from a clean spawn, then
+            # report the timeout to the model as a normal tool error.
+            await self._close_pooled(config.name)
+            raise McpTimeoutError(
+                f"{exc}. The server session was reset; the tool may or may not "
+                "have completed -- do not assume it did, and do not blindly "
+                "re-run it."
+            ) from exc
         except (McpConnectionError, OSError, BrokenPipeError):
             # Dead session — drop it and retry once with a fresh spawn.
             await self._close_pooled(config.name)
