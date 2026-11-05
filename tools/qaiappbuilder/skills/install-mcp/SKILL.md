@@ -31,6 +31,11 @@ that correctly (own venv, entry-point lookup, registration, connection test).
 4. `mcp_manage(action="install_wheel", name="<server name>", wheel_path="<absolute path to .whl>", args=["--stdio"])`
    - Use the `args` you found in the README (not always `--stdio`); environment variables
      the server needs go in `env={...}`.
+   - **Timeout:** the server is registered with `timeout_s=600` (the maximum): each request may
+     stay silent that long, so long-running tools are fine. Connecting / listing tools is always
+     cut off at 120s, so a server that starts but does not speak MCP (e.g. missing `--stdio`)
+     fails within about two minutes, not ten. Only pass `timeout_s` yourself if the README says
+     otherwise.
    - A wheel can ship several console scripts (a server, a REST API, a CLI, ...). The tool
      picks the obvious MCP server itself; if it answers that the choice is ambiguous, ask
      the user which one, then repeat with `entry="<script>"`.
@@ -70,4 +75,8 @@ that correctly (own venv, entry-point lookup, registration, connection test).
   `--stdio`-style flag — re-run `install_wheel` with the right `args`), or it crashed on
   start (it may need an external program installed, which the README will mention);
   re-check with `action="test"`.
+- **`tool call timed out after ...s` / `session was reset`** — the call ran longer than the
+  server's `timeout_s`. The session was reset and the tool was **not** retried, because it may
+  already have done part of its work. Tell the user, ask whether to check the result or run it
+  again, and do not re-run it on your own.
 - **Status shows `(disabled)`** — the per-server switch is off: `action="enable"`.
