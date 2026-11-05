@@ -674,4 +674,5 @@ MESSAGES: dict[str, str] = {
     "chat.context_recovery.succeeded": "上下文已压缩（{before_tokens} \u2192 {after_tokens} tokens），你的消息已完整重新发送。较早的历史已被摘要，因此本次回复稍慢。",
     "chat.context_recovery.failed_no_room": "上下文已满且无法进一步压缩。请发送 /compact 手动压缩历史，或发送 /new 开启新会话继续 \u2014 你的消息没有丢失。",
     "chat.context_recovery.unavailable_mid_tool": "上下文在工具执行过程中被占满，这种情况无法自动压缩。等本轮结束后，请发送 /compact 压缩历史，或发送 /new 开启新会话继续。",
+    "service_release.aria2c.start_denied": "访问被拒绝,可能是安全模式拦截,请到 Settings > Security 把模式设为 Disabled 后重试",
 }

@@ -69,6 +69,20 @@ _INSTALL_URLS: dict[str, str] = {
 }
 
 
+def _describe_start_error(exc: BaseException) -> str:
+    """User-facing reason for a failed aria2c spawn.
+
+    ``[WinError 5]`` / ``PermissionError`` (errno 13) usually means the security
+    guard (mode ``enforcing``) or antivirus blocked the launch.
+    """
+    if isinstance(exc, PermissionError) or getattr(exc, "winerror", None) == 5:
+        # Localised via the request-scoped locale (qai.platform.i18n).
+        from qai.platform.i18n import t
+
+        return t("service_release.aria2c.start_denied")
+    return f"aria2c failed to start: {exc}"
+
+
 def _machine_arch() -> str:
     """Normalised machine arch: ``ARM64`` or ``AMD64`` (V1 :72-77)."""
     machine = platform.machine().upper()
@@ -310,6 +324,7 @@ class Aria2cDaemon:
         "_install_lock",
         "_install_status",
         "_install_error",
+        "_start_error",
         "_installer",
         "_finder",
         "_proxy_provider",
@@ -342,6 +357,9 @@ class Aria2cDaemon:
         self._install_lock = asyncio.Lock()
         self._install_status = Aria2cInstallStatus.IDLE
         self._install_error = ""
+        # Reason the last ``ensure_daemon`` spawn failed ("" = none); surfaced to
+        # the UI so a permission error can point the user at the security mode.
+        self._start_error = ""
         # M-9 — strong ref to the Windows Job Object (KILL_ON_JOB_CLOSE) the
         # daemon is assigned to; kept alive for our process lifetime so the
         # OS reaps the aria2c child if we die abruptly. ``None`` until spawn /
@@ -366,6 +384,10 @@ class Aria2cDaemon:
     @property
     def install_error(self) -> str:
         return self._install_error
+
+    @property
+    def start_error(self) -> str:
+        return self._start_error
 
     @property
     def available(self) -> bool:
@@ -530,6 +552,10 @@ class Aria2cDaemon:
                 stderr_fh.close()
         except Exception as exc:  # noqa: BLE001
             logger.error("failed to start aria2c: %s", exc)
+            self._start_error = _describe_start_error(exc)
+            # ``install_error`` is already on the frozen status wire shape, so
+            # surface the spawn failure there (no new field needed).
+            self._install_error = self._start_error
             return False
 
         # M-9 (铁律5) — orphan-proof the daemon. (1) Assign it to a Windows
