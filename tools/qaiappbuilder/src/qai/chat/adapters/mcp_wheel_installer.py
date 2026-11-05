@@ -268,6 +268,25 @@ def _tail(text: str) -> str:
     return text if len(text) <= _OUTPUT_TAIL_CHARS else "..." + text[-_OUTPUT_TAIL_CHARS:]
 
 
+def _base_python() -> str:
+    """The interpreter a new MCP venv should be built FROM.
+
+    Not ``sys.executable``: when the app runs from a uv-made venv that is a
+    trampoline, and ``python -m venv`` run through it records the base it
+    resolves to in the new venv's ``pyvenv.cfg`` -- observed to be uv's
+    *minor-version alias* directory (``...\\uv\\python\\cpython-3.13-...``).
+    That alias is not stable (uv removes / re-points it on a Python upgrade or
+    cleanup), after which every MCP venv built through it fails to start with
+    ``did not find executable at ...``. The real base interpreter named by
+    ``sys.base_prefix`` is a concrete, versioned directory, so build from that.
+    Falls back to ``sys.executable`` when it cannot be located.
+    """
+    base = Path(sys.base_prefix) / (
+        "python.exe" if sys.platform == "win32" else "bin/python3"
+    )
+    return str(base) if base.exists() else sys.executable
+
+
 def _venv_python(venv_dir: Path) -> Path:
     if sys.platform == "win32":
         return venv_dir / "Scripts" / "python.exe"
@@ -313,10 +332,31 @@ def _install_wheel_blocking(
         res.step, res.error = "prepare", f"cannot create {pkg_dir}: {exc}"
         return res
 
-    # 1. venv (reuse an existing one -> a re-install is an upgrade, not a rebuild)
-    if not vpy.exists():
+    # 1. venv. Reuse a HEALTHY existing one (a re-install is an upgrade, not a
+    #    rebuild); an existing venv that cannot even start (its base Python was
+    #    moved / removed -- e.g. a uv cleanup) is rebuilt, which is also how a
+    #    previously-broken registration gets repaired by simply installing again.
+    healthy = False
+    if vpy.exists():
+        rc_h, _ = runner([str(vpy), "-c", "import sys"], 30)
+        healthy = rc_h == 0
+        if not healthy:
+            res.notes.append(
+                "the existing venv could not start (its base Python is gone or "
+                "moved); rebuilt it"
+            )
+            try:
+                shutil.rmtree(venv_dir)
+            except OSError as exc:
+                res.step = "create_venv"
+                res.error = (
+                    f"cannot remove the broken venv {venv_dir}: {exc} "
+                    "(is a server from it still running?)"
+                )
+                return res
+    if not healthy:
         rc, out = runner(
-            [sys.executable, "-m", "venv", "--system-site-packages", str(venv_dir)],
+            [_base_python(), "-m", "venv", "--system-site-packages", str(venv_dir)],
             _VENV_TIMEOUT_S,
         )
         if rc != 0 or not vpy.exists():
