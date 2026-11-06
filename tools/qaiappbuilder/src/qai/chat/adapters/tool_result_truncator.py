@@ -331,6 +331,12 @@ class AdaptiveToolResultTruncator(ToolResultTruncatorPort):
     the middle for good. ``None`` (the default, and the state of every caller
     that does not wire one) keeps the historical pure-truncation behaviour
     byte for byte."""
+    tool_budget_provider: Callable[[str], int | None] | None = None
+    """Optional ``tool_name -> budget (chars) | None`` hook. When it returns a
+    positive number that number REPLACES the model-family budget for that one
+    result (used for per-MCP-server ``max_result_chars``). ``None`` (the default)
+    and any ``None`` / non-positive answer keep the family budget unchanged; a
+    provider that raises is ignored (truncation must never fail a tool call)."""
 
     def truncate(
         self,
@@ -468,7 +474,9 @@ class AdaptiveToolResultTruncator(ToolResultTruncatorPort):
                 omitted_chars=0,
             )
 
-        budget = self._resolve_budget(model_id=request.model_id)
+        budget = self._tool_budget_override(request.tool_name) or self._resolve_budget(
+            model_id=request.model_id
+        )
 
         if original_length <= budget:
             return ToolResultTruncationResult(
@@ -597,6 +605,23 @@ class AdaptiveToolResultTruncator(ToolResultTruncatorPort):
             )
             return None, OVERFLOW_DECLINED
         return stored_path, OVERFLOW_STORED
+
+    def _tool_budget_override(self, tool_name: str) -> int | None:
+        provider = self.tool_budget_provider
+        if provider is None:
+            return None
+        try:
+            value = provider(tool_name)
+        except Exception:  # noqa: BLE001 -- a hook must never fail a tool call
+            logger.warning(
+                "tool_result_truncator: tool_budget_provider failed for %s",
+                tool_name or "<unknown tool>",
+                exc_info=True,
+            )
+            return None
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            return None
+        return value
 
     def _resolve_budget(self, *, model_id: str) -> int:
         family = self.family_resolver(model_id)
