@@ -250,7 +250,7 @@ def builder_status_model_names(status):
 def fetch_daemon_loaded_models(genie_port, timeout=10):
     """直连 GenieAPIService GET /status，返回 (归一化的已驻留模型名集合, 原始 body)。
     以 slots[].is_loaded 为准——这是服务端自己的视图，不依赖 Builder 的记账。"""
-    r = requests.get(f"http://127.0.0.1:{genie_port}/status", timeout=timeout)
+    r = requests.get(f"http://127.0.0.1:{genie_port}/v2/status", timeout=timeout)
     r.raise_for_status()
     body = r.json()
     names = {_norm_model_name(s["model"]) for s in (body.get("slots") or [])

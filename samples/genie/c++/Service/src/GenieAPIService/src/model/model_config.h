@@ -243,6 +243,7 @@ struct AdaptiveThinkingConfig {
     int max_tokens = 0;
     int ctx_reserve_tokens = 2048;
     int goal_reminder_chars = 0;
+    std::vector<std::string> rethink_tools = {"exec", "bash", "shell"};
 
     int max_consecutive_block = 6;
 

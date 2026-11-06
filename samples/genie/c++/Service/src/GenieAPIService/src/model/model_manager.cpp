@@ -1491,6 +1491,15 @@ bool ModelManager::InitializeConfig()
                     at_cfg.max_tokens = at.value("max_tokens", at_cfg.max_tokens);
                     at_cfg.ctx_reserve_tokens = at.value("ctx_reserve_tokens", at_cfg.ctx_reserve_tokens);
                     at_cfg.goal_reminder_chars = at.value("goal_reminder_chars", at_cfg.goal_reminder_chars);
+                    if (at.contains("rethink_tools") && at["rethink_tools"].is_array())
+                    {
+                        at_cfg.rethink_tools.clear();
+                        for (const auto &tool : at["rethink_tools"])
+                        {
+                            if (tool.is_string())
+                                at_cfg.rethink_tools.push_back(tool.get<std::string>());
+                        }
+                    }
                     at_cfg.max_consecutive_block = at.value("max_consecutive_block", at_cfg.max_consecutive_block);
                     at_cfg.reserved_failure_think_turns =
                             at.value("reserved_failure_think_turns", at_cfg.reserved_failure_think_turns);
@@ -2266,6 +2275,7 @@ bool ModelManager::LoadModel(const ModelLoadRequest &request)
         loaded_model->backend = config->get_backend();
         loaded_model->device = config->get_device();
         loaded_model->is_loaded = true;
+        loaded_model->load_seq = next_load_seq_++;
         loaded_model->occupied_families = ComputeOccupiedFamilies(*loaded_model);
 
         auto existing = loaded_models_.find(request.name);
@@ -2709,6 +2719,21 @@ std::shared_ptr<LoadedModel> ModelManager::GetDefaultModel()
 {
     std::lock_guard<std::mutex> lock(models_mutex_);
     return GetDefaultModelLocked();
+}
+
+std::shared_ptr<LoadedModel> ModelManager::GetFirstLoadedModel() const
+{
+    std::lock_guard<std::mutex> lock(models_mutex_);
+    std::shared_ptr<LoadedModel> first;
+    for (const auto &entry: loaded_models_)
+    {
+        const auto &m = entry.second;
+        if (!m || !m->is_loaded || !m->config || !m->context)
+            continue;
+        if (!first || m->load_seq < first->load_seq)
+            first = m;
+    }
+    return first;
 }
 
 std::shared_ptr<LoadedModel> ModelManager::GetDefaultModelLocked() const

@@ -382,32 +382,39 @@ void GenieService::setupHttpServer()
 
     Route::CreateGetRoute({"/"}, &ChatRequestHandler::HandleWelcome);
 
-    Route::CreatePostRoute({"/completions", "/v1/completions", "/chat/completions", "/v1/chat/completions"},
+    Route::CreatePostRoute({"/completions", "/v1/completions", "/v2/completions",
+                            "/chat/completions", "/v1/chat/completions", "/v2/chat/completions"},
                            &ChatRequestHandler::ChatCompletions);
 
-    Route::CreatePostRoute({"/textsplitter", "/v1/textsplitter"}, &ChatRequestHandler::TextSplitter);
+    Route::CreatePostRoute({"/textsplitter", "/v1/textsplitter", "/v2/textsplitter"},
+                           &ChatRequestHandler::TextSplitter);
 
-    Route::CreateGetRoute({"/models", "/v1/models"}, &ChatRequestHandler::FetchModelList);
+    Route::CreateGetRoute({"/models", "/v1/models", "/v2/models"}, &ChatRequestHandler::FetchModelList);
 
-    Route::CreateGetRoute({"/profile"}, &ChatRequestHandler::FetchProfile);
+    Route::CreateGetRoute({"/profile", "/v1/profile", "/v2/profile"}, &ChatRequestHandler::FetchProfile);
 
-    Route::CreateGetRoute({"/status"}, &ChatRequestHandler::FetchModelStatus);
+    Route::CreateGetRoute({"/status", "/v1/status", "/v2/status"}, &ChatRequestHandler::FetchModelStatus);
 
-    Route::CreatePostRoute({"/stop"}, &ChatRequestHandler::ModelStop);
+    Route::CreatePostRoute({"/stop", "/v1/stop", "/v2/stop"}, &ChatRequestHandler::ModelStop);
 
-    Route::CreatePostRoute({"/clear"}, &ChatRequestHandler::ClearMessage);
+    Route::CreatePostRoute({"/clear", "/v1/clear", "/v2/clear"}, &ChatRequestHandler::ClearMessage);
 
-    Route::CreatePostRoute({"/fetch"}, &ChatRequestHandler::FetchMessage);
+    Route::CreatePostRoute({"/fetch", "/v1/fetch", "/v2/fetch"}, &ChatRequestHandler::FetchMessage);
 
-    Route::CreatePostRoute({"/reload"}, &ChatRequestHandler::ReloadMessage);
+    Route::CreatePostRoute({"/reload", "/v1/reload", "/v2/reload"}, &ChatRequestHandler::ReloadMessage);
 
-    Route::CreatePostRoute({"/servicestop"}, &ChatRequestHandler::ServiceExit);
+    Route::CreatePostRoute({"/servicestop", "/v1/servicestop", "/v2/servicestop"},
+                           &ChatRequestHandler::ServiceExit);
 
-    Route::CreatePostRoute({"/images/generations", "/v1/images/generations"}, &ChatRequestHandler::ImageGenerate);
+    Route::CreatePostRoute({"/images/generations", "/v1/images/generations", "/v2/images/generations"},
+                           &ChatRequestHandler::ImageGenerate);
 
-    Route::CreatePostRoute({"/contextsize"}, &ChatRequestHandler::ContextSize);
+    Route::CreatePostRoute({"/contextsize", "/v1/contextsize", "/v2/contextsize"},
+                           &ChatRequestHandler::ContextSize);
 
-    Route::CreatePostRoute({"/unload"}, &ChatRequestHandler::UnloadModel);
+    Route::CreatePostRoute({"/unload", "/v1/unload", "/v2/unload"}, &ChatRequestHandler::UnloadModel);
+
+    Route::CreatePostRoute({"/v2/unload_all"}, &ChatRequestHandler::UnloadAllModels);
 
     My_Log("GenieService::setupHttpServer end\n");
 }

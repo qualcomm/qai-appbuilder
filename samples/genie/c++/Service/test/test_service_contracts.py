@@ -199,7 +199,7 @@ def check_readonly_endpoints_hammer(client):
             if status not in (200, 503):
                 errors.append((path, status, raw[:80]))
 
-    paths = ["/v1/models", "/v1/models", "/status", "/profile?model=" + urllib.parse.quote(client.model)]
+    paths = ["/v1/models", "/v1/models", "/v2/status", "/v2/profile?model=" + urllib.parse.quote(client.model)]
     threads = [threading.Thread(target=hammer, args=(p,)) for p in paths]
     for t in threads:
         t.start()
@@ -349,18 +349,18 @@ def check_disconnect_queued(client):
 def check_model_required(client):
     missing = "__no_such_model__"
     cases = [
-        ("POST", "/contextsize", {"model": missing}, 404),
-        ("GET", "/contextsize", None, 404),
-        ("POST", "/stop", {"text": "stop"}, 400),
-        ("POST", "/stop", {"text": "stop", "model": missing}, 404),
-        ("POST", "/clear", {}, 400),
-        ("POST", "/clear", {"model": missing}, 404),
-        ("POST", "/textsplitter", {"text": "a b c"}, 400),
-        ("POST", "/textsplitter", {"text": "a b c", "model": missing}, 404),
-        ("POST", "/unload", {}, 400),
-        ("POST", "/unload", {"model": missing}, 404),
-        ("GET", "/profile?model=" + missing, None, 404),
-        ("POST", "/v1/chat/completions", {"messages": [{"role": "user", "content": "hi"}]}, 400),
+        ("POST", "/v2/contextsize", {"model": missing}, 404),
+        ("GET", "/v2/contextsize", None, 404),
+        ("POST", "/v2/stop", {"text": "stop"}, 400),
+        ("POST", "/v2/stop", {"text": "stop", "model": missing}, 404),
+        ("POST", "/v2/clear", {}, 400),
+        ("POST", "/v2/clear", {"model": missing}, 404),
+        ("POST", "/v2/textsplitter", {"text": "a b c"}, 400),
+        ("POST", "/v2/textsplitter", {"text": "a b c", "model": missing}, 404),
+        ("POST", "/v2/unload", {}, 400),
+        ("POST", "/v2/unload", {"model": missing}, 404),
+        ("GET", "/v2/profile?model=" + missing, None, 404),
+        ("POST", "/v2/chat/completions", {"messages": [{"role": "user", "content": "hi"}]}, 400),
     ]
     bad = []
     for method, path, body, expected in cases:
@@ -372,7 +372,7 @@ def check_model_required(client):
     require(status == 200, f"load via chat: HTTP {status} {raw[:200]!r}")
     quoted = urllib.parse.quote(client.model)
     for req_body in (None, {"model": client.model}):
-        status, _, raw = client.request("POST", "/contextsize", req_body or {}, timeout=30)
+        status, _, raw = client.request("POST", "/v2/contextsize", req_body or {}, timeout=30)
         require(status == 200, f"POST /contextsize {req_body}: HTTP {status} {raw[:120]!r}")
         body = json.loads(raw.decode("utf-8", "replace"))
         entries = {e.get("model"): e.get("contextsize", 0) for e in body.get("models", [])}
@@ -380,9 +380,9 @@ def check_model_required(client):
         require(body.get("loaded_models") == len(entries), f"POST /contextsize {req_body} loaded_models: {body}")
         if req_body:
             require(len(entries) == 1, f"POST /contextsize should list only the requested model: {body}")
-    status, _, raw = client.request("POST", "/contextsize?model=" + quoted, {}, timeout=30)
+    status, _, raw = client.request("POST", "/v2/contextsize?model=" + quoted, {}, timeout=30)
     require(status == 200, f"POST /contextsize?model=: HTTP {status} {raw[:120]!r}")
-    status, _, raw = client.request("GET", "/profile", timeout=30)
+    status, _, raw = client.request("GET", "/v2/profile", timeout=30)
     require(status == 200, f"/profile (all): HTTP {status} {raw[:120]!r}")
     body = json.loads(raw.decode("utf-8", "replace"))
     require(client.model in {e.get("model") for e in body.get("models", [])}, f"/profile (all) body: {body}")
@@ -392,7 +392,7 @@ def check_model_required(client):
 def check_status_shape(client):
     status, _, _, raw = client.chat_text("Say hi.", 8, 400)
     require(status == 200, f"load via chat: HTTP {status} {raw[:200]!r}")
-    status, _, raw = client.request("GET", "/status", timeout=15)
+    status, _, raw = client.request("GET", "/v2/status", timeout=15)
     require(status == 200, f"/status: HTTP {status}")
     body = json.loads(raw.decode("utf-8", "replace"))
     require("loading" not in body, f"/status still reports legacy loading: {body}")

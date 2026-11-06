@@ -929,6 +929,11 @@ namespace {
     std::unordered_map<std::string, std::pair<std::string, std::chrono::steady_clock::time_point>> g_pins;
 }
 
+std::string TaskMemoBuilder::ToolCallOrdinalKey(const std::string& call_signature, size_t ordinal)
+{
+    return call_signature + "#" + std::to_string(ordinal);
+}
+
 void TaskMemoBuilder::PinThinkConclusion(const std::string& session_key, const std::string& call_signature,
                                          const std::string& conclusion)
 {
@@ -961,20 +966,23 @@ bool TaskMemoBuilder::IsReasoningNoteMimicry(const std::string& content)
 
 std::string TaskMemoBuilder::ExtractThinkConclusion(const std::string& content)
 {
+    std::string body;
     if (IsReasoningNoteMimicry(content)) {
         const size_t end = content.find("]\n");
-        return end == std::string::npos ? "" : content.substr(sizeof(kPinPrefix) - 1, end - (sizeof(kPinPrefix) - 1));
+        if (end == std::string::npos)
+            return "";
+        body = content.substr(sizeof(kPinPrefix) - 1, end - (sizeof(kPinPrefix) - 1));
+    } else {
+        size_t open = content.find("<think>");
+        size_t close = content.find("</think>", open == std::string::npos ? 0 : open);
+        if (open == std::string::npos && close == std::string::npos)
+            return "";
+        const size_t body_begin = open == std::string::npos ? 0 : open + 7;
+        body = content.substr(body_begin, close == std::string::npos ? std::string::npos : close - body_begin);
+        static const std::string kForced = "Considering the time constraints";
+        if (body.find(kForced) != std::string::npos)
+            return "";
     }
-    size_t open = content.find("<think>");
-    size_t close = content.find("</think>", open == std::string::npos ? 0 : open);
-    if (open == std::string::npos && close == std::string::npos)
-        return "";
-    const size_t body_begin = open == std::string::npos ? 0 : open + 7;
-    std::string body = content.substr(body_begin, close == std::string::npos ? std::string::npos : close - body_begin);
-    static const std::string kForced = "Considering the time constraints";
-    const size_t forced = body.rfind(kForced);
-    if (forced != std::string::npos)
-        body.resize(forced);
     while (!body.empty() && std::isspace(static_cast<unsigned char>(body.back())))
         body.pop_back();
     if (body.empty())
@@ -992,6 +1000,18 @@ std::string TaskMemoBuilder::ExtractThinkConclusion(const std::string& content)
     std::string out = body.substr(start);
     for (char& c : out)
         if (c == '\n' || c == '\r') c = ' ';
+    size_t words = 0;
+    bool in_word = false;
+    for (unsigned char c : out) {
+        if (std::isspace(c)) {
+            in_word = false;
+        } else if (!in_word) {
+            ++words;
+            in_word = true;
+        }
+    }
+    if (words < 3 && out.size() < 24)
+        return "";
     return out;
 }
 

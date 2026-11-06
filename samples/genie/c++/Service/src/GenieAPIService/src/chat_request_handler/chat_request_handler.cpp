@@ -13,6 +13,7 @@
 #include <ctime>
 #include <set>
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <thread>
 #include <chrono>
@@ -73,8 +74,18 @@ void ApplyOutputSizeBudget(ContextBase &handle, ModelInstanceConfig &config,
 }
 
 std::shared_ptr<LoadedModel> ResolveLoadedModel(ModelManager &manager, const std::string &model_name,
-                                                httplib::Response &res)
+                                                ApiVersion version, httplib::Response &res)
 {
+    if (version == ApiVersion::kV1 && model_name.empty())
+    {
+        auto first = manager.GetFirstLoadedModel();
+        if (!first)
+        {
+            res.status = 404;
+            res.set_content(R"({"error": "no model is loaded"})", ResponseDispatcher::MIMETYPE_JSON);
+        }
+        return first;
+    }
     if (model_name.empty())
     {
         res.status = 400;
@@ -93,23 +104,33 @@ std::shared_ptr<LoadedModel> ResolveLoadedModel(ModelManager &manager, const std
 }
 
 std::vector<std::shared_ptr<LoadedModel>> ResolveQueriedModels(ModelManager &manager, const std::string &model_name,
-                                                                httplib::Response &res)
+                                                                ApiVersion version, httplib::Response &res)
 {
     std::vector<std::shared_ptr<LoadedModel>> result;
     if (!model_name.empty())
     {
-        auto loaded = ResolveLoadedModel(manager, model_name, res);
+        auto loaded = ResolveLoadedModel(manager, model_name, version, res);
         if (loaded)
         {
             result.push_back(std::move(loaded));
         }
         return result;
     }
-    for (auto &loaded: manager.GetAllLoadedModels())
+    if (version == ApiVersion::kV1)
     {
-        if (loaded && loaded->is_loaded && loaded->config && loaded->context)
+        if (auto first = manager.GetFirstLoadedModel())
         {
-            result.push_back(std::move(loaded));
+            result.push_back(std::move(first));
+        }
+    }
+    else
+    {
+        for (auto &loaded: manager.GetAllLoadedModels())
+        {
+            if (loaded && loaded->is_loaded && loaded->config && loaded->context)
+            {
+                result.push_back(std::move(loaded));
+            }
         }
     }
     return result;
@@ -161,6 +182,11 @@ void WriteRequestTrace(const std::string &request_id, const std::string &model_n
     }
     writer.WriteRecord(rec);
 }
+}
+
+ApiVersion GetApiVersion(const httplib::Request &req)
+{
+    return req.path.rfind("/v2/", 0) == 0 ? ApiVersion::kV2 : ApiVersion::kV1;
 }
 
 ChatRequestHandler::ChatRequestHandler(GenieService *srv) :
@@ -266,9 +292,18 @@ void ChatRequestHandler::ContextSize(const httplib::Request &req, httplib::Respo
     {
         model_name = ModelNameFromBody(req.body);
     }
-    const auto queried = ResolveQueriedModels(model_manager, model_name, res);
+    const auto version = GetApiVersion(req);
+    const auto queried = ResolveQueriedModels(model_manager, model_name, version, res);
     if (!model_name.empty() && queried.empty())
     {
+        return;
+    }
+
+    if (version == ApiVersion::kV1)
+    {
+        json old_result = {{"contextsize", queried.empty() ? 0 : queried.front()->config->get_context_size()}};
+        res.set_content(old_result.dump(2), ResponseDispatcher::MIMETYPE_JSON);
+        res.status = 200;
         return;
     }
 
@@ -287,7 +322,14 @@ void ChatRequestHandler::ServiceExit(const httplib::Request &req, httplib::Respo
 {
     json data = json::parse(req.body, nullptr, false);
     std::string text = data.value("text", "");
-    res.set_content(R"({"status":"stopped"})", ResponseDispatcher::MIMETYPE_JSON);
+    if (GetApiVersion(req) == ApiVersion::kV1)
+    {
+        res.set_content("", ResponseDispatcher::MIMETYPE_JSON);
+    }
+    else
+    {
+        res.set_content(R"({"status":"stopped"})", ResponseDispatcher::MIMETYPE_JSON);
+    }
     res.status = 200;
     res.set_header("Connection", "close");
     if (text == "stop")
@@ -303,13 +345,24 @@ void ChatRequestHandler::ServiceExit(const httplib::Request &req, httplib::Respo
 void ChatRequestHandler::ModelStop(const httplib::Request &req, httplib::Response &res)
 {
     const std::string model_name = ModelNameFromBody(req.body);
-    auto loaded = ResolveLoadedModel(model_manager, model_name, res);
+    const auto version = GetApiVersion(req);
+    auto loaded = ResolveLoadedModel(model_manager, model_name, version, res);
     if (!loaded)
     {
         return;
     }
 
     json data = json::parse(req.body, nullptr, false);
+    if (version == ApiVersion::kV1)
+    {
+        if (data.is_object() && data.value("text", "") == "stop")
+        {
+            loaded->context->Stop();
+        }
+        res.set_content("", ResponseDispatcher::MIMETYPE_JSON);
+        res.status = 200;
+        return;
+    }
     if (data.value("text", "") != "stop")
     {
         res.status = 400;
@@ -325,7 +378,7 @@ void ChatRequestHandler::ModelStop(const httplib::Request &req, httplib::Respons
 void ChatRequestHandler::ClearMessage(const httplib::Request &req, httplib::Response &res)
 {
     const std::string model_name = ModelNameFromBody(req.body);
-    auto loaded = ResolveLoadedModel(model_manager, model_name, res);
+    auto loaded = ResolveLoadedModel(model_manager, model_name, GetApiVersion(req), res);
     if (!loaded)
     {
         return;
@@ -338,7 +391,14 @@ void ChatRequestHandler::ClearMessage(const httplib::Request &req, httplib::Resp
     ToolCallCircuitBreakerStore::GetInstance().Clear();
     ToolCallRepetitionStore::GetInstance().Clear();
 
-    res.set_content(R"({"status":"cleared"})", ResponseDispatcher::MIMETYPE_JSON);
+    if (GetApiVersion(req) == ApiVersion::kV1)
+    {
+        res.set_content("", ResponseDispatcher::MIMETYPE_JSON);
+    }
+    else
+    {
+        res.set_content(R"({"status":"cleared"})", ResponseDispatcher::MIMETYPE_JSON);
+    }
     res.status = 200;
 }
 
@@ -407,7 +467,7 @@ void ChatRequestHandler::TextSplitter(const httplib::Request &req, httplib::Resp
     std::string text = data.value("text", "");
     std::string model_name = data.contains("model") && data["model"].is_string() ? data["model"].get<std::string>() : "";
 
-    auto loaded = ResolveLoadedModel(model_manager, model_name, res);
+    auto loaded = ResolveLoadedModel(model_manager, model_name, GetApiVersion(req), res);
     if (!loaded)
     {
         return;
@@ -461,8 +521,8 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
         return;
     }
 
+    const auto version = GetApiVersion(req);
     std::string modelName = data.value("model", "");
-
     static const std::string kLocalPrefix = "local::";
     if (modelName.size() > kLocalPrefix.size() &&
         modelName.substr(0, kLocalPrefix.size()) == kLocalPrefix)
@@ -470,33 +530,92 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
         modelName = modelName.substr(kLocalPrefix.size());
     }
 
-    if (modelName.empty())
-    {
-        res.status = 400;
-        res.set_content(R"({"error": "model is required"})", ResponseDispatcher::MIMETYPE_JSON);
-        return;
-    }
-
-    auto loaded_model = model_manager.GetModel(modelName);
-
+    std::shared_ptr<LoadedModel> loaded_model;
     bool model_confirmed_missing = false;
-    if (!loaded_model)
+    if (version == ApiVersion::kV1)
     {
-        bool new_model = false;
-        if (model_manager.LoadModelByName(modelName, new_model))
+        std::lock_guard<std::mutex> lock(v1_switch_mutex_);
+        if (modelName.empty())
         {
-            loaded_model = model_manager.GetModel(modelName);
+            if (auto first = model_manager.GetFirstLoadedModel())
+            {
+                modelName = first->config->get_model_name();
+            }
         }
-        else
+        if (modelName.empty())
         {
+            res.status = 400;
+            res.set_content(R"({"error": "model is required"})", ResponseDispatcher::MIMETYPE_JSON);
+            return;
+        }
+
+        loaded_model = model_manager.GetModel(modelName);
+        if (!loaded_model)
+        {
+            auto normalize_model_name = [](std::string name)
+            {
+                std::transform(name.begin(), name.end(), name.begin(),
+                               [](unsigned char c) -> unsigned char
+                               {
+                                   if (c == '-' || c == '.' || c == ' ')
+                                       return '_';
+                                   return static_cast<unsigned char>(std::tolower(c));
+                               });
+                return name;
+            };
+            const auto normalized_model_name = normalize_model_name(modelName);
             auto disk_models = model_manager.ScanModelDirectory();
-            bool found_on_disk = std::any_of(disk_models.begin(), disk_models.end(),
-                [&modelName](const json &dm) { return dm.value("id", std::string("")) == modelName; });
-            if (!found_on_disk)
+            const auto disk_model = std::find_if(disk_models.begin(), disk_models.end(),
+                [&normalize_model_name, &normalized_model_name](const json &dm)
+                {
+                    return normalize_model_name(dm.value("id", std::string(""))) == normalized_model_name;
+                });
+            if (disk_model == disk_models.end())
             {
                 My_Log{My_Log::Level::kWarning}
                     << "[ChatCompletions] Model '" << modelName << "' not found on disk" << std::endl;
                 model_confirmed_missing = true;
+            }
+            else
+            {
+                modelName = disk_model->value("id", modelName);
+                model_manager.UnloadModel();
+                bool new_model = false;
+                if (model_manager.LoadModelByName(modelName, new_model))
+                {
+                    loaded_model = model_manager.GetModel(modelName);
+                }
+            }
+        }
+    }
+    else
+    {
+        if (modelName.empty())
+        {
+            res.status = 400;
+            res.set_content(R"({"error": "model is required"})", ResponseDispatcher::MIMETYPE_JSON);
+            return;
+        }
+
+        loaded_model = model_manager.GetModel(modelName);
+        if (!loaded_model)
+        {
+            bool new_model = false;
+            if (model_manager.LoadModelByName(modelName, new_model))
+            {
+                loaded_model = model_manager.GetModel(modelName);
+            }
+            else
+            {
+                auto disk_models = model_manager.ScanModelDirectory();
+                bool found_on_disk = std::any_of(disk_models.begin(), disk_models.end(),
+                    [&modelName](const json &dm) { return dm.value("id", std::string("")) == modelName; });
+                if (!found_on_disk)
+                {
+                    My_Log{My_Log::Level::kWarning}
+                        << "[ChatCompletions] Model '" << modelName << "' not found on disk" << std::endl;
+                    model_confirmed_missing = true;
+                }
             }
         }
     }
@@ -793,9 +912,24 @@ void ChatRequestHandler::ChatCompletions(const httplib::Request &req, httplib::R
 void ChatRequestHandler::FetchProfile(const httplib::Request &req, httplib::Response &res)
 {
     const std::string model_name = req.get_param_value("model");
-    const auto queried = ResolveQueriedModels(model_manager, model_name, res);
+    const auto version = GetApiVersion(req);
+    const auto queried = ResolveQueriedModels(model_manager, model_name, version, res);
     if (!model_name.empty() && queried.empty())
     {
+        return;
+    }
+
+    if (version == ApiVersion::kV1)
+    {
+        if (!queried.empty())
+        {
+            json old_profile = queried.front()->context->HandleProfile();
+            if (!old_profile.empty())
+            {
+                res.set_content(json_to_str(old_profile), ResponseDispatcher::MIMETYPE_JSON);
+            }
+        }
+        res.status = 200;
         return;
     }
 
@@ -856,6 +990,14 @@ void ChatRequestHandler::FetchModelStatus(const httplib::Request &req, httplib::
 {
     json result;
 
+    if (GetApiVersion(req) == ApiVersion::kV1)
+    {
+        result["loading"] = std::to_string(!model_manager.IsLoaded());
+        res.set_content(result.dump(), ResponseDispatcher::MIMETYPE_JSON);
+        res.status = 200;
+        return;
+    }
+
     json slots = json::array({
         { {"device", "npu"}, {"model", ""}, {"is_loaded", false}, {"backend", ""} },
         { {"device", "gpu"}, {"model", ""}, {"is_loaded", false}, {"backend", ""} },
@@ -895,6 +1037,14 @@ void ChatRequestHandler::FetchModelStatus(const httplib::Request &req, httplib::
 
 void ChatRequestHandler::UnloadModel(const httplib::Request &req, httplib::Response &res)
 {
+    if (GetApiVersion(req) == ApiVersion::kV1)
+    {
+        model_manager.UnloadModel();
+        res.set_content("", ResponseDispatcher::MIMETYPE_JSON);
+        res.status = 200;
+        return;
+    }
+
     const std::string model_name = ModelNameFromBody(req.body);
     if (model_name.empty())
     {
@@ -911,5 +1061,12 @@ void ChatRequestHandler::UnloadModel(const httplib::Request &req, httplib::Respo
     }
     json ok = {{"status", "unloaded"}, {"model", model_name}};
     res.set_content(ok.dump(), ResponseDispatcher::MIMETYPE_JSON);
+    res.status = 200;
+}
+
+void ChatRequestHandler::UnloadAllModels(const httplib::Request &, httplib::Response &res)
+{
+    model_manager.UnloadModel();
+    res.set_content(R"({"status":"unloaded"})", ResponseDispatcher::MIMETYPE_JSON);
     res.status = 200;
 }
