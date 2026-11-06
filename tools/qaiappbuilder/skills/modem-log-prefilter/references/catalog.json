@@ -1,0 +1,2444 @@
+{
+  "schema_version": 1,
+  "skills": [
+    {
+      "id": "modem.5g-nr.rach-debug",
+      "name": "modem-5g-nr-rach-debug",
+      "aliases": [
+        "Modem-5G-NR-Rach-Debug",
+        "modem-5g-nr-rach-debug",
+        "modem.5g-nr.rach-debug"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0x1849",
+          "0xB821",
+          "0xB883",
+          "0xB884",
+          "0xB885",
+          "0xB887",
+          "0xB889",
+          "0xB88A",
+          "0xB8D2",
+          "0xB8D8"
+        ]
+      },
+      "keywords": [
+        "Num Attempts",
+        "ls_err",
+        "rach_reason"
+      ]
+    },
+    {
+      "id": "hawi.modem.5g.msim_throughput_debug",
+      "name": "msim-tput-debug",
+      "aliases": [
+        "Modem_5G_MSIM_Throughput_Debug",
+        "hawi.modem.5g.msim_throughput_debug",
+        "msim-tput-debug"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0x12E8",
+          "0x1544",
+          "0x1FFB",
+          "0xB883"
+        ],
+        "QTRACE": [
+          "42/0"
+        ]
+      },
+      "keywords": []
+    },
+    {
+      "id": "hawi.modem.5g.nr_throughput_debug",
+      "name": "Modem_5G_NR_Throughput_Debug",
+      "aliases": [
+        "Modem_5G_NR_Throughput_Debug",
+        "hawi.modem.5g.nr_throughput_debug"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0xB821",
+          "0xB826",
+          "0xB84D",
+          "0xB868",
+          "0xB880",
+          "0xB886",
+          "0xB88A",
+          "0xB8D8",
+          "0xB97F",
+          "0xB98F"
+        ],
+        "QTRACE": [
+          "76/4",
+          "98/0",
+          "98/1",
+          "98/2",
+          "98/3",
+          "99/0",
+          "99/1"
+        ]
+      },
+      "keywords": [
+        "ENL2DL",
+        "ENL2UL",
+        "IPAap:",
+        "NR5GMAC",
+        "PDCP_FLUSH",
+        "avgPHY.Kbps",
+        "enl2_dl_qsh",
+        "nr5g_l2ul_qsh",
+        "nr5g_mac_qsh",
+        "throughput",
+        "tput"
+      ]
+    },
+    {
+      "id": "hawi.modem.5g.nr5g_rrc_config_validation",
+      "name": "Modem_NR5G_RRC_Config_Validation",
+      "aliases": [
+        "Modem_5G_RRC_Config_Validation",
+        "Modem_NR5G_RRC_Config_Validation",
+        "hawi.modem.5g.nr5g_rrc_config_validation"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0xB821"
+        ]
+      },
+      "keywords": [
+        "measId-refs"
+      ]
+    },
+    {
+      "id": "hawi.modem.5g.sns.data_stall_debug",
+      "name": "Modem_5G_SNS_Data_Stall_Debug",
+      "aliases": [
+        "Modem_5G_SNS_Data_Stall_Debug",
+        "hawi.modem.5g.sns.data_stall_debug"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0xB97F",
+          "0xB9C3"
+        ]
+      },
+      "keywords": [
+        "(timestamp, UL value, DL value, Mobility value, cell info)",
+        "CC_ID = 0",
+        "Cell Quality RSRP > -113 dBm",
+        "Cells",
+        "Component Carrier List[0]",
+        "Num Cells = 6",
+        "RSRP = NA",
+        "Raster ARFCN = 633984",
+        "Serving Cell Index = 0",
+        "Serving Cell PCI",
+        "Serving Cell PCI = 553",
+        "Srv Data Stall Info"
+      ]
+    },
+    {
+      "id": "hawi.modem.5g.sns.hdr_debug",
+      "name": "sns-hdr-debug",
+      "aliases": [
+        "Modem_5G_SNS_HDR_Debug",
+        "hawi.modem.5g.sns.hdr_debug",
+        "sns-hdr-debug"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0xB9C3"
+        ]
+      },
+      "keywords": []
+    },
+    {
+      "id": "hawi.modem.5g.ul_latency_debug",
+      "name": "ul-latency-debug",
+      "aliases": [
+        "Modem_5G_UL_Latency_Debug",
+        "hawi.modem.5g.ul_latency_debug",
+        "ul-latency-debug"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0xB883",
+          "0xB884",
+          "0xB97F"
+        ],
+        "QTRACE": [
+          "76/0",
+          "76/1",
+          "76/11",
+          "76/2",
+          "76/3",
+          "76/4",
+          "76/5",
+          "76/6",
+          "84/0",
+          "84/1",
+          "84/2",
+          "84/3",
+          "84/4",
+          "99/0",
+          "99/1"
+        ]
+      },
+      "keywords": [
+        "Cell Quality RSRP",
+        "Cell Quality SNR",
+        "ENL2UL",
+        "Filtered Tx Beam RSRP L3",
+        "L2buffDelay",
+        "NR2NR RSRP",
+        "NR5GMAC",
+        "arfcn",
+        "avgRLCrtt",
+        "ipaRxBytes",
+        "latency",
+        "srsAs.Bmsk",
+        "wm.bytes"
+      ]
+    },
+    {
+      "id": "hawi.modem.5g.voice_call_debug",
+      "name": "Modem_5G_Voice_Call_Debug",
+      "aliases": [
+        "Modem_5G_Voice_Call_Debug",
+        "hawi.modem.5g.voice_call_debug"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0x12E8",
+          "0x156E",
+          "0xB0C0",
+          "0xB80B",
+          "0xB821",
+          "0xB840",
+          "0xB842",
+          "0xB84B",
+          "0xB84D",
+          "0xB857",
+          "0xB860",
+          "0xB868",
+          "0xB871",
+          "0xB872",
+          "0xB880",
+          "0xB883",
+          "0xB884",
+          "0xB885",
+          "0xB886",
+          "0xB887",
+          "0xB888",
+          "0xB889",
+          "0xB88A",
+          "0xB890",
+          "0xB8D2",
+          "0xB8D8",
+          "0xB97F"
+        ],
+        "QSH_EVENT": [
+          "0x990BC57"
+        ]
+      },
+      "keywords": [
+        "-30.10 dB",
+        "1 (data)",
+        "23 (VoLTE)",
+        "ABORTED",
+        "BLER",
+        "Cell Id",
+        "Cell Quality RSRP/RSRQ",
+        "Chain Index",
+        "Client Summary",
+        "DR-DSDS Enabled",
+        "Dual Tx DSDA Disabled",
+        "FAIL",
+        "FAILURE_MSG2_RAPID_MISMATCH",
+        "FAILURE_MSG2_RA_TIMER_EXP",
+        "Frame Type Index =",
+        "History-Info",
+        "LTE SUB2",
+        "Lock State",
+        "MCE Bitmask = TCI_STATE_IND_UE_PDCCH_MCE",
+        "NEW_TX",
+        "NR5G SUB2",
+        "NR5GRRC_QSH_EVENT_RLF",
+        "Num Attempts",
+        "Num CRC Fail TB",
+        "Num CRC Pass TB",
+        "Num Slots Elapsed",
+        "PASS",
+        "PHR MTPL",
+        "PHR MTPL (dB)",
+        "Pathloss (dB)",
+        "Phychan Bit Mask",
+        "Power Limited",
+        "Procedure",
+        "RACH Result",
+        "RAT Group",
+        "RE_TX",
+        "RTP NETWORK LOSS",
+        "RX[n] SNR",
+        "Rach Reason",
+        "Reason",
+        "Reference Signal",
+        "Reserved",
+        "SID (COMFORT NOISE FRAME)",
+        "SUCCESS",
+        "Serving Cell PCI",
+        "Serving Cell PCI = NA",
+        "ServingRSRP_Rx23",
+        "Status = FAIL",
+        "Sub-ID:n",
+        "Subscription ID",
+        "TB Size",
+        "TX Type",
+        "Transmit Power (dB)",
+        "UL_DATA_ARRIVAL",
+        "cause",
+        "cause=480",
+        "cause=rlf",
+        "mobilityControlInfo",
+        "service_type_val"
+      ]
+    },
+    {
+      "id": "modem.5g.camping.nr_rrc_ml1_srch",
+      "name": "Modem_5G_Camping_Issue",
+      "aliases": [
+        "Modem_5G_Camping_Issue",
+        "Modem_NR_Camping",
+        "modem.5g.camping.nr5g_rrc_ml1_srch",
+        "modem.5g.camping.nr_rrc_ml1_srch"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0xB96D"
+        ],
+        "EVENT": [
+          "3125"
+        ]
+      },
+      "keywords": [
+        "All freqs tried,",
+        "Bar cell /   Cell Suitable?",
+        "CSP Received NR5G_RRC_SERVICE_REQ",
+        "CSP Scan Scope, Band enabled",
+        "CSP Send Acq Reqi",
+        "CSP Send Acq Reqi - Num of freq in acq list",
+        "EVENT_NR5G_RRC_SIB_READ_FAILURE",
+        "FFS ───►        │",
+        "LFS ACQ DB Scan Triggered",
+        "LFS Scan Start",
+        "LFS Scan Stop",
+        "ML1 Searcher Scan (per ARFCN)",
+        "NR5G ML1 Searcher ACQ Config and Response",
+        "NR5G_RRC_SERVICE_IND",
+        "No        Yes",
+        "Not updating NR Neighbor list",
+        "RRC ACQ",
+        "RRC sent NAS Service Ind NR5G_RRC_SERVICE_IND",
+        "Report Out of Service",
+        "SIB1 Decoded?",
+        "SSB/Cell Found?",
+        "Trigger    Trigger SIB1 Read",
+        "Triggering SIB1 read on",
+        "cell/freq  Report Service",
+        "is_cell_suitable",
+        "no suitable cell?",
+        "scan_type",
+        "│      No        Yes",
+        "└──► Try next   CAMPED →"
+      ]
+    },
+    {
+      "id": "hawi.modem.5g_sub6.sns.prefer_frequency",
+      "name": "Modem_5G_SNS_Prefer_Frequency",
+      "aliases": [
+        "Modem_5G_SNS_Prefer_Frequency",
+        "hawi.modem.5g_sub6.sns.prefer_frequency"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0x3575",
+          "0xB9F8"
+        ]
+      },
+      "keywords": [
+        "Feature Status",
+        "Layer Client",
+        "Layer Client = ODM",
+        "Layer Client = PREF FREQ",
+        "NR5G ML1 Searcher OEM Measurement Database Update Ext",
+        "Num Cells",
+        "RSRP",
+        "RSRQ",
+        "Sub Status",
+        "Subscription ID"
+      ]
+    },
+    {
+      "id": "qraft.modem_5g_etws_debug",
+      "name": "nr-etws-debug",
+      "aliases": [
+        "modem-5g-etws-debug",
+        "nr-etws-debug",
+        "qraft.modem_5g_etws_debug"
+      ],
+      "filters": {},
+      "keywords": [
+        "Actual_Slot",
+        "Failed",
+        "Mod_Period",
+        "OTA_Match",
+        "PHY_PARSED_LOG",
+        "RRCReestablishment",
+        "RadioLinkFailure",
+        "SIB1",
+        "SIB6",
+        "SIB7",
+        "SIB7_Segment",
+        "START SI DECODE",
+        "Segment_Type",
+        "Sfn // modification_period",
+        "SubFrameNum",
+        "SubFrameNum × slots_per_subframe + Slot",
+        "Success",
+        "SystemInformation",
+        "Timestamp",
+        "defaultPagingCycle",
+        "etwsAndCmasIndication",
+        "lastSegment",
+        "modificationPeriodCoeff",
+        "notLastSegment",
+        "sib1 :",
+        "sib6 :",
+        "sib6_7_decode_attempt_vs_success_detailed.csv",
+        "sib7 :",
+        "systemInfoModification"
+      ]
+    },
+    {
+      "id": "modem.5g.debug.rlf_recovery",
+      "name": "5G NR Radio Link Failure Debug",
+      "aliases": [
+        "5G NR Radio Link Failure Debug",
+        "modem-5g-rlf-recovery-debug",
+        "modem.5g.debug.rlf-recovery",
+        "modem.5g.debug.rlf_recovery"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0xB821",
+          "0xB872",
+          "0xB880",
+          "0xB883",
+          "0xB885",
+          "0xB887",
+          "0xB890",
+          "0xB8AE",
+          "0xB97F"
+        ]
+      },
+      "keywords": [
+        "modem.5g.debug.nas-recovery",
+        "modem.lte.debug.rlf-recovery"
+      ]
+    },
+    {
+      "id": "hawi.modem.app_proc_data.tput_analysis",
+      "name": "tput-analysis",
+      "aliases": [
+        "TPUT_ANALYSIS",
+        "hawi.modem.app_proc_data.tput_analysis",
+        "tput-analysis"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0x11EB",
+          "0x413A",
+          "0x414A",
+          "0x4222",
+          "0x4309"
+        ]
+      },
+      "keywords": [
+        "Action=0x5",
+        "CLOSE_RX_WIN",
+        "CRITICAL issues     : [list from report]",
+        "EnabledEquations",
+        "IPA_DL_DROP",
+        "IPA_DL_FC",
+        "IPA_STATS",
+        "IPA_UL_DROP",
+        "Logs Attached:",
+        "NR5G",
+        "NR_SA_DATA",
+        "NV#69739 = 1, 1000",
+        "OPEN_RX_WIN",
+        "PING_LOSS",
+        "QMI_NAS",
+        "QMI_WDS",
+        "RLC_RESET",
+        "Recommended Fix:",
+        "Root Cause Summary:",
+        "TCP_PARAM_MISMATCH",
+        "TCP_RTO",
+        "TCP_ZERO_WINDOW",
+        "THERMAL_FC",
+        "WARNING issues      : [list from report]",
+        "[ ] ADB logcat (data, connectivity)",
+        "[ ] DUT PCAP (tcpdump)",
+        "[ ] DUT TCP params",
+        "[ ] REF PCAP (tcpdump)",
+        "[ ] REF QXDM",
+        "[ ] REF TCP params",
+        "[From RCA_MAP above]",
+        "[Paste top findings from print_tput_report()]",
+        "adb shell \"cat /proc/sys/net/ipv4/tcp_rmem; cat",
+        "adb shell stop thermal-engine",
+        "dataipa_r/ipa/tools/Debug_Bus_parser/",
+        "dataipa_r/ipa/tools/Debug_Bus_parser/ipa_testbus_q6_dump_parse.cmm",
+        "dataipa_r/ipa/tools/Restore_Reg_Analyze/restore.cmm",
+        "dl_drop_cnt",
+        "dl_flow_control_cnt",
+        "performance",
+        "rlcfc",
+        "tcp_sack",
+        "tcp_window_scaling",
+        "ul_drop_cnt",
+        "ul_flow_control_cnt"
+      ]
+    },
+    {
+      "id": "wireless.log.packet.verification",
+      "name": "cellular-log-packet-verifier",
+      "aliases": [
+        "Modem_Conformance_Log_Collection_Assistant",
+        "cellular-log-packet-verifier",
+        "wireless.log.packet.verification"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0x1388",
+          "0x1389",
+          "0x156E",
+          "0x1830",
+          "0x1831",
+          "0x1832",
+          "0x412F",
+          "0x512F",
+          "0x513A",
+          "0x5226",
+          "0x5230",
+          "0x5B2F",
+          "0x5C26",
+          "0x5C30",
+          "0x713A",
+          "0x7B3A",
+          "0xB0C0",
+          "0xB0E2",
+          "0xB0E3",
+          "0xB0EC",
+          "0xB0ED",
+          "0xB800",
+          "0xB801",
+          "0xB808",
+          "0xB809",
+          "0xB80A",
+          "0xB80B",
+          "0xB814",
+          "0xB821"
+        ]
+      },
+      "keywords": [
+        "MasterPicsPixit/CK1001_Walrus.tsp",
+        "TestProject.xml"
+      ]
+    },
+    {
+      "id": "qualcomm.pics.lookup",
+      "name": "pics-lookup",
+      "aliases": [
+        "Modem_Conformance_PICS-Lookup",
+        "pics-lookup",
+        "qualcomm.pics.lookup"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0xB0C0",
+          "0xB821"
+        ]
+      },
+      "keywords": [
+        "--area",
+        "--max-results",
+        "--path",
+        "C113b",
+        "C113bF",
+        "C229a C230a",
+        "CRM Data [5GNR(NG.114)]",
+        "CRM Data [LTE(IR92/94)]",
+        "Cat0",
+        "CatM1",
+        "CatNB1",
+        "EPS Mobility Management",
+        "Ixit",
+        "NR5G Enabled=\"true",
+        "RACS",
+        "UECapabilityInformation",
+        "_merge_files_to_hdf",
+        "analyze_enum_families",
+        "bandNR",
+        "bwp-SameNumerology",
+        "eutra-nr",
+        "ieName label : value,",
+        "ieName value,",
+        "pc_5GC_NSSAA",
+        "pc_InitiateSession",
+        "pc_MTSI_Speech",
+        "pc_MTSI_Video",
+        "pc_MultimediaTelephonyService",
+        "pdfplumber",
+        "px_*",
+        "query",
+        "rat-Type",
+        "scan_fgi_bitstrings",
+        "te_config_parsers.PARSERS"
+      ]
+    },
+    {
+      "id": "modem.lte.conformance.carrier.verizon-device-config-testing",
+      "name": "verizon-device-config-testing",
+      "aliases": [
+        "Modem_Conformance_VZW_Config_Validator",
+        "modem.lte.conformance.carrier.verizon-device-config-testing",
+        "verizon-device-config-testing"
+      ],
+      "filters": {},
+      "keywords": [
+        "--es networkType latency \\",
+        "-n com.verizon.mips.services/com.vzw.networkwrapper.receiver.MVSLauncherLatencyRequest",
+        "adb shell \"am broadcast -a com.verizon.mips.services.TRIGGER_LATENCY_REQUEST \\"
+      ]
+    },
+    {
+      "id": "hawi.modem.data_svcs.modem_ds_atcop",
+      "name": "AT_cop_kili_user",
+      "aliases": [
+        "AT_cop_kili_user",
+        "Modem_DS_ATCOP",
+        "hawi.modem.data_svcs.modem_ds_atcop"
+      ],
+      "filters": {},
+      "keywords": [
+        "$QCBANDPREF?",
+        "+C5GREG:",
+        "+CCWA:",
+        "+CEREG:",
+        "+CGEV:",
+        "+CGEV: ME ACT",
+        "+CGEV: ME DEACT",
+        "+CGEV: ME DETACH",
+        "+CGEV: ME PDN ACT",
+        "+CGEV: ME PDN DEACT",
+        "+CGEV: NW ACT",
+        "+CGEV: NW DEACT",
+        "+CGEV: NW DETACH",
+        "+CGEV: NW MODIFY",
+        "+CGEV: NW PDN ACT",
+        "+CGEV: NW PDN DEACT",
+        "+CGEV: NW REJECT",
+        "+CGREG:",
+        "+CLIP:",
+        "+CMT:",
+        "+CMTI:",
+        "+COPS: (",
+        "+COPS=?",
+        "+CREG:",
+        "+CREG: 0,2",
+        "+CREG: 0,3",
+        "+CRING:",
+        "+CSSI:",
+        "+CSSU:",
+        "+CUSD:",
+        "30 seconds pass",
+        "AT+C5GREG=1",
+        "AT+CCWA=1",
+        "AT+CEREG=1",
+        "AT+CEREG=4",
+        "AT+CGDSCONT",
+        "AT+CGEREP=2",
+        "AT+CGREG=1",
+        "AT+CLIP=1",
+        "AT+CMD",
+        "AT+CMD=",
+        "AT+CNMI=2,1",
+        "AT+CNMI=2,2",
+        "AT+COPS=0",
+        "AT+COPS=1",
+        "AT+COPS=2",
+        "AT+COPS=?",
+        "AT+CPBF=\"",
+        "AT+CRC=1",
+        "AT+CREG=1",
+        "AT+CREG?",
+        "AT+CSSN=0,1",
+        "AT+CSSN=1,0",
+        "OK                  ← final result",
+        "RING",
+        "^DSCI:",
+        "network search in progress"
+      ]
+    },
+    {
+      "id": "qualcomm.wireless.5g_icon_display",
+      "name": "5G_icon",
+      "aliases": [
+        "5G_icon",
+        "Modem_Data_5G_Icon",
+        "qualcomm.connectivity.5g.icon-display",
+        "qualcomm.wireless.5g_icon_display"
+      ],
+      "filters": {},
+      "keywords": [
+        "FiveGA_IRAT_Handle",
+        "data_3gpp_dynamic_config.xml"
+      ]
+    },
+    {
+      "id": "hawi.modem.data.call_end_reason_241",
+      "name": "Modem_Data_CALL_END_REASON_241",
+      "aliases": [
+        "Modem_Data_CALL_END_REASON_241",
+        "hawi.modem.data.call_end_reason_241"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0x138E",
+          "0x138F",
+          "0x1390",
+          "0x1391",
+          "0x1392",
+          "0x1393",
+          "0x1544"
+        ]
+      },
+      "keywords": [
+        "0x1390 QMI Link 2",
+        "0x1390 QMI Link 2 RX PDU",
+        "0x1391 QMI Link 2 TX PDU",
+        "0x1392 QMI Link 3 RX PDU",
+        "0x1393 QMI Link 3 TX PDU",
+        "0x1544 QMI_MCS_QCSI_PKT",
+        "ClientId = 55",
+        "IFType = 1",
+        "MsgType = QMI_WDS_START_NETWORK_INTERFACE_MSG",
+        "QMI_WDS_START_NETWORK_INTERFACE_MSG",
+        "QmiType = WDS",
+        "SduCtlFlags = REQ",
+        "Services.msc",
+        "WDS_VCER_TYPE_INTERNAL",
+        "call_end_reason",
+        "call_end_reason = 241",
+        "parsed_text",
+        "summary",
+        "verbose_call_end_reason",
+        "wds_start_network_interface"
+      ]
+    },
+    {
+      "id": "hawi.modem.data.data_call_setup_check",
+      "name": "Modem_Data_Call_Setup_Check",
+      "aliases": [
+        "Modem_Data_Call_Setup_Check",
+        "hawi.modem.data.data_call_setup_check"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0x1544"
+        ],
+        "QTRACE": [
+          "52/0",
+          "52/1",
+          "52/2",
+          "52/4"
+        ],
+        "DEBUG_MSG": [
+          "5000/0",
+          "5000/1",
+          "5000/2",
+          "5000/3",
+          "5000/4"
+        ]
+      },
+      "keywords": [
+        "A = (value >> 24) & 0xFF",
+        "B = (value >> 16) & 0xFF",
+        "C = (value >> 8) & 0xFF",
+        "ConHandle",
+        "D = value & 0xFF",
+        "DSD_SYS_RAT_EX_3GPP_5G",
+        "DSD_SYS_RAT_EX_3GPP_LTE",
+        "LIMITED",
+        "MsgId = 0x00000020",
+        "MsgId = 0x0000002D",
+        "MsgId = 0x0000006C",
+        "MsgType = Request",
+        "MsgType = Response",
+        "ServiceId = DSD",
+        "ServiceId = WDS",
+        "UNSPECIFIED",
+        "apn_name",
+        "authentication_preference",
+        "avail_sys[0]",
+        "call_end_reason",
+        "dsd_system_status",
+        "event_subs 1",
+        "event_subs 2",
+        "ip_family",
+        "ip_family_preference",
+        "rat_value",
+        "resp",
+        "result = QMI_RESULT_FAILURE",
+        "result = QMI_RESULT_SUCCESS",
+        "send_ind 1",
+        "so_mask",
+        "verbose_call_end_reason",
+        "wds_get_runtime_settings"
+      ]
+    },
+    {
+      "id": "hawi.modem.data.iwlan_call_issue",
+      "name": "Modem_Data_IWLAN_Call_Issue",
+      "aliases": [
+        "Modem_Data_IWLAN_Call_Issue",
+        "hawi.modem.data.iwlan_call_issue"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0x138E",
+          "0x138F",
+          "0x1544",
+          "0xB0E2",
+          "0xB0E3",
+          "0xB0EC",
+          "0xB0ED",
+          "0xB800",
+          "0xB801",
+          "0xB808",
+          "0xB809",
+          "0xB80A",
+          "0xB80B",
+          "0xB814"
+        ],
+        "QTRACE": [
+          "52/0",
+          "52/1",
+          "52/2",
+          "52/4",
+          "53/0",
+          "53/2",
+          "53/4"
+        ],
+        "DEBUG_MSG": [
+          "5000/0",
+          "5000/1",
+          "5000/2",
+          "5000/3",
+          "5000/4",
+          "5003/0",
+          "5003/1",
+          "5003/2",
+          "5003/3",
+          "5003/4",
+          "5025/0",
+          "5025/1",
+          "5025/2",
+          "5025/3",
+          "5025/4",
+          "5030/0",
+          "5030/1",
+          "5030/2",
+          "5030/3",
+          "5030/4",
+          "5031/0",
+          "5031/1",
+          "5031/2",
+          "5031/3",
+          "5031/4",
+          "5034/0",
+          "5034/1",
+          "5034/2",
+          "5034/3",
+          "5034/4",
+          "5503/0",
+          "5503/1",
+          "5503/2",
+          "5503/3",
+          "5503/4",
+          "5503/5"
+        ]
+      },
+      "keywords": [
+        "DS WLAN",
+        "DS WLAN/Error",
+        "DS WLAN/High",
+        "DS WLAN/Medium",
+        "DSD_SYS_RAT_EX_3GPP_WLAN",
+        "DSD_WIFI_CONN_STATUS_IP_CONNECTED",
+        "HANDOFF_INIT",
+        "HH:MM:SS.ssssss",
+        "apn_avail_sys",
+        "apn_name = ims",
+        "appid",
+        "connection_status = DSD_WIFI_CONN_STATUS",
+        "dsd_system_status",
+        "dss_pppopen",
+        "rat_value",
+        "so_mask = QMI_DSD_3GPP_SO_MASK_S2B"
+      ]
+    },
+    {
+      "id": "hawi.modem.ims.ims_common_sups_skill",
+      "name": "ims-ut-supplementary",
+      "aliases": [
+        "IMS_COMMON_SUPS_SKILL",
+        "hawi.modem.ims.ims_common_sups_skill",
+        "ims-ut-supplementary"
+      ],
+      "filters": {},
+      "keywords": [
+        "#### AbortUnknownSScode"
+      ]
+    },
+    {
+      "id": "hawi.modem.ims.volte_call_flow_oem",
+      "name": "Modem_IMS_VoLTE_Call_Flow_OEM",
+      "aliases": [
+        "Modem_IMS_VoLTE_Call_Flow_OEM",
+        "hawi.modem.ims.volte_call_flow_oem"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0x1544",
+          "0x156B",
+          "0x156C",
+          "0x156E",
+          "0x1571",
+          "0x17F2",
+          "0x1830",
+          "0x1831",
+          "0x1C43",
+          "0x1C48",
+          "0x1C94",
+          "0x1D4D",
+          "0x1E9E",
+          "0xB0E2",
+          "0xB0E3"
+        ],
+        "QTRACE": [
+          "89/0",
+          "89/1",
+          "89/2",
+          "89/3",
+          "97/0",
+          "97/1"
+        ],
+        "DEBUG_MSG": [
+          "6052/0",
+          "6052/1",
+          "6052/2",
+          "6052/3",
+          "6052/4",
+          "6054/0",
+          "6054/1",
+          "6054/2",
+          "6054/3",
+          "6054/4",
+          "6056/0",
+          "6056/1",
+          "6056/2",
+          "6056/3",
+          "6056/4",
+          "6057/0",
+          "6057/1",
+          "6057/2",
+          "6057/3",
+          "6057/4",
+          "6058/0",
+          "6058/1",
+          "6058/2",
+          "6058/3",
+          "6058/4",
+          "6063/0",
+          "6063/1",
+          "6063/2",
+          "6063/3",
+          "6063/4",
+          "6067/0",
+          "6067/1",
+          "6067/2",
+          "6067/3",
+          "6067/4"
+        ]
+      },
+      "keywords": [
+        "## IMS log mask catalog",
+        "100 Trying",
+        "180 Ringing",
+        "183 Session Progress",
+        "200 OK for PRACK",
+        "200 OK for UPDATE",
+        "Activate dedicated EPS bearer context accept",
+        "Activate dedicated EPS bearer context request",
+        "CALL_STATE_CONVERSATION",
+        "CALL_STATE_DISCONNECTING",
+        "CALL_STATE_END",
+        "Creating Offer",
+        "DPL_QOS_MSG_NW_INIT_AVAIL",
+        "Direction = NETWORK_TO_UE",
+        "EVENT_SIP_REQUEST_RECV: ACK sip:0d95a77a-ad08-419d-a75c-",
+        "EVENT_VOLTE_CALL_ANSWER",
+        "EVENT_VOLTE_CALL_CONNECTED",
+        "IMS SIP Message          Length: 0792",
+        "IMS_SIP_BYE",
+        "IMS_SIP_PRACK",
+        "IMS_SIP_UPDATE",
+        "INVITE",
+        "MCS QCSI Payload Packet  Length: 0053",
+        "MCS QCSI Payload Packet  Length: 0131",
+        "MCS QCSI Payload Packet  Length: 0164",
+        "Message ID = IMS_SIP_ACK",
+        "MsgType = Indication",
+        "Preconditions enabled",
+        "Received RTP",
+        "Sending RTP",
+        "[0x1544]                 LOG",
+        "[0x156E]                 OTA LOG",
+        "[6054/0002]              MSG",
+        "a=curr:qos",
+        "a=des:qos",
+        "call_state = CALL_STATE_CONVERSATION",
+        "call_type = CALL_TYPE_VOICE_IP",
+        "direction = CALL_DIRECTION_MO",
+        "direction = CALL_DIRECTION_MT",
+        "from 12 to CONNECTED, ind required = 1",
+        "is_offer",
+        "mbr met",
+        "mode = CALL_MODE_LTE",
+        "payload type 27",
+        "precondition enabled =",
+        "qipcallcodec_session_configure",
+        "qipcallcodec_session_configure: status 0, session id 0, media type 0,",
+        "qipcalldialog_start_qos_timer_if_required",
+        "qipcallh_move_to_connected",
+        "qipcallqos_mbr_status_check",
+        "qipcallqos_register_qos",
+        "qipcallsdp_find_mime_from_peer_sdp",
+        "qipcallsdp_find_mime_from_peer_sdp: num_formats 2",
+        "qipcallsdp_is_local_pre_condition_met",
+        "qipcallsdp_is_remote_pre_condition_met",
+        "speech_codec",
+        "speech_codec = VOICE_SPEECH_CODEC_AMR_WB",
+        "speech_codec = VOICE_SPEECH_CODEC_EVS_SWB",
+        "speech_enc_samp_freq = 16000",
+        "tstamp= 320, marker = 0, seq = 0, len = 33",
+        "tstamp= 320, marker = 0, seq = 0, len = 45",
+        "voice_answer_call",
+        "voice_end_call"
+      ]
+    },
+    {
+      "id": "hawi.modem.ims.external.modem_ims_ut_service",
+      "name": "ims-ut-service-oem",
+      "aliases": [
+        "hawi.modem.ims.external.modem_ims_ut_service",
+        "ims-ut-service-oem",
+        "modem_ims_ut_service"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0x1544"
+        ]
+      },
+      "keywords": [
+        "MSG=GET",
+        "reason = VOICE_REASON_BARR_ALLOUTGOING"
+      ]
+    },
+    {
+      "id": "MODEM_LTE_SCG_FAILURE",
+      "name": "Modem_LTE_ENDC_Failure_Analysis",
+      "aliases": [
+        "MODEM_LTE_SCG_FAILURE",
+        "Modem_LTE_ENDC_Failure_Analysis"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0x1849",
+          "0xB0C0",
+          "0xB0C2",
+          "0xB0CD",
+          "0xB139",
+          "0xB826",
+          "0xB872",
+          "0xB887"
+        ],
+        "QTRACE": [
+          "13/0",
+          "13/1"
+        ]
+      },
+      "keywords": [
+        "'s BW",
+        "2 (qmi)",
+        "ANTENNA",
+        "ANTENNA_2_2",
+        "ANTENNA_4",
+        "CFG FAILURE",
+        "Cause = HO_FAILURE",
+        "ConHandle",
+        "DSDA",
+        "Earfcn",
+        "HARQ_RETX",
+        "HO_FAILURE",
+        "LTE_5G_MGR scg deact reason:2(qmi)",
+        "LTE_RLCUL_MAX_RETX_IND",
+        "LTE_RRC_SILENCE_NR5G_ACTIVITY_REQ",
+        "MsgId",
+        "NR5G_RRC_CFG_STAT_UPD_IND(status:1) FAILURE",
+        "RLF NR RECONFIG FAILURE",
+        "RLF NR RECONGIF FAILURE",
+        "RRCConnectionReconfiguration",
+        "Rcvd LTE_RRC_CONN_MODE_FAILURE_INDI with cause:11, ho:0, cre_cause:23 causing RLF",
+        "Received LTE_RLCUL_MAX_RETX_IND causing RLF",
+        "Received NR5G_RRC_CFG_STAT_UPD_IND(status:1) FAILURE due to validatn from NR5G-RRC, Triggering RLF",
+        "UECapabilityEnquiry",
+        "UECapabilityInformation",
+        "[0x1849]",
+        "[0x1FFB]",
+        "[0x1FFB] EVENT_NR5G_RRC_RADIO_LINK_FAILURE_STAT_V7",
+        "[0xB0C0]OTA_MESSAGES",
+        "[0xB0C2]",
+        "[0xB0CD]",
+        "[0xB826]",
+        "[0xB872]",
+        "[0xB872] NR5G L2 UL TB",
+        "enable_endc = false",
+        "failureType-r15 rlc-MaxNumRetx",
+        "immediate_scg_rel = true",
+        "is not within the bounds of band",
+        "lte_rrc_rlf_stat_event.csv",
+        "maxLayersMIMO-r10 fourLayers",
+        "nDDS",
+        "nas_set_endc_config",
+        "num_mimo_lyr 4 not matched in this CA Combo",
+        "qmi (2)",
+        "requestedFreqBandsNR-MRDC-r15",
+        "scgFailureInformationNR-r15",
+        "volte"
+      ]
+    },
+    {
+      "id": "lte.rach.fail.analysis",
+      "name": "lte-rach-fail-analysis",
+      "aliases": [
+        "Modem_LTE-RACH-Fail-Issue-Analysis",
+        "lte-rach-fail-analysis",
+        "lte.rach.fail.analysis"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0xB061",
+          "0xB062",
+          "0xB063",
+          "0xB06E",
+          "0xB167",
+          "0xB168",
+          "0xB169",
+          "0xB16A",
+          "0xB16E",
+          "0xB172",
+          "0xB173",
+          "0xB193"
+        ],
+        "QTRACE": [
+          "13/0",
+          "13/1"
+        ]
+      },
+      "keywords": [
+        "-> Category D: Repeated RACH / MAC Layer Issue",
+        "-> Category E: Configuration Issue",
+        "-> Proceed to Step 9 (Cross-Reference and Correlate)",
+        "ELSE IF RACH configuration parameters appear abnormal:",
+        "ELSE IF RACH triggered repeatedly in short interval (> 3 attempts in 1 second):",
+        "ELSE:",
+        "lte_rrc"
+      ]
+    },
+    {
+      "id": "lte-as-volte-tx-analyzer",
+      "name": "lte-as-volte-tx-analyzer",
+      "aliases": [
+        "Modem_LTE_AS_VoLTE_TX_Analyzer",
+        "lte-as-volte-tx-analyzer"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0x1830",
+          "0x1831",
+          "0xB064",
+          "0xB097",
+          "0xB0B4",
+          "0xB0C0",
+          "0xB0E2",
+          "0xB0E3",
+          "0xB16E"
+        ]
+      },
+      "keywords": [
+        "0xB0C0 RRCConnectionReconfiguration",
+        "RB Config Index == drb-Identity",
+        "drb-Identity"
+      ]
+    },
+    {
+      "id": "hawi.modem.lte.ca_configuration",
+      "name": "Modem_LTE_CA_Configuration",
+      "aliases": [
+        "Modem_LTE_CA_Configuration",
+        "hawi.modem.lte.ca_configuration"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0xB0C0",
+          "0xB0C2",
+          "0xB0CD",
+          "0xB193",
+          "0xB826"
+        ],
+        "QTRACE": [
+          "13/0"
+        ]
+      },
+      "keywords": [
+        "CA pruning active",
+        "UECapabilityInformation",
+        "[0xB0C0]OTA_MESSAGES",
+        "[0xB0C2]",
+        "[0xB0CD]",
+        "[0xB193]",
+        "[0xB826]",
+        "lte_feature_ca.xml",
+        "num_mimo_lyr not matched in CA Combo"
+      ]
+    },
+    {
+      "id": "lte.cell-selection.debug",
+      "name": "lte-cell-selection-debug",
+      "aliases": [
+        "Modem_LTE_Cell_Selection_Debug",
+        "lte-cell-selection-debug",
+        "lte.cell-selection.debug"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0xB0C0",
+          "0xB113",
+          "0xB115",
+          "0xB173",
+          "0xB176",
+          "0xB17F",
+          "0xB18D",
+          "0xB18E"
+        ],
+        "QTRACE": [
+          "13/0",
+          "13/1"
+        ]
+      },
+      "keywords": [
+        "Acquisition list prepared with",
+        "Camped on physical cell ID",
+        "Cell Lock list",
+        "Continuing multi cell lock selection",
+        "MMR_REG_REQ",
+        "MMR_REG_REQ PLMN=",
+        "entry(s) for multi cell lock cell selection",
+        "lte_rrc"
+      ]
+    },
+    {
+      "id": "hawi.modem.lte.fast_return_to_nr",
+      "name": "Modem_LTE_Fast_Return_To_NR",
+      "aliases": [
+        "Modem_LTE_Fast_Return_To_NR",
+        "hawi.modem.lte.fast_return_to_nr"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0xB0C0",
+          "0xB821"
+        ],
+        "QTRACE": [
+          "13/0",
+          "13/1"
+        ]
+      },
+      "keywords": [
+        "EMC call ongoing",
+        "IRAT_LTE_TO_NR5G : *IRAT REDIRECTION START*",
+        "IRAT_LTE_TO_NR5G : IRAT_TO_NR5G_IN_PROGRESS - Success",
+        "L2NR Fast Return crit is not meet",
+        "RRCC: Check EPS fallback status, call_status 1, is_eps_fallback 1",
+        "Tput status:0",
+        "Tput status:1",
+        "endc_mode:0",
+        "found *** NR Nbrs for Fast Return",
+        "fr_eval_in_prog:1",
+        "is_eps_fallback 1",
+        "mobility_in_prog:0",
+        "nr_deprio:0",
+        "silence_act:0",
+        "trigger RRC local release as normal reason for L2NR Fast Return",
+        "ue_mode:0, device_mode:1, standby_mode:1, endc_mode:0"
+      ]
+    },
+    {
+      "id": "qraft.modem_lte_paging_missed",
+      "name": "Modem_LTE_Paging_Missed",
+      "aliases": [
+        "Modem_LTE_Paging_Missed",
+        "qraft.modem_lte_paging_missed"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0xB0C0",
+          "0xB173",
+          "0xB193"
+        ],
+        "QTRACE": [
+          "13/0",
+          "13/1"
+        ],
+        "EVENT": [
+          "1606"
+        ]
+      },
+      "keywords": [
+        "CRC Result = Fail",
+        "RNTI type = P",
+        "Sending page_ind to NAS",
+        "UE id matched",
+        "[0xB0C0]OTA_MESSAGES"
+      ]
+    },
+    {
+      "id": "hawi.modem.lte.rlf_analysis",
+      "name": "Modem_LTE_RLF_Analysis",
+      "aliases": [
+        "Modem_LTE_RLF_Analysis",
+        "hawi.modem.lte.rlf_analysis"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0x1849",
+          "0xB061",
+          "0xB062",
+          "0xB063",
+          "0xB064",
+          "0xB06E",
+          "0xB082",
+          "0xB083",
+          "0xB086",
+          "0xB092",
+          "0xB093",
+          "0xB0A1",
+          "0xB0A2",
+          "0xB0A5",
+          "0xB0B1",
+          "0xB0C0",
+          "0xB113",
+          "0xB115",
+          "0xB167",
+          "0xB168",
+          "0xB169",
+          "0xB16A",
+          "0xB16B",
+          "0xB16C",
+          "0xB16D",
+          "0xB16E",
+          "0xB16F",
+          "0xB172",
+          "0xB173",
+          "0xB18A",
+          "0xB193"
+        ],
+        "QTRACE": [
+          "11/1",
+          "118/0",
+          "118/1",
+          "124/0",
+          "124/1",
+          "125/0",
+          "125/1",
+          "13/0",
+          "13/1",
+          "76/4",
+          "9/1",
+          "9/2",
+          "9/3",
+          "9/4",
+          "9/5",
+          "9/6",
+          "98/0"
+        ],
+        "EVENT": [
+          "1619",
+          "3475"
+        ]
+      },
+      "keywords": [
+        "Conn rel triggered",
+        "EVENT_LTE_RRC_RADIO_LINK_FAILURE_STAT_V1",
+        "Events_vs_Time",
+        "LTE_RLCUL_MAX_RETX_IND",
+        "QSH_ANALYSIS",
+        "Resume",
+        "Sent sib_read_error_indi.*sibs rcvd = 0x1 sibs not rcvd = 0x2",
+        "UECapabilityInformation",
+        "[0xB0C0]OTA_MESSAGES",
+        "[0xB0C0]OTA_MESSAGES/txt",
+        "[3475]EVENT_LTE_RRC_RADIO_LINK_FAILURE_STAT_V1",
+        "max_retx_threshold",
+        "opt_early_rlf timer expired, RLF",
+        "rb_cfg_idx",
+        "re-establishment",
+        "rlc_sn"
+      ]
+    },
+    {
+      "id": "modem.lte.volte.rx.analysis",
+      "name": "Modem_LTE_VOLTE_RX_Analysis",
+      "aliases": [
+        "Modem_LTE_VOLTE_RX_Analysis",
+        "Modem_LTE_VoLTE_RX_Analyzer",
+        "modem.lte.volte.rx.analysis"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0x1830",
+          "0x1831",
+          "0xB082",
+          "0xB087",
+          "0xB0A1",
+          "0xB0A4",
+          "0xB0C0",
+          "0xB0E2",
+          "0xB0E3",
+          "0xB173"
+        ]
+      },
+      "keywords": [
+        "0xB0C0 LTE RRC OTA Packet (DL_DCCH / RRCConnectionReconfiguration)",
+        "drb-Identity"
+      ]
+    },
+    {
+      "id": "hawi.modem.lte.irat_procedures",
+      "name": "Modem_LTE_and_NR_IRAT_Procedures",
+      "aliases": [
+        "Modem_LTE_and_NR_IRAT_Procedures",
+        "hawi.modem.lte.irat_procedures"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0x1E5A",
+          "0x1FFB",
+          "0xB061",
+          "0xB062",
+          "0xB0C0",
+          "0xB115",
+          "0xB167",
+          "0xB168",
+          "0xB169",
+          "0xB16A",
+          "0xB16B",
+          "0xB16E",
+          "0xB172",
+          "0xB173",
+          "0xB186",
+          "0xB187",
+          "0xB193",
+          "0xB1C5",
+          "0xB1F5",
+          "0xB36C",
+          "0xB821",
+          "0xB97F"
+        ],
+        "QTRACE": [
+          "124/0",
+          "124/1",
+          "13/0",
+          "13/1",
+          "87/0",
+          "87/1",
+          "87/2",
+          "87/3",
+          "9/1",
+          "9/2",
+          "9/3",
+          "9/4",
+          "9/5",
+          "9/6"
+        ],
+        "EVENT": [
+          "1890",
+          "3475"
+        ]
+      },
+      "keywords": [
+        "CRP: Initiating NR cell search on freq **",
+        "CRP: NR cell found, initiating redirect procedure",
+        "CRP: NR cell search failed on redirect freq **",
+        "CRP: Received RRC_RELEASE with NR redirect, freq **",
+        "CRP: Sending NR5G_CPHY_NR2L_REDIR_REQ with freq **",
+        "CSP: Acq succeeded on physical cell ID ** on earfcn **",
+        "CSP: Received Cell Select Cnf",
+        "Cell select req is failure",
+        "Consolidated silence action mask:***, active client mask:***",
+        "EVENT_LTE_RRC_RADIO_LINK_FAILURE_STAT_V1",
+        "IRAT_LTE_FROM_NR5G : #Earfcn[**] = (**)",
+        "IRAT_LTE_FROM_NR5G : INITIAL - Redirected to list!",
+        "IRAT_LTE_FROM_NR5G : IRAT Redir to LTE Failed!!",
+        "IRAT_LTE_FROM_NR5G : NR5G Redir List contains = (**) EARFCNs",
+        "IRAT_LTE_FROM_NR5G : Starting guard timer",
+        "IRAT_LTE_FROM_NR5G : find conn nbr freq **",
+        "IRAT_LTE_FROM_NR5G: find idle nbr freq **",
+        "NR Meas Obj * being pruned",
+        "OTA_MESSAGES",
+        "Peek RRCRelease has redirect IE",
+        "RADIO_LINK_FAILURE_STAT",
+        "T320",
+        "carrierFreq-r15",
+        "cellReselectionPriority-r15",
+        "dmc_Events_vs_Time",
+        "freqPriorityListNR-r15"
+      ]
+    },
+    {
+      "id": "hawi.modem.multimode.mcfg.mcfg_hw_mbn_activation",
+      "name": "MCFG_HW_MBN_activation",
+      "aliases": [
+        "MCFG_HW_MBN_activation",
+        "hawi.modem.multimode.mcfg.mcfg_hw_mbn_activation",
+        "mcfg_hw_mbn_activation"
+      ],
+      "filters": {
+        "DEBUG_MSG": [
+          "91/1",
+          "91/2",
+          "91/3",
+          "91/4"
+        ]
+      },
+      "keywords": [
+        "Activate",
+        "Added one config with type 0",
+        "Candidate cap id",
+        "Config:",
+        "Config: SS-LA-Clarence",
+        "Deactivate current config first before deleting",
+        "Execute policy with oem hw id",
+        "Power down reason",
+        "Reset modem with ssreq_res_code",
+        "Subsystem restart",
+        "Sys M request queued for graceful modem restart",
+        "Sys M request queued for graceful modem restart, wait ..",
+        "The matching capability id is",
+        "Trigger SSR for config change",
+        "_condition_evaluate",
+        "crash",
+        "cv2x_license_status",
+        "efs_errno",
+        "fatal",
+        "hw config sel params are not changed",
+        "hw_autoselect_nv 0x",
+        "last_saved_hw_sel_params",
+        "mcfg_autoselect_by_uim",
+        "mcfg_hw_config_sel_params_got_changed",
+        "mcfg_hw_sel_db.xml",
+        "mcfg_hw_sel_record_action_execute",
+        "mcfg_remote",
+        "mcfg_remote_oem_hw_has_single_entry",
+        "mcfg_remote_update_oem_hw_has_single_entry_efs_file",
+        "mcfg_rfs_hw_digest_version",
+        "mcfg_sel_hw_config_reselect",
+        "mcfg_sel_hw_config_reselect: Trigger SSR for config change. Power down reason : 16",
+        "mcfg_sel_hw_read_device_properties",
+        "mcfg_uim_nv_hw_autoselect_enabled NV=",
+        "mcfg_utils_reset_modem",
+        "nr5g_license_status",
+        "oem_hw_config_count",
+        "oem_hw_id",
+        "prev and curr remote digest version",
+        "read failed",
+        "read_one_line",
+        "remote discovery",
+        "sel_db_digst",
+        "set_active_config",
+        "set_active_config sub0 52c5b3",
+        "set_selected_config"
+      ]
+    },
+    {
+      "id": "modem.mmcp.mmode.lte_nr_reg_and_dom_sel",
+      "name": "LTE/NR Registration and Domain Selection",
+      "aliases": [
+        "LTE/NR Registration and Domain Selection",
+        "MODEM_MMCP_MMODE_LTE_NR_REG_AND_DOM_SEL",
+        "modem.lte_nr.ims.registration_domain_selection",
+        "modem.mmcp.mmode.lte_nr_reg_and_dom_sel"
+      ],
+      "filters": {},
+      "keywords": [
+        "! PM provided incorrect LTE/NR5G band_cap and limited_band_cap",
+        ", act_type",
+        ", addl_action",
+        ", asubs_id=",
+        ", backoff timer",
+        ", block_reas",
+        ", call_id",
+        ", curr_dds",
+        ", current_nr5g_cap =",
+        ", current_reg_status",
+        ", dds_switch",
+        ", device_policy_changes 0x",
+        ", is_locked",
+        ", is_tau_reqd",
+        ", new mode 0x",
+        ", nv",
+        ", ph_mode 0x",
+        ", policy_changes 0x",
+        ", prev_nr_pref",
+        ", ps_detach",
+        ", sa_disabled",
+        ", sim_state",
+        ", sms_domain_pref=",
+        ", srv_mode=",
+        ", stk=",
+        ", sub",
+        ", sub=",
+        ", sys_mode=",
+        ", timer:",
+        ", update NR5G SA disable reason",
+        ">>PH FORCE_PREF: voice_dom_pref for sub",
+        "CM->MSGR: SEND: SMS_DOMAIN_PREF_CHANGED_IND, sys_mode=",
+        "CM->NAS: Sending CM_DDS_SWITCH_IND, dds_sub=",
+        "CM->PM, sub",
+        "CMPM_HOLD_ACQ: Update hold_acq_sub",
+        "Check_timer: Reject 27 timer [",
+        "Current nr_pref",
+        "Domain selection globals are not reset sub",
+        "Domsel: SMS_DOM_SEL_SHGD_IND Old",
+        "Domsel:Process No SMS Ind: is_sms_mandatory =",
+        "FILL_SRV_REQ: Ignore RPLMNACT for the non-DDS sub",
+        "FORCE_POLICY: sub",
+        "FORCE_PREF",
+        "IMS_REG:",
+        "IMS_REG: failed over NR5G. cause code",
+        "IMS_REG: success over NR5G, current_reg_status",
+        "IMS_enable",
+        "Ignore IMS REG status: No NR5G stack capability stack_capability =",
+        "MSC: PS_DETACH: addl_action 0x",
+        "MSGR->CM: UPDATE_SMS_DOMAIN_PREF_REQ, sys_mode",
+        "NR5G_REMOVAL: REMOVE SA BANDS",
+        "PLMN_BLOCK:",
+        "PLMN_BLOCK: is_lte_only=1, is_ims_enabled",
+        "PM -> PMPRX: srv_mode_chgd: asubs_id=",
+        "PM->CM: call_mode_chgd, call_mode new",
+        "PM->CM: domain_cap_chgd, new domain_cap=",
+        "PM->CM: voice_domain_pref_chgd, new voice_domain_pref=",
+        "PROC SIM_STATE_UPDATE: rpt",
+        "PS_DETACH_EVAL: sub",
+        "SMS_DOM_SEL: Delay PLMN blocking till CSFB call end =",
+        "SMS_DOM_SEL: SMS Domsel:Stay on LTE/NR5G as SMS is not Mandatory",
+        "SMS_DOM_SEL: Skip SMS DOM SEL IMS will perform PLMN blocking",
+        "SMS_DOM_SEL_NR5G:",
+        "SUB MSC->MMOC: sub",
+        "Sanity fail for sub",
+        "Unexpected PLMN block type",
+        "VOIMS: SR expired for call_id",
+        "VOIMS: t_wait for index",
+        "VONR_OFF",
+        "VOTE: CAP: old_nr5g_cap =",
+        "] for PLMN",
+        "blocking_interval=0",
+        "cause=10",
+        "cs_for_request set to FALSE due to no cs rats in rat prio list",
+        "current",
+        "expired - curr_systime:",
+        "expired, cat",
+        "from PM, current: voice_dom_pref",
+        "ims_reg_status_wait_timer",
+        "in fallback state",
+        "in t_wait state, sub",
+        "is_ims_fail_all_ps_rats",
+        "is_locked=",
+        "is_lte_removal_enabled",
+        "is_plmn_block_req_in_lte_only_mode",
+        "is_tau_reqd=1",
+        "log_tag_or_nv",
+        "lte_disable_duration",
+        "lte_max_ims_reg_attempt_timer",
+        "max_ims_reg_attempt_timer",
+        "min_plmn_blocking_duration",
+        "modem.mmode.ims.domain-selection",
+        "modem.mmode.ims.log-print-reference",
+        "modem.mmode.ims.log-print-reference.registration-efs",
+        "modem.mmode.lte-nr-registration-efs",
+        "modem.mmode.lte-nr.registration-efs",
+        "non_dds_lte_removal_timer",
+        "not_ok_to_enforce: sub",
+        "nr5g_plmn_blocking_timer",
+        "old mode 0x",
+        "pasted_log_lines",
+        "query_type",
+        "rat_context",
+        "reg_fail_timer",
+        "skip_ndds_plmn_blocking",
+        "sms_domain_pref",
+        "sms_domain_pref_list",
+        "sms_mandatory",
+        "sub_id",
+        "sys_call_mode_t",
+        "ue_usage_setting",
+        "voice_domain_pref",
+        "vops_off_timer"
+      ]
+    },
+    {
+      "id": "hawi.modem.multimode.mmcp.sups.configuration",
+      "name": "mmcp-sups-configuration-expert",
+      "aliases": [
+        "Modem_MMCP_MMODE_Sups_config_analyzer",
+        "hawi.modem.multimode.mmcp.sups.configuration",
+        "mmcp-sups-configuration-expert",
+        "qualcomm.mmcp.sups.configuration"
+      ],
+      "filters": {},
+      "keywords": [
+        ", camped_mode_at_orig",
+        ", camped_mode_at_sups_orig",
+        ", cmd_subs_id",
+        ", dsda_sups_data_not_suspended",
+        ", fast_return_to_nr5g",
+        ", favored_mode_pref 0x",
+        ", favored_sups_mode_pref 0x",
+        ", redial_mask",
+        ", silent_redial",
+        ", sub",
+        ", sups domain pref=",
+        "CM->NAS: SUPS_END: FR:",
+        "CM->NAS: SUPS_END: FR: Send CM_CS_CALL_ENDED_REQ, sub",
+        "CMEFS_CW_SUPS_CONFIG_ARRAY_SIZE",
+        "CMEFS_IMMEDIATE_SUPS_SYNC_WITH_CS",
+        "FAST_RETURN to NR triggerd by SUPS activity",
+        "FAST_RETURN to NR triggerd by SUPS activity, camped_mode_at_orig",
+        "IP call present. End SUPS with CS domain",
+        "MM_REJ_ENFORCE_CS_RAT received, update pref_reas to",
+        "MSIM_DATA_SUSPEND: CIWLAN_MSIM: sub",
+        "MSIM_DATA_SUSPEND: sub",
+        "SS_CFNL",
+        "SUPS additional attempt over CS",
+        "SUPS command",
+        "SUPS event=",
+        "SUPS t_wait timer expired",
+        "SUPS t_wait timer expired. ss_ref",
+        "SUPS: buffer the sups cmd on sub",
+        "SUPS_END: process standby_chgd on sub",
+        "SUPS_FW_LL: Not needed to suspend data on other sub",
+        "SUPS_FW_LL: SMREG_PS_SIGNALING_REL_REQ sent on SubsId",
+        "SUSP_AFTER_E911: not ok to force device policy when sub is suspended",
+        "Unforce SUPS pref, ss_ref",
+        "cm_sups_info_s_type",
+        "cmd_subs_id updated:",
+        "cmipsups_route",
+        "cmipsups_route: cmd=",
+        "cmsups2_cmd_redial_forward_ll",
+        "cmsups2_cmd_redial_forward_ll: sups_domain",
+        "cmsups2_process_ok_to_orig",
+        "cmsups2_process_ok_to_orig: F3_FOR_RCI: ss_ref",
+        "cmsups2_process_ok_to_orig: ss_ref",
+        "cmsups2_process_ok_to_orig: t_wait_timer failed to start. End SUPS activity",
+        "cmsups_nv_refresh: sups_ptr->sub_info[i] NULL ptr for asubs_id",
+        "cw_nw_status",
+        "cw_sups_enable_opr_mask",
+        "for 1s or until service CNF",
+        "for sups cmd",
+        "pending on WLAN for sub",
+        "reserved",
+        "sim_state",
+        "start_twait_sups",
+        "sups_force_pref",
+        "sups_force_pref: sub"
+      ]
+    },
+    {
+      "id": "hawi.modem.multimode.nas.rplmn_ehplmn_selection",
+      "name": "modem-mmcp-nas-rplmn-ehplmn-selection",
+      "aliases": [
+        "hawi.modem.multimode.nas.rplmn_ehplmn_selection",
+        "modem-mmcp-nas-rplmn-ehplmn-selection"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0x7130",
+          "0x7131",
+          "0x7132",
+          "0x7133",
+          "0x7134",
+          "0x7135",
+          "0x7136",
+          "0x7137",
+          "0x7138",
+          "0x7139",
+          "0x713A",
+          "0x713D",
+          "0x713E",
+          "0x7150",
+          "0x7151",
+          "0x7152",
+          "0x7153",
+          "0x7154",
+          "0x7155",
+          "0x7156",
+          "0x7157",
+          "0x7158",
+          "0x7159",
+          "0x7160",
+          "0x7161",
+          "0x7162",
+          "0x7163",
+          "0x7168",
+          "0xB0E0",
+          "0xB0E1",
+          "0xB0E2",
+          "0xB0E3",
+          "0xB0E4",
+          "0xB0E5",
+          "0xB0E6",
+          "0xB0E7",
+          "0xB0EA",
+          "0xB0EB",
+          "0xB0EC",
+          "0xB0ED",
+          "0xB0EE",
+          "0xB0EF",
+          "0xB0F2",
+          "0xB0F5",
+          "0xB0F6",
+          "0xB0F7",
+          "0xB0F9",
+          "0xB800",
+          "0xB801",
+          "0xB803",
+          "0xB804",
+          "0xB805",
+          "0xB806",
+          "0xB807",
+          "0xB808",
+          "0xB809",
+          "0xB80A",
+          "0xB80B",
+          "0xB80C",
+          "0xB80D",
+          "0xB80E",
+          "0xB80F",
+          "0xB810",
+          "0xB811",
+          "0xB812",
+          "0xB813",
+          "0xB814",
+          "0xB815"
+        ],
+        "QTRACE": [
+          "13/0",
+          "47/0",
+          "47/1",
+          "47/2",
+          "87/0"
+        ]
+      },
+      "keywords": [
+        "EHPLMN camping 1",
+        "LRPLMNSI",
+        "RRC_SERVICE_IND",
+        "SET HPMLN to be given priority in OOS/Power up 1",
+        "is_hplmn_has_to_be_selected"
+      ]
+    },
+    {
+      "id": "hawi.modem.qmi.sig_info_ind_report_analysis",
+      "name": "Modem_QMI_Sig_Info_IND_Debug",
+      "aliases": [
+        "Modem_QMI_SIG_INFO_IND REPORT ANALYSIS",
+        "Modem_QMI_Sig_Info_IND_Debug",
+        "hawi.modem.qmi.sig_info_ind_report_analysis"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0x1544"
+        ],
+        "QTRACE": [
+          "42/0",
+          "42/1"
+        ],
+        "DEBUG_MSG": [
+          "90/2"
+        ]
+      },
+      "keywords": [
+        "(~1803-1812). **Skips the threshold/delta check entirely** — sends as soon as the newly-active RAT has valid data. This is why a",
+        ", client",
+        ", timer",
+        "CM_SS_EVENT_RSSI",
+        "GW_RSSI",
+        "QMI_NAS_SIG_INFO_IND",
+        "SIG_INFO_IND",
+        "SIG_INFO_IND not sent",
+        "UPDATE_MEAS",
+        "check_send_ind_for_cm_measurement_event",
+        "check_send_ind_for_hys_timer_event",
+        "curr_sig_info_mode == 0",
+        "diff = new_value - old_value",
+        "diff = new_value - threshold_value",
+        "hysteresis:",
+        "hysteresis: sub",
+        "ind_msg",
+        "nas_config_sig_info2_req",
+        "nas_indication_register_req",
+        "new_value < threshold <= old_value",
+        "old_value < threshold <= new_value",
+        "qm_meas_process_cm_measurement_event",
+        "qm_meas_process_hys_timer_expiry_evt",
+        "qm_meas_report_new_active_rats",
+        "qm_nas_clnt_crossed_threshold",
+        "qmi_nasi_send_ind",
+        "ret_val = diff > (config2_info.hysteresis / 10)",
+        "ret_val = diff > config2_info.hysteresis",
+        "ret_val = diff >= config2_info.delta",
+        "rssi",
+        "send_client_sig_info_ind",
+        "sig_info",
+        "sig_info_ind",
+        "sig_info_mode"
+      ]
+    },
+    {
+      "id": "hawi.modem.ril.mms.mms_debug",
+      "name": "MMS_DEBUG",
+      "aliases": [
+        "MMS_DEBUG",
+        "hawi.modem.ril.mms.mms_debug"
+      ],
+      "filters": {},
+      "keywords": [
+        "Content-Type",
+        "MmsApp",
+        "MmsBroadcastReceiver",
+        "MmsConfig: MMSC URL = null",
+        "MmsNetworkManager: acquire network failed",
+        "POST",
+        "SendRequest",
+        "SmsApplication: no default SMS app",
+        "TelephonyFramework: MMS request failed",
+        "TelephonyFramework:V",
+        "WapPushOverSms: dispatchWapPdu",
+        "X-Mms-*",
+        "adb logcat"
+      ]
+    },
+    {
+      "id": "hawi.modem.uim.bip_troubleshooting_workflow",
+      "name": "Modem_UIM_CAT_Commands",
+      "aliases": [
+        "Modem_UIM_BIP_Troubleshooting_Workflow",
+        "Modem_UIM_CAT_Commands",
+        "hawi.modem.uim.bip_troubleshooting_workflow"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0x1098",
+          "0x14CE",
+          "0x1901",
+          "0x1903",
+          "0x19B7",
+          "0x1CC8"
+        ],
+        "QTRACE": [
+          "64/0",
+          "64/1"
+        ],
+        "DEBUG_MSG": [
+          "21/0",
+          "21/1",
+          "21/2",
+          "21/3",
+          "21/4",
+          "58/0",
+          "58/1",
+          "58/2",
+          "58/3",
+          "58/4",
+          "63/0",
+          "63/1",
+          "63/2",
+          "63/3",
+          "63/4"
+        ]
+      },
+      "keywords": [
+        "!= 0x00",
+        ", Buffer Len:",
+        "80 F2",
+        "Bearer Type:",
+        "CALL_CM_GW",
+        "CALL_IMS_EXT",
+        "CALL_IMS_INT",
+        "Channel status for send data is wrong for send data",
+        "Channel with status 0x",
+        "DS_EMSGSIZE error -- update channel status",
+        "ESTK sending data available event with size",
+        "IN GSTK_CLOSE_CH_REQ",
+        "IN GSTK_OPEN_CH_REQ",
+        "IN GSTK_RECEIVE_DATA_REQ",
+        "IN GSTK_SEND_DATA_REQ",
+        "Link Drop already sent",
+        "Receive Data sends terminal response with remaining len:",
+        "Send Data Channel status is pending",
+        "Send Data channel status active: send_data_immediately=",
+        "Send Data len 0x",
+        "Sending data available envelope failed",
+        "Transport Protocol Type",
+        "Wrote",
+        "bytes with error_num",
+        "dns_requested",
+        "dsnet_Start returned [Non-Zero]",
+        "dss_async_select failed",
+        "dss_write did not write all the bytes of send data",
+        "dss_write returns unhandled error_num",
+        "estk_bip_get_prio_network",
+        "estk_bip_network_cb (error_num=0)",
+        "estk_bringup_iface",
+        "estk_convert_ch_id_to_index failed",
+        "estk_process_open_ch_req",
+        "estk_send_terminal_response failed",
+        "has no available data",
+        "not active to receive data",
+        "on_demand_link_est",
+        "receive_data_allowed is FALSE, returning error",
+        "sock_fd is negative"
+      ]
+    },
+    {
+      "id": "uim.mmgsdi.debug",
+      "name": "mmgsdi-debug",
+      "aliases": [
+        "Modem_UIM_MMGSDI_End-to-End_Flow",
+        "mmgsdi-debug",
+        "uim.mmgsdi.debug"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0x1098",
+          "0x14CE",
+          "0x19B7"
+        ],
+        "QTRACE": [
+          "64/0",
+          "64/1"
+        ],
+        "DEBUG_MSG": [
+          "21/0",
+          "21/1",
+          "21/2",
+          "21/3",
+          "21/4",
+          "6039/1",
+          "6039/2",
+          "6039/3",
+          "6039/4",
+          "63/0",
+          "63/1",
+          "63/2",
+          "63/3",
+          "63/4"
+        ]
+      },
+      "keywords": [
+        ", MMGSDI_CARD_ERR_UNKNOWN_ERROR)",
+        ", MMGSDI_SESSION_CLOSED_CAUSE_CARD_REMOVED)",
+        "BLOCK_DATA",
+        "BLOCK_NONE",
+        "BLOCK_VOICE",
+        "BLOCK_VOICE_OR_DATA",
+        "Do not run EONS algo as OPL PNN cache is not ready",
+        "MMGSDI_CARD_ERR_SAP_CONNECTED",
+        "MMGSDI_SAP_CONNECTING",
+        "MMGSDI_SAP_CONNECT_EVT",
+        "MMGSDI_SIM_BUSY",
+        "MMGSDI_STATE_NO_CARD",
+        "UIM_MSG_*",
+        "UIM_RESET_SWITCH_UIM_PASSIVE_F",
+        "app_state",
+        "card_error_condition",
+        "card_error_condition = MMGSDI_CARD_ERR_SAP_CONNECTED",
+        "card_error_condition == MMGSDI_CARD_ERR_SAP_CONNECTED",
+        "mmgsdi_eons_opl_pnn_cache_ready()",
+        "mmgsdi_eons_trigger_enum_type",
+        "mmgsdi_evt_build_and_send_card_error(",
+        "mmgsdi_is_sim_in_slot_available()",
+        "mmgsdi_sap_conn_condition_enum_type",
+        "mmgsdi_sap_connected[slot_index] = TRUE",
+        "mmgsdi_sap_rsp_sap_connect()",
+        "mmgsdi_sap_sap_connect()",
+        "mmgsdi_util_update_session_closed_cause_for_slot("
+      ]
+    },
+    {
+      "id": "hawi.modem.uim.mmgsdi_introduction_and_log_analysis",
+      "name": "Modem_UIM_MMGSDI_Initialization_SUCI_Analysis",
+      "aliases": [
+        "Modem_UIM_MMGSDI_Initialization_SUCI_Analysis",
+        "Modem_UIM_MMGSDI_Introduction_And_Log_Analysis",
+        "hawi.modem.uim.mmgsdi_introduction_and_log_analysis"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0x1098",
+          "0x14CE",
+          "0x1901",
+          "0x1903",
+          "0x19B7",
+          "0x1CC8"
+        ],
+        "QTRACE": [
+          "47/0",
+          "47/1",
+          "47/2",
+          "64/0",
+          "64/1"
+        ],
+        "DEBUG_MSG": [
+          "21/0",
+          "21/1",
+          "21/2",
+          "21/3",
+          "21/4"
+        ]
+      },
+      "keywords": [
+        "19B7",
+        "1CC8",
+        "63 CX",
+        "6A 88",
+        "6C 0F",
+        "6D 00",
+        "6X XX",
+        "78 A1 0D",
+        "80 78 00 01 0F",
+        "ATR received",
+        "CARD_ERROR",
+        "CARD_REMOVED",
+        "CM_MMGSDI_CARD_STATUS_IND",
+        "CM_SERVICE_CNF",
+        "CM_SERVICE_REQ",
+        "DISABLED",
+        "EF_5GAUTHKEYS",
+        "EF_5GS3GPPLOCI",
+        "EF_5GS3GPPNSC",
+        "EF_IMSI",
+        "EF_LOCI",
+        "EF_PSLOCI",
+        "EF_SUCI_Calc_Info",
+        "EF_UAC_AIC",
+        "EF_UST",
+        "ENABLED_NOT_VERIFIED",
+        "ENABLED_VERIFIED",
+        "GET IDENTITY",
+        "Invalidate mobility",
+        "Invalidate mobility: update_status/sim_state/delete_eplmn_list",
+        "MMGSDI returned incorrect NW PKI",
+        "MMGSDI returned incorrect protection scheme",
+        "MMGSDI returned status",
+        "MMGSDI returned status X in GET_SUCI_CNF or SUCI parsing failed",
+        "MMGSDI_FEATURE_SIM_FILE_FALLBACK_TO_FS",
+        "MMGSDI_GET_ALL_PIN_STATUS_REQ",
+        "MMGSDI_READ_REQ",
+        "MMGSDI_SELECT_AID_REQ",
+        "MMGSDI_SUBSCRIPTION_READY_EVT",
+        "MMR_REG_REQ",
+        "MMR_SIM_AVAILABLE_IND",
+        "PIN1 enabled and verified",
+        "PIN1 state",
+        "PIN1 verified",
+        "Queue of MMGSDI command: MMGSDI_SESSION_GET_SUCI_REQ",
+        "READ_REQ",
+        "Reading EF",
+        "Received SIM_MM_USIM_GET_SUCI_CNF",
+        "SELECT AID",
+        "SUCI data generated",
+        "SUCI data len",
+        "SUCI data len 0",
+        "SUCI data len X",
+        "SUCI: 0x",
+        "SUCI[0]",
+        "SUCI[X]:",
+        "Sending down GET_IDENTITY command to UIM",
+        "Srv Type 0x",
+        "Srv Type 0x47b",
+        "Srv Type 0x47b, UICC SRV AVAILABLE",
+        "Srv Type 0x47c",
+        "Srv Type 0x47c, UICC SRV AVAILABLE",
+        "UICC SRV AVAILABLE",
+        "UIM APDU SLOT_X Type = RX Data",
+        "UIM APDU SLOT_X Type = TX/RX Data",
+        "UIM POWER UP",
+        "VERIFY PIN",
+        "mmgsdi_cnf_build_and_queue, CNF Build Status",
+        "mmgsdi_session_get_suci",
+        "sim_state = 4",
+        "srv status = 1"
+      ]
+    },
+    {
+      "id": "hawi.modem.uim.uimdriver",
+      "name": "uimdrv-callflow",
+      "aliases": [
+        "Modem_UIM_UIMDRIVER",
+        "hawi.modem.uim.uimdriver",
+        "uimdrv-callflow",
+        "uimdrv.callflow"
+      ],
+      "filters": {},
+      "keywords": [
+        ", GPIOINT_TRIGGER_DUAL_EDGE, uimUimctrlIsr, uim_ptr)",
+        "GPIOInt_RegisterIsr(",
+        "GPIO_GetPinNumber(uim_hw_if.gpio[id].m_PresentGpioId)",
+        "UIM_DONE_ST",
+        "UIM_INTERNAL_WAKE_UP_F",
+        "UIM_MAX_NUM_ATTEMPTS",
+        "UIM_SWITCH_VOLTAGE",
+        "cmd_rsp_timer",
+        "current_selected_port_id[]",
+        "current_voltage_class",
+        "manage_lsi.lsi_number",
+        "mep_mode",
+        "num_of_ports",
+        "uim_interface_gstk_send_recovery_cmd()",
+        "uimdrv/build/uim_uimdrv.scons",
+        "uimgen_iso_handle_manage_lsi_configure_st_rsp",
+        "uimgen_iso_handle_manage_lsi_reset_st",
+        "uimgen_iso_handle_manage_lsi_reset_st_rsp",
+        "uimgen_iso_handle_manage_lsi_select_st",
+        "uimgen_iso_handle_manage_lsi_select_st_rsp",
+        "uimgen_iso_handle_read_iccid_st_rsp()",
+        "uimgen_iso_handle_select_lsi_zero_st",
+        "uimgen_iso_handle_switch_lsi_st",
+        "uimgen_iso_handle_switch_lsi_st_rsp",
+        "uimgen_iso_handle_switch_ports_st"
+      ]
+    },
+    {
+      "id": "sns-qms-usage-en",
+      "name": "sns-qms-usage-en",
+      "aliases": [
+        "MODEM_5G_SNS_Interface_Usage",
+        "sns-qms-usage-en"
+      ],
+      "filters": {},
+      "keywords": []
+    },
+    {
+      "id": "Modem_Data_AT_OEM_CMD",
+      "name": "Modem_Data_AT_OEM_CMD",
+      "aliases": [
+        "Modem_Data_AT_OEM_CMD"
+      ],
+      "filters": {},
+      "keywords": []
+    },
+    {
+      "id": "Modem_Data_Extract_ADPL",
+      "name": "Modem_Data_Extract_ADPL",
+      "aliases": [
+        "Modem_Data_Extract_ADPL"
+      ],
+      "filters": {},
+      "keywords": []
+    },
+    {
+      "id": "Qualcomm Policyman Capability Checker",
+      "name": "Qualcomm Policyman Capability Checker",
+      "aliases": [
+        "Qualcomm Policyman Capability Checker",
+        "MODEM_MMCP_Policyman_capability_checker"
+      ],
+      "filters": {},
+      "keywords": []
+    },
+    {
+      "id": "mcfg-crash-debug",
+      "name": "mcfg-crash-debug",
+      "aliases": [
+        "mcfg-crash-debug",
+        "modem_mmcp_mcfg_crash_analyzer"
+      ],
+      "filters": {},
+      "keywords": []
+    },
+    {
+      "id": "mbn-manual-select",
+      "name": "mbn-manual-select",
+      "aliases": [
+        "mbn-manual-select",
+        "MODEM_MMCP_MCFG_MBN_MANUAL_ACTIVATION"
+      ],
+      "filters": {},
+      "keywords": []
+    },
+    {
+      "id": "mcfg-merge-xml",
+      "name": "mcfg-merge-xml",
+      "aliases": [
+        "mcfg-merge-xml",
+        "MODEM_MMCP_MCFG_XML_MERGE"
+      ],
+      "filters": {},
+      "keywords": []
+    },
+    {
+      "id": "Modem_QMI_Client_Service_Generator",
+      "name": "Modem_QMI_Client_Service_Generator",
+      "aliases": [
+        "Modem_QMI_Client_Service_Generator"
+      ],
+      "filters": {},
+      "keywords": []
+    },
+    {
+      "id": "Modem_QMI_IDL_Message_Generator",
+      "name": "Modem_QMI_IDL_Message_Generator",
+      "aliases": [
+        "Modem_QMI_IDL_Message_Generator"
+      ],
+      "filters": {},
+      "keywords": []
+    },
+    {
+      "id": "Modem_UIM_pSIM_eSIM_Switch_Troubleshooting_Workflow",
+      "name": "Modem_UIM_pSIM_eSIM_Switch_Troubleshooting_Workflow",
+      "aliases": [
+        "Modem_UIM_pSIM_eSIM_Switch",
+        "Modem_UIM_pSIM_eSIM_Switch_Troubleshooting_Workflow"
+      ],
+      "filters": {
+        "LOG_PACKET": [
+          "0x1098",
+          "0x14CE",
+          "0x1544",
+          "0x1901",
+          "0x1903",
+          "0x19B7",
+          "0x1CC8"
+        ],
+        "QTRACE": [
+          "47/0",
+          "47/1",
+          "47/2",
+          "64/0",
+          "64/1"
+        ],
+        "DEBUG_MSG": [
+          "21/0",
+          "21/1",
+          "21/2",
+          "21/3",
+          "21/4",
+          "58/1",
+          "58/2",
+          "58/3",
+          "58/4",
+          "63/0",
+          "63/1",
+          "63/2",
+          "63/3",
+          "63/4"
+        ]
+      },
+      "keywords": [
+        ", activated: 0x",
+        ", phy_slot: 0x",
+        ", session_type: 0x",
+        ", slot: 0x",
+        ", status: 0x",
+        ", window_seconds=4)",
+        "MMGSDI_CARD_ERROR",
+        "MMGSDI_CARD_ERROR, condition: 0x2, slot: 0x2, phy_slot: 0x2",
+        "MMGSDI_CARD_INSERTED_EVT",
+        "MMGSDI_CARD_INSERTED_EVT, slot: 0x",
+        "MMGSDI_PERSO_EVT",
+        "MMGSDI_PERSO_EVT, feature: 0x",
+        "MMGSDI_PIN1_EVT",
+        "MMGSDI_PIN1_EVT, status: 0x",
+        "MMGSDI_SESSION_CHANGED_EVT",
+        "MMGSDI_SESSION_CHANGED_EVT, app: 0x",
+        "MMGSDI_SUBSCRIPTION_READY_EVT",
+        "MMGSDI_SUBSCRIPTION_READY_EVT, app: 0x",
+        "MsgType = Response",
+        "QMI_ERR_DEVICE_IN_USE",
+        "QMI_ERR_INTERNAL",
+        "QMI_ERR_INVALID_ARG",
+        "QMI_RESULT_FAILURE",
+        "QMI_RESULT_SUCCESS",
+        "QTRACE",
+        "USIM",
+        "USIM/LowFreq/High/USIM",
+        "User Identity Module",
+        "[response_timestamp, response_timestamp + 4s]",
+        "app_state",
+        "card_state",
+        "condition",
+        "condition:",
+        "curr_sim_type",
+        "error",
+        "error_code != QMI_ERR_NO_EFFECT",
+        "filter_log_records",
+        "logical slot info",
+        "offset",
+        "phy_slot",
+        "query_evidence",
+        "requ_sim_type",
+        "result",
+        "result = QMI_RESULT_FAILURE",
+        "result = QMI_RESULT_SUCCESS",
+        "sim_type request for instance:",
+        "slice_log_records(source=\"DEBUG_MSG\", anchor=",
+        "slice_log_records(source=\"DEBUG_MSG\", anchor=\"MMGSDI_CARD_ERROR\", window_seconds=2)",
+        "switch slot request for logical slot:",
+        "timestamp",
+        "timestamp_us",
+        "uim_get_logical_slot_info",
+        "uim_set_sim_type",
+        "uim_sm_link_established",
+        "uim_switch_slot"
+      ]
+    }
+  ]
+}

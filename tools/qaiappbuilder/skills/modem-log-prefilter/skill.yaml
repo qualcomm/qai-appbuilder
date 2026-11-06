@@ -1,0 +1,26 @@
+id: "hawi.modem.common.log_prefilter"
+version: "1.4.0"
+title: "Modem Log Requirements and Prefilter"
+description: >-
+  Combine packet, trace, event and keyword requirements for selected modem
+  analysis skills, extract HDF/ISF captures through the bundled QUTS adapter,
+  and select complete matching records from decoded captures.
+tech_area:
+  - "Modem"
+skill_category: "Debug"
+required_inputs:
+  - name: "Selected modem skills"
+    description: "Skill IDs or names from the bundled requirements table."
+    required: true
+  - name: "Log capture"
+    description: "Decoded TXT/JSONL or HDF/ISF with QUTS and its Python SDK installed. Not needed for planning."
+    required: false
+applicability:
+  products: []
+  releases: []
+  audience_roles:
+    - "approved_oem_engineer"
+    - "field_support_engineer"
+depends_on: []
+related_skills: []
+document_references: []
