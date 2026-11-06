@@ -31,6 +31,12 @@ that correctly (own venv, entry-point lookup, registration, connection test).
 4. `mcp_manage(action="install_wheel", name="<server name>", wheel_path="<absolute path to .whl>", args=["--stdio"])`
    - Use the `args` you found in the README (not always `--stdio`); environment variables
      the server needs go in `env={...}`.
+   - **Companion packages (`extra_wheels`):** every MCP server gets its **own isolated Python
+     environment**, so a package installed for one server is invisible to another. If the
+     README (or an error) says this server needs another package "in the same Python
+     environment" — for example a catalog / data package it imports at run time — pass that
+     package's local `.whl` in `extra_wheels=[...]` so both are installed together. Do not use
+     `PYTHONPATH` tricks, and do not copy that package's contents by hand.
    - **Large results:** results over the model's normal per-result budget (30K characters
      for qwen/deepseek/glm, 50K for claude/gpt) are cut head+tail and the full text is saved to
      a file named in the footer (`[full_output_saved] path=...` -> `read` it). For a server whose
@@ -75,6 +81,13 @@ that correctly (own venv, entry-point lookup, registration, connection test).
   scripts and it is unclear which starts the MCP server (the message lists them: ask the user,
   then retry with `entry="<script>"`), or the `entry` you gave does not exist. Nothing was
   installed or registered yet.
+- **`ModuleNotFoundError` / "install … in the same Python environment"** (from a tool call or
+  `test`) — the server imports a package that lives in a different server's environment. Find
+  that package's `.whl` and run `install_wheel` again for this server with it in
+  `extra_wheels` (the existing environment is reused and upgraded). If a tool takes a skill /
+  document reference, prefer the **reference the server documents** (an id or a path to the
+  original file) over re-typing the document's text into a new file — re-typing is slow and
+  silently alters the content.
 - **Registered but `NOT connected`, with an `error:` line** — show the user that error. A
   handshake timeout usually means the program started but is not in MCP stdio mode (missing
   `--stdio`-style flag — re-run `install_wheel` with the right `args`), or it crashed on
