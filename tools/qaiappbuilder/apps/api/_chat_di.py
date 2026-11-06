@@ -99,6 +99,8 @@ from qai.chat.adapters import (
     McpManageToolHandler,
     McpServerRegistry,
     OfflinePromptEnhancer,
+    SKILL_INSTALL_TOOL_SCHEMA,
+    SkillInstallToolHandler,
     OfflineTitleGenerator,
     ProviderAwareModelResolver,
     QueuedSubAgentSessionRepository,
@@ -2508,6 +2510,17 @@ def build_chat_services(container: Container) -> ChatServices:
             data_dir=container.data_paths.root,
         ).execute,
         schema=MCP_MANAGE_TOOL_SCHEMA,
+    )
+    # ``skill_install``: install a user's skill (folder / .zip) into ``<repo>/skills`` --
+    # the directory ``SkillDiscovery`` scans live. Built-in skill ids are refused so a user
+    # skill cannot shadow one (``skills/`` wins over ``factory/chat_features/``).
+    tools.register(
+        "skill_install",
+        SkillInstallToolHandler(
+            skills_root=container.repo_root / "skills",
+            builtin_root=container.repo_root / "factory" / "chat_features",
+        ).execute,
+        schema=SKILL_INSTALL_TOOL_SCHEMA,
     )
 
     # Promote-ready turn-end detection (migration 057): adapt App Builder's
