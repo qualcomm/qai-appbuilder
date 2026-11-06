@@ -107,6 +107,8 @@ TOOL_ORDER: tuple[str, ...] = (
     # ``SUB_AGENT_EXCLUDED_TOOLS``). Listed so ``TOOL_ORDER - enabled_tools``
     # (the scheduled-task disable set) accounts for it.
     "mcp_manage",
+    # Skill self-service install (main agent only, same reasoning as mcp_manage).
+    "skill_install",
     # Conditional / mode-specific tools last (only advertised in their mode).
     # ``implementation_plan`` is advertised ONLY in a multi-agent discussion
     # (see :data:`CONDITIONAL_TOOL_NAMES` below); the main-agent + sub-agent
@@ -176,10 +178,12 @@ _APP_BUILDER_CONDITIONAL_TOOL_NAMES: frozenset[str] = frozenset(
 #   * ``mcp_manage`` — installing / registering MCP servers (third-party code)
 #     and the global MCP switch need the user in the loop, which only the main
 #     agent has.
+#   * ``skill_install`` — installing a user's skill (it may bundle scripts) needs
+#     the user's confirmation, which only the main agent can ask for.
 # The take-over path in ``streaming`` derives its ``excluded`` set from
 # this same constant, so the two loops share ONE definition.
 SUB_AGENT_EXCLUDED_TOOLS: frozenset[str] = frozenset(
-    {"agent", "question", "scheduled_task", "sub_agent", "mcp_manage"}
+    {"agent", "question", "scheduled_task", "sub_agent", "mcp_manage", "skill_install"}
 )
 
 #: Tools never advertised on an ON-DEVICE (local) turn -- main agent,
