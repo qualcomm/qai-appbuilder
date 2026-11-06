@@ -553,7 +553,6 @@ Skills are the plugin-extension mechanism. There are two kinds, kept separate by
 | `file-manager` | File system operations |
 | `weather` | China weather queries |
 | `read-arxiv-paper` | Read & summarize arXiv papers |
-| `email-163-com` | 163 Mail send/receive |
 
 ### How to Use
 

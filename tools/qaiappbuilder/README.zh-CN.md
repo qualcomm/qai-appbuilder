@@ -506,7 +506,6 @@ Skill 是插件扩展机制，分为两类，设计上彼此隔离：
 | `file-manager` | 文件系统操作 |
 | `weather` | 中国城市天气查询 |
 | `read-arxiv-paper` | 阅读并摘要 arXiv 论文 |
-| `email-163-com` | 163 邮箱收发 |
 
 ### 使用方式
 

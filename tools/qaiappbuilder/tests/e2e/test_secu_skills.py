@@ -55,7 +55,7 @@ pytestmark = pytest.mark.e2e
 
 SEC = "/api/security"
 BUILTIN_FEATURES = {"app-builder", "model-builder", "code-assist", "model-hub", "ppt-gen"}
-BUILTIN_SKILLS = {"browser-automation", "computer-automation", "email-163-com", "read-arxiv-paper", "weather"}
+BUILTIN_SKILLS = {"browser-automation", "computer-automation", "read-arxiv-paper", "weather"}
 
 
 # --------------------------------------------------------------------------

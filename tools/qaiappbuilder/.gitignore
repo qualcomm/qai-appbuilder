@@ -79,8 +79,6 @@ skills/**/models/**/__pycache__/
 skills/**/models/**/*.pyc
 !factory/chat_features/**/models/
 !factory/chat_features/**/models/**
-# modem-log-prefilter writes plans / extracted evidence into its own work/ dir at run time.
-skills/modem-log-prefilter/work/
 factory/chat_features/**/models/**/__pycache__/
 factory/chat_features/**/models/**/*.pyc
 # Root-level dev toolchain + vendored deps (reproducible; never source).
