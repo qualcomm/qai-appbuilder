@@ -47,7 +47,7 @@ import subprocess
 import sys
 import threading
 import zipfile
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -69,10 +69,6 @@ SERVER_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.\-]*$"
 _NAME_RE = re.compile(SERVER_NAME_PATTERN)
 
 _OUTPUT_TAIL_CHARS = 2048
-#: Most companion wheels one server may be installed with (a sanity bound, not a
-#: tuning knob: a server that needs more than a handful of local wheels is almost
-#: certainly mis-described).
-_MAX_EXTRA_WHEELS = 8
 _VENV_TIMEOUT_S = 180
 _INSTALL_TIMEOUT_S = 600
 
@@ -112,9 +108,6 @@ class WheelInstallResult:
     console_scripts: tuple[str, ...] = ()
     #: True when no console script exists and ``python -m <pkg>`` was guessed.
     entry_is_guess: bool = False
-    #: ``(dist name, version)`` of every companion wheel installed into the same
-    #: venv alongside the primary one (see ``extra_wheels`` on the installer).
-    extra_wheels: tuple[tuple[str, str], ...] = ()
     #: The environment the server was installed into (``"shared"`` by default).
     environment: str = ""
     #: True when it kept using a PRE-EXISTING per-server venv (the old layout).
@@ -342,59 +335,6 @@ def _canonical_dist(name: str) -> str:
     return re.sub(r"[-_.]+", "-", name or "").lower()
 
 
-def _validate_extra_wheels(
-    primary_path: Path,
-    primary: WheelInfo,
-    extras: Sequence[str | Path],
-) -> tuple[list[Path], list[WheelInfo], str]:
-    """Check companion wheels BEFORE anything is created or installed.
-
-    Returns ``(paths, infos, "")`` on success or ``([], [], reason)``. Generic by
-    construction: it looks only at the files themselves (is it a readable ``.whl``,
-    is it a duplicate, does it clash with the primary distribution) -- never at what
-    package they are.
-    """
-    if len(extras) > _MAX_EXTRA_WHEELS:
-        return [], [], (
-            f"too many extra_wheels ({len(extras)}); at most {_MAX_EXTRA_WHEELS} "
-            "companion wheels per server"
-        )
-    try:
-        primary_key = primary_path.resolve()
-    except OSError:
-        primary_key = primary_path
-    seen_paths = {primary_key}
-    seen_dists = {_canonical_dist(primary.dist_name): primary.dist_name}
-    paths: list[Path] = []
-    infos: list[WheelInfo] = []
-    for i, raw in enumerate(extras):
-        if not isinstance(raw, (str, Path)) or not str(raw).strip():
-            return [], [], f"extra_wheels[{i}] must be a non-empty path string"
-        path = Path(str(raw).strip()).expanduser()
-        try:
-            info = read_wheel_info(path)
-        except ValueError as exc:
-            return [], [], f"extra_wheels[{i}] ({path.name}): {exc}"
-        try:
-            key = path.resolve()
-        except OSError:
-            key = path
-        if key in seen_paths:
-            continue  # the same file listed twice (or the primary again): install once
-        dist_key = _canonical_dist(info.dist_name)
-        if dist_key in seen_dists:
-            return [], [], (
-                f"extra_wheels[{i}] ({path.name}) is another wheel of "
-                f"'{seen_dists[dist_key]}', which is already being installed; "
-                "list each distribution once"
-            )
-        seen_paths.add(key)
-        seen_dists[dist_key] = info.dist_name
-        paths.append(path)
-        infos.append(info)
-    return paths, infos, ""
-
-
 _SHARED_ENV = "shared"
 _ENVS_DIRNAME = "_envs"
 _MANIFEST_NAME = "env.json"
@@ -486,8 +426,6 @@ def _install_wheel_blocking(
     entry: str | None,
     runner: Runner,
     uv_path: str | None,
-    extra_paths: Sequence[Path] = (),
-    extra_infos: Sequence[WheelInfo] = (),
 ) -> WheelInstallResult:
     res = WheelInstallResult(
         ok=False,
@@ -514,10 +452,7 @@ def _install_wheel_blocking(
         return res
 
     # What this call installs, and who else already lives in the environment.
-    this_install: list[tuple[WheelInfo, Path]] = [
-        (info, wheel),
-        *zip(extra_infos, extra_paths),
-    ]
+    this_install: list[tuple[WheelInfo, Path]] = [(info, wheel)]
     this_keys = {_canonical_dist(i.dist_name) for i, _ in this_install}
     others = (
         []
@@ -603,10 +538,10 @@ def _install_wheel_blocking(
             except OSError:
                 pass
 
-    # 3. install -- ONE invocation for the primary, every companion and (after a
-    #    rebuild) every previous member: the resolver sees them together, and a
-    #    conflict fails the whole install instead of leaving the venv half-populated.
-    targets = [str(w) for w in (wheel, *extra_paths, *restore)]
+    # 3. install -- ONE invocation for the wheel and (after a rebuild) every
+    #    previous member: the resolver sees them together, and a conflict fails
+    #    the whole install instead of leaving the venv half-populated.
+    targets = [str(w) for w in (wheel, *restore)]
     if uv_path:
         cmd = [uv_path, "pip", "install", "--python", str(vpy), "--native-tls"]
         for f in constraint_files:
@@ -669,7 +604,6 @@ def _install_wheel_blocking(
             "wheel has no console_scripts; guessed `python -m "
             f"{pkgs[0]}` -- verify with a connection test"
         )
-    res.extra_wheels = tuple((i.dist_name, i.version) for i in extra_infos)
     res.env_wheels = tuple((m["dist"], m["version"]) for m in others)
     if not env_legacy:
         recorded = {
@@ -711,7 +645,6 @@ async def install_wheel_as_mcp(
     entry: str | None = None,
     runner: Runner | None = None,
     uv_path: str | None = None,
-    extra_wheels: Sequence[str | Path] = (),
     environment: str | None = None,
 ) -> WheelInstallResult:
     """Validate + install a local wheel into an MCP environment. Never raises.
@@ -725,10 +658,6 @@ async def install_wheel_as_mcp(
     packages the shared environment already holds: installs into an environment that
     already has other members keep those members' installed versions fixed, so a
     conflict FAILS instead of altering them.
-
-    ``extra_wheels``: further LOCAL wheels installed into the same environment in the
-    same pip/uv call. Console scripts of the extras are ignored (the launch command
-    always comes from ``wheel_path``).
 
     ``uv_path`` defaults to ``shutil.which("uv")`` when ``runner`` is not injected
     (tests inject both and stay hermetic).
@@ -757,10 +686,6 @@ async def install_wheel_as_mcp(
     except ValueError as exc:
         return WheelInstallResult(ok=False, step="read_wheel", error=str(exc))
 
-    extra_paths, extra_infos, why = _validate_extra_wheels(wheel, info, extra_wheels)
-    if why:
-        return WheelInstallResult(ok=False, step="read_wheel", error=why)
-
     use_runner: Runner = runner or _default_runner
     use_uv = uv_path if (uv_path is not None or runner is not None) else shutil.which("uv")
     env_name, env_dir, env_legacy = _resolve_environment(
@@ -779,8 +704,6 @@ async def install_wheel_as_mcp(
                 entry=entry,
                 runner=use_runner,
                 uv_path=use_uv,
-                extra_paths=extra_paths,
-                extra_infos=extra_infos,
             )
 
     loop = asyncio.get_running_loop()

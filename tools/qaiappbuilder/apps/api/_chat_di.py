@@ -2494,15 +2494,6 @@ def build_chat_services(container: Container) -> ChatServices:
         ssl_verify_provider=_ssl_verify_provider,
         edition=getattr(container.settings, "edition", "internal"),
     )
-    # Per-MCP-server ``max_result_chars``: let the (shared) tool-result truncator
-    # ask the registry for a server's own cap instead of always applying the
-    # model-family budget. Back-filled in place -- the truncator instance is shared
-    # by the main agent, the sub-agent handler and the ChatServices namespace, so
-    # replacing it would leave two of them without the hook.
-    if hasattr(tool_result_truncator, "tool_budget_provider"):
-        tool_result_truncator.tool_budget_provider = (  # type: ignore[attr-defined]
-            mcp_server_registry.result_budget_for_tool  # type: ignore[attr-defined]
-        )
     # ``mcp_manage``: lets the main agent install / register / test MCP servers
     # (incl. a local ``.whl`` -> dedicated venv) with deterministic actions
     # instead of hand-rolling exec + raw HTTP. Registered HERE (right after the
