@@ -7,7 +7,7 @@
 
 Why this exists: the MCP marketplace only knows ``npx`` launchers and ``.mcp``
 zip packages (``mcp_client._install_mcp_package``); a plain wheel such as
-``quts_skill_validator_mcp-0.1.1-py3-none-any.whl`` had no supported path, so an
+``some_server-0.1.1-py3-none-any.whl`` had no supported path, so an
 agent asked to "install this MCP" had nothing deterministic to call.
 
 This module does the mechanical, error-prone part and nothing else:
@@ -38,12 +38,14 @@ Design notes
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -65,6 +67,10 @@ SERVER_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_.\-]*$"
 _NAME_RE = re.compile(SERVER_NAME_PATTERN)
 
 _OUTPUT_TAIL_CHARS = 2048
+#: Most companion wheels one server may be installed with (a sanity bound, not a
+#: tuning knob: a server that needs more than a handful of local wheels is almost
+#: certainly mis-described).
+_MAX_EXTRA_WHEELS = 8
 _VENV_TIMEOUT_S = 180
 _INSTALL_TIMEOUT_S = 600
 
@@ -104,6 +110,9 @@ class WheelInstallResult:
     console_scripts: tuple[str, ...] = ()
     #: True when no console script exists and ``python -m <pkg>`` was guessed.
     entry_is_guess: bool = False
+    #: ``(dist name, version)`` of every companion wheel installed into the same
+    #: venv alongside the primary one (see ``extra_wheels`` on the installer).
+    extra_wheels: tuple[tuple[str, str], ...] = ()
     notes: list[str] = field(default_factory=list)
 
 
@@ -299,6 +308,84 @@ def _script_path(venv_dir: Path, script: str) -> Path:
     return venv_dir / "bin" / script
 
 
+def _remove_tree(path: Path) -> None:
+    """``rmtree`` that copes with Windows' 260-character limit and read-only files.
+
+    A skills / data bundle inside a venv (observed: ~22 MB of nested folders) easily
+    pushes a file path past MAX_PATH once the data directory itself is long, and
+    plain ``shutil.rmtree`` then fails with "path not found" on files that exist --
+    which would make a broken venv impossible to rebuild. Windows' extended-length
+    path prefix lifts the limit; read-only files are made writable and retried.
+    """
+    target = str(path)
+    if sys.platform == "win32" and not target.startswith("\\\\?\\"):
+        target = "\\\\?\\" + str(path.resolve())
+
+    def _retry(func: Callable[[str], object], p: str, _exc: object) -> None:
+        os.chmod(p, stat.S_IWRITE)
+        func(p)
+
+    shutil.rmtree(target, onerror=_retry)
+
+
+def _canonical_dist(name: str) -> str:
+    """PEP 503 normalisation, so ``Foo_Bar`` / ``foo-bar`` / ``foo.bar`` compare equal."""
+    return re.sub(r"[-_.]+", "-", name or "").lower()
+
+
+def _validate_extra_wheels(
+    primary_path: Path,
+    primary: WheelInfo,
+    extras: Sequence[str | Path],
+) -> tuple[list[Path], list[WheelInfo], str]:
+    """Check companion wheels BEFORE anything is created or installed.
+
+    Returns ``(paths, infos, "")`` on success or ``([], [], reason)``. Generic by
+    construction: it looks only at the files themselves (is it a readable ``.whl``,
+    is it a duplicate, does it clash with the primary distribution) -- never at what
+    package they are.
+    """
+    if len(extras) > _MAX_EXTRA_WHEELS:
+        return [], [], (
+            f"too many extra_wheels ({len(extras)}); at most {_MAX_EXTRA_WHEELS} "
+            "companion wheels per server"
+        )
+    try:
+        primary_key = primary_path.resolve()
+    except OSError:
+        primary_key = primary_path
+    seen_paths = {primary_key}
+    seen_dists = {_canonical_dist(primary.dist_name): primary.dist_name}
+    paths: list[Path] = []
+    infos: list[WheelInfo] = []
+    for i, raw in enumerate(extras):
+        if not isinstance(raw, (str, Path)) or not str(raw).strip():
+            return [], [], f"extra_wheels[{i}] must be a non-empty path string"
+        path = Path(str(raw).strip()).expanduser()
+        try:
+            info = read_wheel_info(path)
+        except ValueError as exc:
+            return [], [], f"extra_wheels[{i}] ({path.name}): {exc}"
+        try:
+            key = path.resolve()
+        except OSError:
+            key = path
+        if key in seen_paths:
+            continue  # the same file listed twice (or the primary again): install once
+        dist_key = _canonical_dist(info.dist_name)
+        if dist_key in seen_dists:
+            return [], [], (
+                f"extra_wheels[{i}] ({path.name}) is another wheel of "
+                f"'{seen_dists[dist_key]}', which is already being installed; "
+                "list each distribution once"
+            )
+        seen_paths.add(key)
+        seen_dists[dist_key] = info.dist_name
+        paths.append(path)
+        infos.append(info)
+    return paths, infos, ""
+
+
 def _install_wheel_blocking(
     wheel: Path,
     info: WheelInfo,
@@ -308,6 +395,8 @@ def _install_wheel_blocking(
     entry: str | None,
     runner: Runner,
     uv_path: str | None,
+    extra_paths: Sequence[Path] = (),
+    extra_infos: Sequence[WheelInfo] = (),
 ) -> WheelInstallResult:
     res = WheelInstallResult(
         ok=False,
@@ -346,7 +435,7 @@ def _install_wheel_blocking(
                 "moved); rebuilt it"
             )
             try:
-                shutil.rmtree(venv_dir)
+                _remove_tree(venv_dir)
             except OSError as exc:
                 res.step = "create_venv"
                 res.error = (
@@ -390,7 +479,10 @@ def _install_wheel_blocking(
         cmd = [uv_path, "pip", "install", "--python", str(vpy), "--native-tls"]
         if constraints:
             cmd += ["-c", str(constraints)]
-        cmd.append(str(wheel))
+        # ONE invocation for the primary and every companion wheel: the resolver
+        # sees them together, and a conflict fails the whole install instead of
+        # leaving the venv half-populated.
+        cmd.extend(str(w) for w in (wheel, *extra_paths))
         rc, out = runner(cmd, _INSTALL_TIMEOUT_S)
         res.notes.append("installed with uv pip")
     else:
@@ -408,7 +500,7 @@ def _install_wheel_blocking(
         ]
         if constraints:
             cmd += ["-c", str(constraints)]
-        cmd.append(str(wheel))
+        cmd.extend(str(w) for w in (wheel, *extra_paths))  # see the uv branch
         rc, out = runner(cmd, _INSTALL_TIMEOUT_S)
         res.notes.append("installed with pip")
     if rc != 0:
@@ -441,6 +533,7 @@ def _install_wheel_blocking(
             "wheel has no console_scripts; guessed `python -m "
             f"{pkgs[0]}` -- verify with a connection test"
         )
+    res.extra_wheels = tuple((i.dist_name, i.version) for i in extra_infos)
     res.ok = True
     _log.info(
         "chat.mcp.wheel_installed",
@@ -461,8 +554,15 @@ async def install_wheel_as_mcp(
     entry: str | None = None,
     runner: Runner | None = None,
     uv_path: str | None = None,
+    extra_wheels: Sequence[str | Path] = (),
 ) -> WheelInstallResult:
     """Validate + install a local wheel into a dedicated venv. Never raises.
+
+    ``extra_wheels``: further LOCAL wheels installed into the SAME venv in the same
+    pip/uv call -- for a server that imports a companion package at run time. Each
+    server gets its own isolated venv, so a package installed for server A is not
+    visible to server B; whatever B needs must be listed here. Console scripts of
+    the extras are ignored (the launch command always comes from ``wheel_path``).
 
     ``uv_path`` defaults to ``shutil.which("uv")`` when ``runner`` is not injected
     (tests inject both and stay hermetic).
@@ -482,6 +582,10 @@ async def install_wheel_as_mcp(
     except ValueError as exc:
         return WheelInstallResult(ok=False, step="read_wheel", error=str(exc))
 
+    extra_paths, extra_infos, why = _validate_extra_wheels(wheel, info, extra_wheels)
+    if why:
+        return WheelInstallResult(ok=False, step="read_wheel", error=why)
+
     use_runner: Runner = runner or _default_runner
     use_uv = uv_path if (uv_path is not None or runner is not None) else shutil.which("uv")
     loop = asyncio.get_running_loop()
@@ -496,6 +600,8 @@ async def install_wheel_as_mcp(
                 entry=entry,
                 runner=use_runner,
                 uv_path=use_uv,
+                extra_paths=extra_paths,
+                extra_infos=extra_infos,
             ),
         )
     except Exception as exc:  # noqa: BLE001 -- contract: never raise

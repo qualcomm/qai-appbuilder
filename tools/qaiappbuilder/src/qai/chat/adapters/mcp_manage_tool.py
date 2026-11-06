@@ -129,6 +129,21 @@ MCP_MANAGE_TOOL_SCHEMA: dict[str, Any] = {
                         "install_wheel: absolute path of the local .whl file."
                     ),
                 },
+                "extra_wheels": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "install_wheel: further LOCAL .whl files to install into "
+                        "this server's SAME environment, in the same step. Every "
+                        "MCP server gets its own isolated Python environment, so "
+                        "a package installed for one server is NOT visible to "
+                        "another. List here any companion/catalog package this "
+                        "server imports at run time -- typical clue: its README "
+                        "or an error says to install some package 'in the same "
+                        "Python environment' as the server. Absolute paths; at "
+                        "most 8. Console scripts of these wheels are ignored."
+                    ),
+                },
                 "entry": {
                     "type": "string",
                     "description": (
@@ -365,11 +380,24 @@ class McpManageToolHandler:
             from qai.chat.adapters.mcp_wheel_installer import install_wheel_as_mcp
 
             install = install_wheel_as_mcp
+        extras_raw = args.get("extra_wheels")
+        if extras_raw is None:
+            extras: list[str] = []
+        elif isinstance(extras_raw, list) and all(
+            isinstance(p, str) and p.strip() for p in extras_raw
+        ):
+            extras = [p.strip() for p in extras_raw]
+        else:
+            return (
+                "[mcp_manage] extra_wheels must be a list of non-empty .whl path "
+                "strings."
+            )
         res: WheelInstallResult = await install(
             wheel_path.strip(),
             server_name=name.strip(),
             data_dir=self._data_dir,
             entry=args.get("entry") if isinstance(args.get("entry"), str) else None,
+            extra_wheels=extras,
         )
         if not res.ok:
             return (
@@ -390,6 +418,14 @@ class McpManageToolHandler:
         gate = reg.global_enabled()
         lines = [
             f"Installed {res.dist_name} {res.version} into {res.venv_dir}",
+            *(
+                [
+                    "Also installed into the same environment: "
+                    + ", ".join(f"{d} {v}" for d, v in res.extra_wheels)
+                ]
+                if res.extra_wheels
+                else []
+            ),
             f"Registered MCP server '{cfg.name}': {cfg.command} {' '.join(cfg.args)}".rstrip(),
             f"Per-request timeout: {cfg.timeout_s:g}s (re-run install_wheel with "
             "timeout_s=... to change it).",
