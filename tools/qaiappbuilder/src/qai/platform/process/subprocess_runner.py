@@ -53,6 +53,7 @@ from .ports import (
     ProcessStdoutFrame,
     ProcessTerminatedFrame,
 )
+from .spawn import create_subprocess_for_argv
 
 __all__ = ["SubprocessProcessRunner"]
 
@@ -110,8 +111,8 @@ class SubprocessProcessRunner:
             else asyncio.subprocess.DEVNULL
         )
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *request.argv,
+            proc = await create_subprocess_for_argv(
+                request.argv,
                 cwd=request.cwd,
                 env=env,
                 stdout=asyncio.subprocess.PIPE,
