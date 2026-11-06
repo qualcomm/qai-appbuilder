@@ -144,21 +144,6 @@ MCP_MANAGE_TOOL_SCHEMA: dict[str, Any] = {
                         "Letters, digits, '_', '.', '-'."
                     ),
                 },
-                "extra_wheels": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "install_wheel: further LOCAL .whl files to install into "
-                        "this server's SAME environment, in the same step. Every "
-                        "MCP server gets its own isolated Python environment, so "
-                        "a package installed for one server is NOT visible to "
-                        "another. List here any companion/catalog package this "
-                        "server imports at run time -- typical clue: its README "
-                        "or an error says to install some package 'in the same "
-                        "Python environment' as the server. Absolute paths; at "
-                        "most 8. Console scripts of these wheels are ignored."
-                    ),
-                },
                 "entry": {
                     "type": "string",
                     "description": (
@@ -395,18 +380,6 @@ class McpManageToolHandler:
             from qai.chat.adapters.mcp_wheel_installer import install_wheel_as_mcp
 
             install = install_wheel_as_mcp
-        extras_raw = args.get("extra_wheels")
-        if extras_raw is None:
-            extras: list[str] = []
-        elif isinstance(extras_raw, list) and all(
-            isinstance(p, str) and p.strip() for p in extras_raw
-        ):
-            extras = [p.strip() for p in extras_raw]
-        else:
-            return (
-                "[mcp_manage] extra_wheels must be a list of non-empty .whl path "
-                "strings."
-            )
         env_raw = args.get("environment")
         if env_raw is not None and not (isinstance(env_raw, str) and env_raw.strip()):
             return "[mcp_manage] environment must be a non-empty name (letters, digits, '_', '.', '-')."
@@ -415,7 +388,6 @@ class McpManageToolHandler:
             server_name=name.strip(),
             data_dir=self._data_dir,
             entry=args.get("entry") if isinstance(args.get("entry"), str) else None,
-            extra_wheels=extras,
             environment=env_raw.strip() if isinstance(env_raw, str) else None,
         )
         if not res.ok:
@@ -458,14 +430,6 @@ class McpManageToolHandler:
                     "environment='shared'."
                 ]
                 if res.env_is_legacy
-                else []
-            ),
-            *(
-                [
-                    "Also installed into the same environment: "
-                    + ", ".join(f"{d} {v}" for d, v in res.extra_wheels)
-                ]
-                if res.extra_wheels
                 else []
             ),
             f"Registered MCP server '{cfg.name}': {cfg.command} {' '.join(cfg.args)}".rstrip(),

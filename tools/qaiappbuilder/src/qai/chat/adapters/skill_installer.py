@@ -28,6 +28,7 @@ import re
 import shutil
 import stat
 import sys
+import time
 import uuid
 import zipfile
 import zlib
@@ -103,6 +104,23 @@ def _lp(path: Path | str) -> str:
     if s.startswith("\\\\"):  # UNC
         return "\\\\?\\UNC\\" + s[2:]
     return "\\\\?\\" + s
+
+
+def _replace(src: Path, dst: Path) -> None:
+    """``os.replace`` for directories, retrying the transient Windows "access denied".
+
+    Right after files are written, a virus scanner or the search indexer may hold a handle
+    inside the new tree for a moment; renaming the directory then fails with
+    ``PermissionError`` (WinError 5) although nothing is wrong. A few short retries ride it out.
+    """
+    for attempt in range(6):
+        try:
+            os.replace(_lp(src), _lp(dst))
+            return
+        except PermissionError:
+            if attempt == 5:
+                raise
+            time.sleep(0.15 * (attempt + 1))
 
 
 def _clean_source(raw: object) -> Path:
@@ -306,13 +324,13 @@ def install_skill(
         res = SkillInstallResult(ok=False, skill_id=skill_id, path=str(final), files=budget.files, size=budget.size)
         if exists:
             old_backup = skills_root / f".old-{skill_id}-{uuid.uuid4().hex[:6]}"
-            os.replace(_lp(final), _lp(old_backup))
+            _replace(final, old_backup)
             res.replaced = True
         try:
-            os.replace(_lp(payload), _lp(final))
+            _replace(payload, final)
         except OSError:
             if old_backup is not None:
-                os.replace(_lp(old_backup), _lp(final))
+                _replace(old_backup, final)
                 old_backup = None
             raise
 
@@ -321,7 +339,7 @@ def install_skill(
             # Roll back: the skill must be usable or not installed at all.
             _remove_tree(final)
             if old_backup is not None:
-                os.replace(_lp(old_backup), _lp(final))
+                _replace(old_backup, final)
                 old_backup = None
             raise _Rejected(
                 "not_discovered",
@@ -350,7 +368,7 @@ def install_skill(
             try:
                 if os.path.exists(_lp(final)):
                     _remove_tree(final)
-                os.replace(_lp(old_backup), _lp(final))
+                _replace(old_backup, final)
             except OSError:
                 pass
         return SkillInstallResult(ok=False, step="unexpected", error=f"{type(exc).__name__}: {exc}")
