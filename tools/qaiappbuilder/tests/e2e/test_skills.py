@@ -273,9 +273,9 @@ def test_a_default_off_skill_can_be_turned_on(sk: tuple) -> None:
 def test_toggling_one_skill_leaves_the_others_alone(sk: tuple) -> None:
     _ob, cl = sk
     before = _modes(cl)
-    cl.post("/api/skills/toggle", json={"skill_name": "email-163-com", "enabled": False})
+    cl.post("/api/skills/toggle", json={"skill_name": "read-arxiv-paper", "enabled": False})
     after = _modes(cl)
-    assert {k for k in before if before[k] != after[k]} == {"email-163-com"}
+    assert {k for k in before if before[k] != after[k]} == {"read-arxiv-paper"}
 
 
 @pytest.mark.parametrize("body", [{"skill_name": "weather"}, {"enabled": True}, {"skill_name": "weather", "enabled": "maybe"}, {}])
