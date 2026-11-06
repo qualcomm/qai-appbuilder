@@ -11,6 +11,7 @@
 #include "response_tools.h"
 #include "mimicry_recovery.h"
 #include "repeat_gate.h"
+#include "rethink_gate.h"
 
 #include "log.h"
 #include "../processor/general.h"
@@ -223,6 +224,8 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
     size_t mimicry_tail_tokens = 0;
     bool mimicry_soft_stop = false;
     bool mimicry_soft_retry_used = false;
+    bool rethink_stop = false;
+    bool rethink_used = false;
 
     bool extra_retry_used = false;
 
@@ -310,6 +313,25 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
         }
 
         response_buffer += message;
+
+        if (!rethink_used && !model_input_.rethink_text_.empty() && is_tool_
+            && GetEffectivePromptType() == PromptType::General && instance_config_)
+        {
+            const auto &rethink_tools = instance_config_->i_model_config_.GetAdaptiveThinkingConfig().rethink_tools;
+            const auto decision = RethinkGate::Decide(response_buffer, rethink_tools);
+            if (decision != RethinkGate::Decision::Pending)
+            {
+                rethink_used = true;
+                if (decision == RethinkGate::Decision::Rethink)
+                {
+                    rethink_stop = true;
+                    My_Log{My_Log::Level::kWarning}
+                        << "[Rethink] Execution tool call detected; stopping no-think generation for adaptive-thinking retry."
+                        << std::endl;
+                    return false;
+                }
+            }
+        }
 
         if (is_tool_ && TaskMemoBuilder::IsReasoningNoteMimicry(response_buffer))
         {
@@ -427,6 +449,43 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
 
         My_Log{} << "--- Query Context Start ---" << std::endl;
         bool first_query_ok = handle->Query(model_input_, genie_callback, prefill_heartbeat);
+        if (rethink_stop && !connection_broken && isConnectionAlive())
+        {
+            rethink_used = true;
+            ModelInput rethink_input = model_input_;
+            rethink_input.text_ = model_input_.rethink_text_;
+            const auto &at_cfg = instance_config_->i_model_config_.GetAdaptiveThinkingConfig();
+            rethink_input.think_time_budget_s_ = at_cfg.time_budget_s;
+            rethink_input.think_min_tokens_ = at_cfg.min_tokens;
+            rethink_input.think_max_tokens_ = at_cfg.max_tokens;
+            rethink_input.think_ctx_reserve_ = at_cfg.ctx_reserve_tokens;
+            rethink_input.think_force_min_floor_ = false;
+
+            response_buffer.clear();
+            toolResponse.clear();
+            isToolResponse = false;
+            degenerate_mimicry_stop = false;
+            mimicry_tail_tokens = 0;
+            mimicry_soft_stop = false;
+            proc_->Clean();
+            bare_json_state = ResponseTools::BareJsonHoldState();
+            harmony_thinking_status_sent = false;
+            last_hold_keepalive_at = std::chrono::steady_clock::now();
+            rethink_stop = false;
+
+            try
+            {
+                My_Log{} << "--- Query Context Start ([Rethink]) ---" << std::endl;
+                first_query_ok = handle->Query(rethink_input, genie_callback, prefill_heartbeat);
+                My_Log{} << "--- Query Context End ([Rethink]) ---" << std::endl;
+            }
+            catch (const std::exception &e)
+            {
+                My_Log{My_Log::Level::kError}
+                    << "[Rethink] Exception during adaptive-thinking retry: " << e.what() << std::endl;
+                first_query_ok = false;
+            }
+        }
         if (!first_query_ok && mimicry_soft_stop && !mimicry_soft_retry_used && !connection_broken
             && instance_config_ && !retry_request_data_.is_null()
             && retry_request_data_.contains("messages") && retry_request_data_["messages"].is_array()
@@ -1029,8 +1088,34 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                             if (output_truncated && !reasoning_note_mimicry)
                                 conclusion += (conclusion.empty() ? "" : " ") + std::string("this call was cut off by the output token limit after ")
                                     + std::to_string(response_buffer.size()) + " characters, so its arguments are incomplete; split the content into several smaller calls";
-                            if (!conclusion.empty())
-                                TaskMemoBuilder::PinThinkConclusion(think_session_key, signature, conclusion);
+                            if (!conclusion.empty()) {
+                                auto compute_tool_call_signature = [](const json& call) {
+                                    std::string args = "{}";
+                                    try {
+                                        if (call.contains("arguments") && call["arguments"].is_string())
+                                            args = json::parse(call["arguments"].get<std::string>()).dump();
+                                        else if (call.contains("arguments") && call["arguments"].is_object())
+                                            args = call["arguments"].dump();
+                                    } catch (...) {}
+                                    return call.value("name", "") + "|" + args;
+                                };
+                                const std::string pin_signature = compute_tool_call_signature(parsed);
+                                size_t ordinal = 1;
+                                if (retry_request_data_.contains("messages") && retry_request_data_["messages"].is_array()) {
+                                    for (const auto& message : retry_request_data_["messages"]) {
+                                        if (get_json_value(message, "role", BLANK_STRING) != "assistant"
+                                            || !message.contains("tool_calls") || !message["tool_calls"].is_array()
+                                            || message["tool_calls"].empty() || !message["tool_calls"][0].contains("function"))
+                                            continue;
+                                        if (compute_tool_call_signature(message["tool_calls"][0]["function"]) == pin_signature)
+                                            ++ordinal;
+                                    }
+                                }
+                                TaskMemoBuilder::PinThinkConclusion(
+                                    think_session_key,
+                                    TaskMemoBuilder::ToolCallOrdinalKey(pin_signature, ordinal),
+                                    conclusion);
+                            }
                         }
                     }
                     catch (...) {}

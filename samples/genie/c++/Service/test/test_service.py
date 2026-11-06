@@ -45,6 +45,7 @@ from service_tests.multi_model import discover_models, discover_models_remote
 from service_tests.report import ReportGenerator
 from service_tests.suite_long_task_memory import _run_long_task_memory_suite
 from service_tests.suite_prompt_fidelity import _run_prompt_fidelity_suite
+from service_tests.suite_api_versions import _run_api_versions_suite
 from service_tests.suite_skill_capacity import _run_skill_capacity_suite
 from service_tests.suites import (
     _finalize_and_exit,
@@ -71,6 +72,7 @@ SUITE_HANDLERS = {
     "qnn": _run_qnn_suite,
     "graceful_shutdown": _run_graceful_shutdown_suite,
     "prompt_fidelity": _run_prompt_fidelity_suite,
+    "api_versions": _run_api_versions_suite,
     "skill_capacity": _run_skill_capacity_suite,
     "long_task_memory": _run_long_task_memory_suite,
 }
@@ -143,7 +145,7 @@ def main():
                              "fidelity.{cjk,ascii}_chars_per_token=4.0 + budget_partition.enabled=false，改前备份、"
                              "finally 还原）；optimized=Step2 改造后的默认档位（不写覆盖，直接用 C++ 侧新默认值）；"
                              "both=依次跑两档并在 data 里各自记录 frontier_skills，供报告算提升倍数")
-    parser.add_argument("--suite", choices=("full", "model", "sampleapp", "multimodal", "gguf", "multi_model", "mnn", "qnn", "graceful_shutdown", "prompt_fidelity", "skill_capacity", "long_task_memory"),
+    parser.add_argument("--suite", choices=("full", "model", "sampleapp", "multimodal", "gguf", "multi_model", "mnn", "qnn", "graceful_shutdown", "prompt_fidelity", "api_versions", "skill_capacity", "long_task_memory"),
                         default=None, help="选择要运行的测试套件（必传参数，不再有隐式默认值；如需完整回归请显式传入 full）")
     parser.add_argument("--long_task_memory_models", default=None,
                         help="--suite long_task_memory 限定测试的目标模型简写，逗号分隔（qwen3-8b/gguf-20b/mnn-20b），"

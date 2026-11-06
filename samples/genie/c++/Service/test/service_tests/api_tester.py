@@ -201,13 +201,14 @@ class APITester:
         """执行模型无关的通用接口测试（只需运行一次）
 
         覆盖 GenieAPIService.cpp 中"加载模型前可调用"的全部 GET 路由
-        及其别名 (/models 与 /v1/models)。
+        及其 /v1、/v2 别名。
         """
         results = []
         tests = [
             ("GET /", lambda: self.test_welcome(1)),
             ("GET /models", lambda: self.test_models(1, path="/models")),
             ("GET /v1/models", lambda: self.test_models(1, path="/v1/models")),
+            ("GET /v2/models", lambda: self.test_models(1, path="/v2/models")),
         ]
         for test_name, test_fn in tests:
             print(f"    测试 {test_name} ... ", end="", flush=True)
@@ -269,19 +270,19 @@ class APITester:
         except Exception:
             pass  # 连接失败时不做预检，让后续测试正常运行
 
-        # GenieAPIService.cpp 里 ChatCompletions handler 注册的 4 个路径
-        chat_paths = ["/v1/chat/completions", "/chat/completions",
-                      "/v1/completions", "/completions"]
+        # GenieAPIService.cpp 里 ChatCompletions handler 注册的 6 个路径
+        chat_paths = ["/v1/chat/completions", "/chat/completions", "/v2/chat/completions",
+                      "/v1/completions", "/completions", "/v2/completions"]
 
         tests = []
         # /status (before): 第一次 chat 之前的一次观察
         tests.append((f"GET /status (before chat)",
                       lambda rn=round_num: self.test_status(rn, name="GET /status (before chat)")))
 
-        # 4 个 chat 别名 × (non-stream + stream),共 8 次；每个别名按下标 + 轮次轮流使用
+        # 6 个 chat 别名 × (non-stream + stream),共 12 次；每个别名按下标 + 轮次轮流使用
         # CHAT_CONTENT_FORMATS 里的一种 content 格式，确保哪怕默认只跑 1 轮
         # (--rounds 默认为 1)，OpenAI 字符串/数组风格与 GenieAPIClient 对象风格 3 种格式
-        # 也都会在单轮内被覆盖到（4 个别名对 3 种格式取模自然循环一遍多），
+        # 也都会在单轮内被覆盖到（6 个别名对 3 种格式取模自然循环两遍），
         # 而不是只测最常见的纯字符串写法；多轮时额外叠加轮次偏移，避免同一别名每轮都固定同一格式。
         for idx, cp in enumerate(chat_paths):
             fmt = CHAT_CONTENT_FORMATS[(idx + round_num - 1) % len(CHAT_CONTENT_FORMATS)]
@@ -298,8 +299,7 @@ class APITester:
         tests.append(("POST /contextsize", lambda rn=round_num: self.test_contextsize(rn)))
         tests.append(("POST /fetch", lambda rn=round_num: self.test_fetch(rn)))
 
-        # textsplitter: /textsplitter + /v1/textsplitter
-        for tp in ["/textsplitter", "/v1/textsplitter"]:
+        for tp in ["/textsplitter", "/v1/textsplitter", "/v2/textsplitter"]:
             tests.append((f"POST {tp}",
                           lambda rn=round_num, p=tp: self.test_textsplitter(rn, path=p)))
 
@@ -567,7 +567,7 @@ class APITester:
         # /status 是 GET 路由,不能用 POST
         # 严格判定:仅当 HTTP 200 且包含完整槽位结构与 loaded_models 计数时 PASS;
         # 其它任何状态(包括冷启动期间)一律视为 FAIL。
-        resp = self._safe_request("GET", "/status", name, round_num)
+        resp = self._safe_request("GET", "/v2/status", name, round_num)
         if isinstance(resp, TestResult):
             resp.name = name
             return resp
@@ -619,7 +619,7 @@ class APITester:
         )
 
     def test_profile(self, round_num):
-        resp = self._safe_request("GET", "/profile", "GET /profile", round_num,
+        resp = self._safe_request("GET", "/v2/profile", "GET /profile", round_num,
                                   params={"model": self.model_name})
         if isinstance(resp, TestResult):
             return resp
@@ -1154,6 +1154,8 @@ class APITester:
             "max_length": 50,
             "separators": [".", " ", ""]
         }
+        if path != "/v1/textsplitter":
+            body["model"] = self.model_name
         resp = self._safe_request("POST", path, name, round_num, json=body)
         if isinstance(resp, TestResult):
             resp.name = name
@@ -1198,7 +1200,7 @@ class APITester:
         )
 
     def test_contextsize(self, round_num):
-        resp = self._safe_request("POST", "/contextsize", "POST /contextsize", round_num,
+        resp = self._safe_request("POST", "/v2/contextsize", "POST /contextsize", round_num,
                                   json={"model": self.model_name})
         if isinstance(resp, TestResult):
             return resp
@@ -1235,15 +1237,20 @@ class APITester:
     def test_model_required_contract(self, round_num):
         name = "model-required contract (400/404)"
         checks = [
+            ("POST", "/v2/contextsize", {"json": {"model": "__no_such_model__"}}, 404),
+            ("POST", "/v2/stop", {"json": {"text": "stop"}}, 400),
+            ("POST", "/v2/stop", {"json": {"text": "stop", "model": "__no_such_model__"}}, 404),
+            ("POST", "/v2/clear", {"json": {}}, 400),
+            ("POST", "/v2/unload", {"json": {}}, 400),
+            ("POST", "/v2/unload", {"json": {"model": "__no_such_model__"}}, 404),
+            ("GET", "/v2/profile", {"params": {"model": "__no_such_model__"}}, 404),
             ("POST", "/contextsize", {"json": {"model": "__no_such_model__"}}, 404),
-            ("POST", "/stop", {"json": {"text": "stop"}}, 400),
-            ("POST", "/stop", {"json": {"text": "stop", "model": "__no_such_model__"}}, 404),
-            ("POST", "/clear", {"json": {}}, 400),
-            ("POST", "/unload", {"json": {}}, 400),
-            ("POST", "/unload", {"json": {"model": "__no_such_model__"}}, 404),
-            ("GET", "/profile", {"params": {"model": "__no_such_model__"}}, 404),
-            ("POST", "/v1/chat/completions",
+            ("POST", "/clear", {"json": {}}, 200),
+            ("POST", "/v1/clear", {"json": {}}, 200),
+            ("POST", "/v2/chat/completions",
              {"json": {"messages": [{"role": "user", "content": "hi"}]}}, 400),
+            ("POST", "/v1/chat/completions",
+             {"json": {"messages": [{"role": "user", "content": "hi"}]}}, 200),
         ]
         failures = []
         start = time.time()

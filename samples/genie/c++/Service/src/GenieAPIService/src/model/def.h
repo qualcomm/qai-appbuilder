@@ -20,6 +20,7 @@ struct ModelInput
 {
     std::string system_;
     std::string text_;
+    std::string rethink_text_;
     std::string image_;
     std::string audio_;
     std::string agent_type_ = "sub";

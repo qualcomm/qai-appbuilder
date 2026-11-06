@@ -28,6 +28,7 @@ struct LoadedModel
     std::string device;
     std::vector<std::string> occupied_families;
     bool is_loaded{false};
+    uint64_t load_seq{0};
 };
 
 class ModelManager : public IModelConfig
@@ -77,6 +78,8 @@ public:
     std::shared_ptr<LoadedModel> GetModel(const std::string &model_name);
 
     std::shared_ptr<LoadedModel> GetDefaultModel();
+
+    std::shared_ptr<LoadedModel> GetFirstLoadedModel() const;
 
     std::vector<std::string> ListLoadedModels() const;
 
@@ -148,6 +151,7 @@ private:
 
     std::unordered_map<std::string, std::shared_ptr<LoadedModel>> loaded_models_;
     std::string default_model_name_;
+    uint64_t next_load_seq_{1};
     mutable std::mutex models_mutex_;
     std::recursive_mutex load_mutex_;
     std::once_flag config_list_once_;

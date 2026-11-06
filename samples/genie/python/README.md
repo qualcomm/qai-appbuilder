@@ -87,6 +87,8 @@ The following command to generate text from text prompt:
 ```
 python genie\python\GenieAPIClient.py --prompt "How to fish?" --stream
 ```
+`GenieAPIClient.py` is command compatible with the C++ [GenieAPIClient](../c++/Service/examples/GenieAPIClient/) and only needs the Python standard library. It supports `--prompt`, `--system`, `--model`, `--stream`, `--img`, `--audio`, `--host`, `--key`, `--raw_file`, `--bench` and `--v2` (send the request to `/v2/chat/completions` instead of `/v1/chat/completions`).<br>
+*. Text requests work with both the C++ and the Python version of the service. `--img`, `--audio`, `--bench` and `--v2` need the C++ GenieAPIService, the Python 'GenieAPIService.py' only accepts plain text messages on `/v1`.<br>
 The following command to generate image from text prompt:
 ```
 python genie\python\GenieAPIClientImage.py --prompt "spectacular view of northern lights from Alaska"
@@ -97,7 +99,7 @@ python genie\python\GenieAPIClientImage.py --prompt "spectacular view of norther
 ### Sample List:
 |  Sample   | Description  |
 |  ----  | :----    |
-| GenieAPIClient.py | A client sample code to call GenieAPIService to generate text. |
+| GenieAPIClient.py | A client sample code to call GenieAPIService to generate text, command compatible with the C++ GenieAPIClient. |
 | GenieAPIClientTools.py | A client sample code to make tool call to GenieAPIService. |
 | GenieAPIClientImage.py * | A client sample code to call GenieAPIService to generate image. |
 | GenieSample.py  | Use GenieContext to load and run the LLM model in local process.|

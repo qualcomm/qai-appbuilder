@@ -205,7 +205,7 @@ def run_numresponse_stateless_mode_regressions(args, models, all_results, all_cr
             # 探针4：长文本摘要（先查真实 context_size，再按 trigger_ratio 动态换算超阈值长度）
             context_size = 0
             try:
-                ctx_r = requests.post(f"http://{args.host}:{args.port}/contextsize",
+                ctx_r = requests.post(f"http://{args.host}:{args.port}/v2/contextsize",
                                        json={"model": model_name}, timeout=30)
                 if ctx_r.status_code == 200:
                     context_size = next((e.get("contextsize", 0) for e in ctx_r.json().get("models", [])
@@ -235,7 +235,7 @@ def run_numresponse_stateless_mode_regressions(args, models, all_results, all_cr
                 data["fetch_resp"] = None
                 data["fetch_err"] = f"{type(e).__name__}: {e}"
             try:
-                data["contextsize_resp"] = requests.post(f"http://{args.host}:{args.port}/contextsize",
+                data["contextsize_resp"] = requests.post(f"http://{args.host}:{args.port}/v2/contextsize",
                                                             json={"model": model_name}, timeout=30)
             except Exception as e:
                 data["contextsize_resp"] = None

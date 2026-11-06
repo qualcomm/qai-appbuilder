@@ -53,27 +53,13 @@ inline bool ComputeForcedUnblockFromStreak(int &block_streak, int max_consecutiv
 
 inline std::string BuildCycleRepeatSignature(const std::vector<std::string> &keys, size_t window)
 {
-    if (window == 0 || keys.empty())
+    if (window == 0 || keys.empty() || keys.back().empty())
         return "";
     const size_t begin = keys.size() > window ? keys.size() - window : 0;
-    std::unordered_set<std::string> seen(keys.begin(), keys.begin() + begin);
-    std::set<std::string> repeated;
-    for (size_t i = begin; i < keys.size(); ++i)
-    {
-        if (keys[i].empty())
-            continue;
-        if (!seen.insert(keys[i]).second)
-            repeated.insert(keys[i]);
-    }
-    if (repeated.empty())
+    const size_t last = keys.size() - 1;
+    if (std::find(keys.begin() + begin, keys.begin() + last, keys.back()) == keys.begin() + last)
         return "";
-    std::string joined;
-    for (const auto &key : repeated)
-    {
-        joined += key;
-        joined += '\x1e';
-    }
-    return "cycle:" + std::to_string(std::hash<std::string>{}(joined));
+    return "cycle:" + std::to_string(std::hash<std::string>{}(keys.back()));
 }
 
 inline bool IsReserveEligibleThinkReason(const std::string &reason)
@@ -497,13 +483,29 @@ private:
             } catch (...) {}
             return fn.value("name", "") + "|" + args;
         };
-        std::unordered_map<std::string, int> last_pin_element;
-        for (size_t i = 0; i < msg.size(); ++i) {
-            if (get_json_value(msg[i], "role", BLANK_STRING) == "assistant") {
-                const std::string signature = compute_tool_call_signature(msg[i]);
+        const json& raw_messages = request_data_.is_object() && request_data_.contains("messages")
+                && request_data_["messages"].is_array() ? request_data_["messages"] : msg;
+        std::unordered_map<std::string, size_t> raw_pin_counts;
+        std::unordered_map<std::string, size_t> filtered_pin_counts;
+        std::unordered_map<std::string, size_t> pin_ordinal_offsets;
+        std::unordered_map<std::string, size_t> pin_ordinal_seen;
+        for (const auto& element : raw_messages) {
+            if (get_json_value(element, "role", BLANK_STRING) == "assistant") {
+                const std::string signature = compute_tool_call_signature(element);
                 if (!signature.empty())
-                    last_pin_element[signature] = static_cast<int>(i);
+                    ++raw_pin_counts[signature];
             }
+        }
+        for (const auto& element : msg) {
+            if (get_json_value(element, "role", BLANK_STRING) == "assistant") {
+                const std::string signature = compute_tool_call_signature(element);
+                if (!signature.empty())
+                    ++filtered_pin_counts[signature];
+            }
+        }
+        for (const auto& [signature, raw_count] : raw_pin_counts) {
+            const size_t filtered_count = filtered_pin_counts[signature];
+            pin_ordinal_offsets[signature] = raw_count > filtered_count ? raw_count - filtered_count : 0;
         }
 
         int element_index = -1;
@@ -538,12 +540,12 @@ private:
                     auto converted_calls = optimizer_.ConvertOpenAIToolCalls(element["tool_calls"]);
                     std::string pin;
                     const std::string signature = compute_tool_call_signature(element);
-                    auto last_pin = last_pin_element.find(signature);
-                    if (last_pin != last_pin_element.end() && last_pin->second == element_index)
+                    if (!signature.empty()) {
+                        const size_t ordinal = pin_ordinal_offsets[signature] + ++pin_ordinal_seen[signature];
                         pin = TaskMemoBuilder::LookupPinnedConclusion(
-                            TaskMemoBuilder::ComputeFirstMsgKey(
-                                (request_data_.is_object() && request_data_.contains("messages")) ? request_data_["messages"] : msg),
-                            signature);
+                            TaskMemoBuilder::ComputeFirstMsgKey(raw_messages),
+                            TaskMemoBuilder::ToolCallOrdinalKey(signature, ordinal));
+                    }
                     for (const auto& converted_content : converted_calls)
                     {
                         all_messages.push_back({role, pin + converted_content});
@@ -659,6 +661,7 @@ private:
         std::string think_goal_reminder;
         model_input_.think_time_budget_s_ = 0;
         model_input_.think_force_min_floor_ = false;
+        std::vector<std::string> rethink_tools;
         if (instance_config_->is_thinking_model())
         {
             bool failure_trigger = false;
@@ -684,6 +687,40 @@ private:
             {
                 systemDefaultPrompt += "/no_think";
                 force_empty_think_prefill = instance_config_->is_speculative_draft_configured();
+                const auto &at_cfg = instance_config_->i_model_config_.GetAdaptiveThinkingConfig();
+                if (is_tool && at_cfg.enabled && at_cfg.time_budget_s > 0 && !at_cfg.rethink_tools.empty())
+                {
+                    std::string previous_tool_name;
+                    for (auto message = msg.rbegin(); message != msg.rend(); ++message)
+                    {
+                        if (!message->is_object() || message->value("role", "") != "assistant"
+                            || !message->contains("tool_calls") || !(*message)["tool_calls"].is_array())
+                            continue;
+                        const auto &tool_calls = (*message)["tool_calls"];
+                        for (auto tool_call = tool_calls.rbegin(); tool_call != tool_calls.rend(); ++tool_call)
+                        {
+                            if (!tool_call->is_object() || !tool_call->contains("function")
+                                || !(*tool_call)["function"].is_object())
+                                continue;
+                            const auto &function = (*tool_call)["function"];
+                            if (function.contains("name") && function["name"].is_string())
+                            {
+                                previous_tool_name = function["name"].get<std::string>();
+                                break;
+                            }
+                        }
+                        if (!previous_tool_name.empty())
+                            break;
+                    }
+                    if (!previous_tool_name.empty()
+                        && std::find(at_cfg.rethink_tools.begin(), at_cfg.rethink_tools.end(), previous_tool_name)
+                               == at_cfg.rethink_tools.end())
+                    {
+                        rethink_tools = at_cfg.rethink_tools;
+                        model_input_.think_min_tokens_ = at_cfg.min_tokens;
+                        model_input_.think_ctx_reserve_ = at_cfg.ctx_reserve_tokens;
+                    }
+                }
             }
         }
 
@@ -756,9 +793,43 @@ private:
                                                           start_prompt_str,
                                                           stable_empty_think_history ? empty_think_start : std::string(),
                                                           BuildTaskMemoNotes());
+        if (!rethink_tools.empty() && modelInputContent.size() >= start_prompt_str.size()
+            && modelInputContent.compare(modelInputContent.size() - start_prompt_str.size(),
+                                         start_prompt_str.size(), start_prompt_str) == 0)
+        {
+            const std::string rethink_start = j["start"].get<std::string>() + "<think>\n";
+            model_input_.rethink_text_ = modelInputContent.substr(0, modelInputContent.size() - start_prompt_str.size())
+                                         + rethink_start;
+        }
+
+        size_t final_tokens = context_->TokenLength(modelInputContent);
+        const long long ctx_left = static_cast<long long>(instance_config_->get_context_size())
+            - static_cast<long long>(final_tokens) - model_input_.think_ctx_reserve_;
+        if (force_open_think_prefill && !model_input_.think_force_min_floor_
+            && ctx_left < model_input_.think_min_tokens_)
+        {
+            const std::string non_think_start = instance_config_->is_speculative_draft_configured()
+                ? empty_think_start : j["start"].get<std::string>();
+            if (modelInputContent.size() >= start_prompt_str.size()
+                && modelInputContent.compare(modelInputContent.size() - start_prompt_str.size(),
+                                             start_prompt_str.size(), start_prompt_str) == 0)
+            {
+                modelInputContent.replace(modelInputContent.size() - start_prompt_str.size(),
+                                          start_prompt_str.size(), non_think_start);
+                start_prompt_str = non_think_start;
+                force_open_think_prefill = false;
+                final_tokens = context_->TokenLength(modelInputContent);
+            }
+            model_input_.think_time_budget_s_ = 0;
+            model_input_.rethink_text_.clear();
+            My_Log{} << "[AdaptiveThinking] skip open think: ctx_left=" << ctx_left << std::endl;
+        }
+        else if (!model_input_.rethink_text_.empty() && ctx_left < model_input_.think_min_tokens_)
+        {
+            model_input_.rethink_text_.clear();
+        }
 
         {
-            size_t final_tokens = context_->TokenLength(modelInputContent);
 
             FillLedger(ledger_tokens_in, final_tokens, ledger_messages_in, optimized);
 
@@ -1913,20 +1984,11 @@ private:
                 candidates.push_back({"near_repeat", "near:" + near_tpl, false});
         }
 
-        constexpr size_t kCycleWindow = 48;
-        constexpr size_t kCycleRepeatThreshold = 4;
-        bool cycle_checked = false;
-        size_t cycle_repeats = 0;
-        std::string cycle_signature;
+        constexpr size_t kCycleWindow = 12;
         const std::vector<std::string> cycle_keys = CollectCycleToolCallKeys(messages);
-        if (!cycle_keys.empty())
-        {
-            cycle_repeats = ToolCallRepetitionStore::CountRepeatsInWindow(cycle_keys, kCycleWindow);
-            cycle_signature = BuildCycleRepeatSignature(cycle_keys, kCycleWindow);
-            cycle_checked = true;
-            if (cycle_repeats >= kCycleRepeatThreshold && !cycle_signature.empty())
-                candidates.push_back({"cycle_repeat", cycle_signature, false});
-        }
+        const std::string cycle_signature = BuildCycleRepeatSignature(cycle_keys, kCycleWindow);
+        if (!cycle_signature.empty())
+            candidates.push_back({"cycle_repeat", cycle_signature, false});
         const auto &rg_cfg = instance_config_->i_model_config_.GetToolCallRepairConfig().redundant_call_guard;
         std::string repeat_key;
         int repeat_count = 0;
@@ -1949,8 +2011,6 @@ private:
             int tool_turns = 0;
 
             int failure_reserve_used = 0;
-
-            std::string last_cycle_signature;
             std::chrono::steady_clock::time_point touched;
         };
         static std::mutex s_mu;
@@ -1969,21 +2029,6 @@ private:
             const auto it = st.per_signature.find("repeat:" + repeat_key);
             if (it != st.per_signature.end())
                 it->second = 0;
-        }
-        if (cycle_checked)
-        {
-            if (cycle_repeats >= kCycleRepeatThreshold && !cycle_signature.empty())
-            {
-                st.last_cycle_signature = cycle_signature;
-            }
-            else if (!st.last_cycle_signature.empty())
-            {
-
-                const auto it = st.per_signature.find(st.last_cycle_signature);
-                if (it != st.per_signature.end())
-                    it->second = 0;
-                st.last_cycle_signature.clear();
-            }
         }
         bool fallback_paced = false;
         for (const auto &candidate : candidates)
@@ -2484,6 +2529,7 @@ private:
     {
         model_input_.system_.clear();
         model_input_.text_.clear();
+        model_input_.rethink_text_.clear();
         model_input_.image_.clear();
         model_input_.audio_.clear();
         model_input_.agent_type_ = "sub";

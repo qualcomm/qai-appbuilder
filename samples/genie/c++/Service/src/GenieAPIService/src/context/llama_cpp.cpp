@@ -450,7 +450,36 @@ public:
         {
             ckpt_points.push_back(ckpt_target);
         }
-        const int ckpt_end = prefix_cache_on ? FindCheckpointPos(effective_prompt_len, n_reuse, 1) : -1;
+        int ckpt_end = prefix_cache_on ? FindCheckpointPos(effective_prompt_len, n_reuse, 1) : -1;
+        if (prefix_cache_on) {
+            const auto im_end_tokens = common_tokenize(ctx, "<|im_end|>", false, true);
+            if (im_end_tokens.size() == 1) {
+                const llama_token bos = llama_vocab_bos(vocab);
+                llama_token msg_start = LLAMA_TOKEN_NULL;
+                for (int i = 0; i < effective_prompt_len; ++i) {
+                    if (embd_inp[i] != bos && llama_vocab_is_control(vocab, embd_inp[i])) {
+                        msg_start = embd_inp[i];
+                        break;
+                    }
+                }
+                int last_msg_start = -1;
+                if (msg_start != LLAMA_TOKEN_NULL) {
+                    for (int i = 0; i < effective_prompt_len; ++i) {
+                        if (embd_inp[i] == msg_start)
+                            last_msg_start = i;
+                    }
+                }
+                int tail_start = -1;
+                for (int i = last_msg_start - 1; i >= 0; --i) {
+                    if (embd_inp[i] == im_end_tokens[0]) {
+                        tail_start = i + 1;
+                        break;
+                    }
+                }
+                if (tail_start >= 0 && last_msg_start - tail_start > 1)
+                    ckpt_end = tail_start;
+            }
+        }
         if (ckpt_end > ckpt_target)
         {
             ckpt_points.push_back(ckpt_end);

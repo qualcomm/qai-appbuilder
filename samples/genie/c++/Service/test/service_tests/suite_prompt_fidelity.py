@@ -347,7 +347,7 @@ def _run_prompt_fidelity_suite(args, models, remote_mode, out_dir):
         probe = _PromptLogProbe(svc._stdout_log)
         context_size = 0
         try:
-            r = requests.post(f"http://{args.host}:{args.port}/contextsize",
+            r = requests.post(f"http://{args.host}:{args.port}/v2/contextsize",
                               json={"model": target}, timeout=120)
             if r.status_code == 200:
                 context_size = int(next((e.get("contextsize", 0) for e in r.json().get("models", [])
