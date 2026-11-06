@@ -38,12 +38,14 @@ Design notes
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import shutil
 import stat
 import subprocess
 import sys
+import threading
 import zipfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -113,6 +115,13 @@ class WheelInstallResult:
     #: ``(dist name, version)`` of every companion wheel installed into the same
     #: venv alongside the primary one (see ``extra_wheels`` on the installer).
     extra_wheels: tuple[tuple[str, str], ...] = ()
+    #: The environment the server was installed into (``"shared"`` by default).
+    environment: str = ""
+    #: True when it kept using a PRE-EXISTING per-server venv (the old layout).
+    env_is_legacy: bool = False
+    #: ``(dist, version)`` of the wheels OTHER servers installed into this same
+    #: environment -- i.e. who this server shares its packages with.
+    env_wheels: tuple[tuple[str, str], ...] = ()
     notes: list[str] = field(default_factory=list)
 
 
@@ -386,12 +395,94 @@ def _validate_extra_wheels(
     return paths, infos, ""
 
 
+_SHARED_ENV = "shared"
+_ENVS_DIRNAME = "_envs"
+_MANIFEST_NAME = "env.json"
+
+# One install at a time per environment (an agent can issue two ``install_wheel``
+# calls in parallel; two pip runs on one venv would corrupt it).
+_ENV_LOCKS: dict[str, threading.Lock] = {}
+_ENV_LOCKS_GUARD = threading.Lock()
+
+
+def _env_lock(env_dir: Path) -> threading.Lock:
+    key = os.path.normcase(os.path.abspath(str(env_dir)))
+    with _ENV_LOCKS_GUARD:
+        return _ENV_LOCKS.setdefault(key, threading.Lock())
+
+
+def _resolve_environment(
+    data_dir: Path, server_name: str, environment: str | None
+) -> tuple[str, Path, bool]:
+    """Pick the environment a server is installed into: ``(name, dir, is_legacy)``.
+
+    * explicit ``environment`` -> ``<data>/mcp_packages/_envs/<environment>``;
+    * else a PRE-EXISTING per-server venv (``<data>/mcp_packages/<server>/venv``, the
+      old layout) keeps being used, so re-installing an already-registered server
+      upgrades it in place instead of silently moving it;
+    * else the shared environment.
+
+    ``_envs`` starts with an underscore, so it can never collide with a server name
+    (those must start with a letter or digit).
+    """
+    root = Path(data_dir) / "mcp_packages"
+    if environment:
+        return environment, root / _ENVS_DIRNAME / environment, False
+    legacy = root / server_name
+    if (legacy / "venv").exists():
+        return server_name, legacy, True
+    return _SHARED_ENV, root / _ENVS_DIRNAME / _SHARED_ENV, False
+
+
+def _read_manifest(env_dir: Path) -> list[dict[str, str]]:
+    """The wheels this environment was built from. Missing / corrupt -> ``[]``."""
+    try:
+        data = json.loads((env_dir / _MANIFEST_NAME).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    wheels = data.get("wheels") if isinstance(data, dict) else None
+    if not isinstance(wheels, list):
+        return []
+    return [
+        {"dist": w["dist"], "version": str(w.get("version") or ""), "path": w["path"]}
+        for w in wheels
+        if isinstance(w, dict)
+        and isinstance(w.get("dist"), str)
+        and isinstance(w.get("path"), str)
+    ]
+
+
+def _write_manifest(env_dir: Path, entries: list[dict[str, str]]) -> bool:
+    try:
+        (env_dir / _MANIFEST_NAME).write_text(
+            json.dumps({"wheels": entries}, indent=2), encoding="utf-8"
+        )
+    except OSError:
+        return False
+    return True
+
+
+def _freeze_constraints(frozen: str, *, exclude: set[str]) -> str:
+    """``pip freeze`` output -> a constraints file body, minus the dists in ``exclude``."""
+    keep: list[str] = []
+    for ln in frozen.splitlines():
+        ln = ln.strip()
+        if not ln or ln.startswith(("-e ", "#", "WARNING")) or "==" not in ln:
+            continue
+        if _canonical_dist(ln.split("==", 1)[0]) in exclude:
+            continue
+        keep.append(ln)
+    return "\n".join(keep)
+
+
 def _install_wheel_blocking(
     wheel: Path,
     info: WheelInfo,
     *,
     server_name: str,
-    data_dir: Path,
+    env_name: str,
+    env_dir: Path,
+    env_legacy: bool,
     entry: str | None,
     runner: Runner,
     uv_path: str | None,
@@ -403,6 +494,8 @@ def _install_wheel_blocking(
         dist_name=info.dist_name,
         version=info.version,
         console_scripts=info.console_scripts,
+        environment=env_name,
+        env_is_legacy=env_legacy,
     )
     # Decide the entry first: an ambiguous / invalid choice must fail BEFORE the
     # (slow, network-touching) install, with nothing created on disk.
@@ -410,29 +503,56 @@ def _install_wheel_blocking(
     if info.console_scripts and chosen is None:
         res.step, res.error = "resolve_entry", why
         return res
-    pkg_dir = Path(data_dir) / "mcp_packages" / server_name
-    venv_dir = pkg_dir / "venv"
+    venv_dir = env_dir / "venv"
     vpy = _venv_python(venv_dir)
     res.venv_dir = str(venv_dir)
     res.venv_python = str(vpy)
     try:
-        pkg_dir.mkdir(parents=True, exist_ok=True)
+        env_dir.mkdir(parents=True, exist_ok=True)
     except OSError as exc:
-        res.step, res.error = "prepare", f"cannot create {pkg_dir}: {exc}"
+        res.step, res.error = "prepare", f"cannot create {env_dir}: {exc}"
         return res
 
+    # What this call installs, and who else already lives in the environment.
+    this_install: list[tuple[WheelInfo, Path]] = [
+        (info, wheel),
+        *zip(extra_infos, extra_paths),
+    ]
+    this_keys = {_canonical_dist(i.dist_name) for i, _ in this_install}
+    others = (
+        []
+        if env_legacy
+        else [m for m in _read_manifest(env_dir) if _canonical_dist(m["dist"]) not in this_keys]
+    )
+
     # 1. venv. Reuse a HEALTHY existing one (a re-install is an upgrade, not a
-    #    rebuild); an existing venv that cannot even start (its base Python was
-    #    moved / removed -- e.g. a uv cleanup) is rebuilt, which is also how a
-    #    previously-broken registration gets repaired by simply installing again.
+    #    rebuild). One that cannot even start (its base Python was moved / removed
+    #    -- e.g. a uv cleanup) or that is gone is (re)built, and then EVERY wheel the
+    #    environment was made from is installed again with it: the venv is shared, so
+    #    rebuilding it for one server must not silently drop the others' packages.
     healthy = False
+    rebuilt = False
     if vpy.exists():
         rc_h, _ = runner([str(vpy), "-c", "import sys"], 30)
         healthy = rc_h == 0
-        if not healthy:
+    restore: list[Path] = []
+    if not healthy:
+        missing = [m["path"] for m in others if not Path(m["path"]).is_file()]
+        if missing:
+            res.step = "rebuild_env"
+            res.error = (
+                f"environment '{env_name}' must be rebuilt, but these wheels it was "
+                f"built from are no longer on disk: {', '.join(missing)}. Restore "
+                "them, or install into a different environment name."
+            )
+            return res
+        restore = [Path(m["path"]) for m in others]
+        if vpy.exists():
+            rebuilt = True
             res.notes.append(
                 "the existing venv could not start (its base Python is gone or "
                 "moved); rebuilt it"
+                + (f" and reinstalled {len(restore)} other wheel(s)" if restore else "")
             )
             try:
                 _remove_tree(venv_dir)
@@ -443,7 +563,6 @@ def _install_wheel_blocking(
                     "(is a server from it still running?)"
                 )
                 return res
-    if not healthy:
         rc, out = runner(
             [_base_python(), "-m", "venv", "--system-site-packages", str(venv_dir)],
             _VENV_TIMEOUT_S,
@@ -452,37 +571,47 @@ def _install_wheel_blocking(
             res.step, res.error = "create_venv", _tail(out) or f"exit code {rc}"
             return res
 
-    # 2. constraints from the host's installed packages (best-effort)
-    constraints: Path | None = None
+    # 2. version constraints (best-effort): the host's installed packages, and -- for
+    #    an environment that already has other members -- what is installed in it NOW.
+    #    The second file is what makes sharing safe: a new package that needs a
+    #    different version of something already installed FAILS the install loudly
+    #    instead of silently upgrading / downgrading it under the other servers.
+    constraint_files: list[Path] = []
     rc, frozen = runner([sys.executable, "-m", "pip", "freeze", "--all"], 60)
     if rc == 0 and frozen.strip():
-        constraints = pkg_dir / "_host_constraints.txt"
+        host_file = env_dir / "_host_constraints.txt"
         try:
-            constraints.write_text(
-                "\n".join(
-                    ln
-                    for ln in frozen.splitlines()
-                    if ln and not ln.startswith(("-e ", "#", "WARNING"))
-                    and "==" in ln
-                ),
-                encoding="utf-8",
-            )
+            host_file.write_text(_freeze_constraints(frozen, exclude=set()), encoding="utf-8")
+            constraint_files.append(host_file)
         except OSError:
-            constraints = None
+            pass
     else:
         res.notes.append(
             "host pip freeze unavailable; installed without version constraints"
         )
+    protected = False
+    if healthy and not env_legacy:
+        rc_f, env_frozen = runner([str(vpy), "-m", "pip", "freeze", "--local", "--all"], 60)
+        if rc_f == 0 and env_frozen.strip():
+            env_file = env_dir / "_env_constraints.txt"
+            try:
+                env_file.write_text(
+                    _freeze_constraints(env_frozen, exclude=this_keys), encoding="utf-8"
+                )
+                constraint_files.append(env_file)
+                protected = True
+            except OSError:
+                pass
 
-    # 3. install
+    # 3. install -- ONE invocation for the primary, every companion and (after a
+    #    rebuild) every previous member: the resolver sees them together, and a
+    #    conflict fails the whole install instead of leaving the venv half-populated.
+    targets = [str(w) for w in (wheel, *extra_paths, *restore)]
     if uv_path:
         cmd = [uv_path, "pip", "install", "--python", str(vpy), "--native-tls"]
-        if constraints:
-            cmd += ["-c", str(constraints)]
-        # ONE invocation for the primary and every companion wheel: the resolver
-        # sees them together, and a conflict fails the whole install instead of
-        # leaving the venv half-populated.
-        cmd.extend(str(w) for w in (wheel, *extra_paths))
+        for f in constraint_files:
+            cmd += ["-c", str(f)]
+        cmd.extend(targets)
         rc, out = runner(cmd, _INSTALL_TIMEOUT_S)
         res.notes.append("installed with uv pip")
     else:
@@ -498,13 +627,20 @@ def _install_wheel_blocking(
             str(vpy), "-m", "pip", "install", "--quiet", "--prefer-binary",
             "--trusted-host", "pypi.org", "--trusted-host", "files.pythonhosted.org",
         ]
-        if constraints:
-            cmd += ["-c", str(constraints)]
-        cmd.extend(str(w) for w in (wheel, *extra_paths))  # see the uv branch
+        for f in constraint_files:
+            cmd += ["-c", str(f)]
+        cmd.extend(targets)
         rc, out = runner(cmd, _INSTALL_TIMEOUT_S)
         res.notes.append("installed with pip")
     if rc != 0:
         res.step, res.error = "install_wheel", _tail(out) or f"exit code {rc}"
+        if protected:
+            res.error += (
+                f"\n\n(Environment '{env_name}' already holds other packages whose "
+                "versions are kept fixed. If this wheel needs different versions of "
+                "them, install it into its own environment: pass "
+                "environment='<another name>'.)"
+            )
         return res
 
     # 4. entry point
@@ -534,14 +670,35 @@ def _install_wheel_blocking(
             f"{pkgs[0]}` -- verify with a connection test"
         )
     res.extra_wheels = tuple((i.dist_name, i.version) for i in extra_infos)
+    res.env_wheels = tuple((m["dist"], m["version"]) for m in others)
+    if not env_legacy:
+        recorded = {
+            _canonical_dist(m["dist"]): m
+            for m in others
+        }
+        for i, p in this_install:
+            try:
+                path_str = str(p.resolve())
+            except OSError:
+                path_str = str(p)
+            recorded[_canonical_dist(i.dist_name)] = {
+                "dist": i.dist_name, "version": i.version, "path": path_str,
+            }
+        if not _write_manifest(env_dir, list(recorded.values())):
+            res.notes.append(
+                "could not record the environment's wheel list; a later rebuild of "
+                "this environment will not know to restore it"
+            )
     res.ok = True
     _log.info(
         "chat.mcp.wheel_installed",
         server=server_name,
+        environment=env_name,
         dist=info.dist_name,
         version=info.version,
         command=res.command,
         guess=res.entry_is_guess,
+        rebuilt=rebuilt,
     )
     return res
 
@@ -555,14 +712,23 @@ async def install_wheel_as_mcp(
     runner: Runner | None = None,
     uv_path: str | None = None,
     extra_wheels: Sequence[str | Path] = (),
+    environment: str | None = None,
 ) -> WheelInstallResult:
-    """Validate + install a local wheel into a dedicated venv. Never raises.
+    """Validate + install a local wheel into an MCP environment. Never raises.
 
-    ``extra_wheels``: further LOCAL wheels installed into the SAME venv in the same
-    pip/uv call -- for a server that imports a companion package at run time. Each
-    server gets its own isolated venv, so a package installed for server A is not
-    visible to server B; whatever B needs must be listed here. Console scripts of
-    the extras are ignored (the launch command always comes from ``wheel_path``).
+    ``environment``: which venv the server lives in. Servers installed into the SAME
+    environment can import each other's packages (what a server that needs a
+    companion package at run time requires) and share one copy of common
+    dependencies. Omitted -> the shared environment, unless the server already has a
+    per-server venv from the old layout (then that one is upgraded in place). Pass
+    another name to keep a server apart, e.g. when it needs different versions of
+    packages the shared environment already holds: installs into an environment that
+    already has other members keep those members' installed versions fixed, so a
+    conflict FAILS instead of altering them.
+
+    ``extra_wheels``: further LOCAL wheels installed into the same environment in the
+    same pip/uv call. Console scripts of the extras are ignored (the launch command
+    always comes from ``wheel_path``).
 
     ``uv_path`` defaults to ``shutil.which("uv")`` when ``runner`` is not injected
     (tests inject both and stay hermetic).
@@ -573,6 +739,15 @@ async def install_wheel_as_mcp(
             step="validate",
             error=(
                 f"invalid server name {server_name!r}: use letters, digits, "
+                "'_', '.', '-' and start with a letter or digit"
+            ),
+        )
+    if environment and not _NAME_RE.match(str(environment)):
+        return WheelInstallResult(
+            ok=False,
+            step="validate",
+            error=(
+                f"invalid environment name {environment!r}: use letters, digits, "
                 "'_', '.', '-' and start with a letter or digit"
             ),
         )
@@ -588,22 +763,29 @@ async def install_wheel_as_mcp(
 
     use_runner: Runner = runner or _default_runner
     use_uv = uv_path if (uv_path is not None or runner is not None) else shutil.which("uv")
-    loop = asyncio.get_running_loop()
-    try:
-        return await loop.run_in_executor(
-            None,
-            lambda: _install_wheel_blocking(
+    env_name, env_dir, env_legacy = _resolve_environment(
+        Path(data_dir), server_name, environment
+    )
+
+    def _locked() -> WheelInstallResult:
+        with _env_lock(env_dir):
+            return _install_wheel_blocking(
                 wheel,
                 info,
                 server_name=server_name,
-                data_dir=Path(data_dir),
+                env_name=env_name,
+                env_dir=env_dir,
+                env_legacy=env_legacy,
                 entry=entry,
                 runner=use_runner,
                 uv_path=use_uv,
                 extra_paths=extra_paths,
                 extra_infos=extra_infos,
-            ),
-        )
+            )
+
+    loop = asyncio.get_running_loop()
+    try:
+        return await loop.run_in_executor(None, _locked)
     except Exception as exc:  # noqa: BLE001 -- contract: never raise
         _log.warning("chat.mcp.wheel_install_unexpected", error=str(exc))
         return WheelInstallResult(
