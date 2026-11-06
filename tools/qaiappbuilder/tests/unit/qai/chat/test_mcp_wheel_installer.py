@@ -181,7 +181,7 @@ def test_installs_with_pip_and_returns_the_console_script(tmp_path: Path) -> Non
     assert install_cmds[0][1:4] == ["-m", "pip", "install"]
     assert str(whl) in install_cmds[0]
     # host-version constraints were written, without the editable line
-    cons = tmp_path / "mcp_packages" / "demo" / "_host_constraints.txt"
+    cons = tmp_path / "mcp_packages" / "_envs" / "shared" / "_host_constraints.txt"  # new servers default to the shared environment
     assert cons.read_text(encoding="utf-8").splitlines() == ["mcp==1.9.0", "httpx==0.27.0"]
     assert "-c" in install_cmds[0]
 
