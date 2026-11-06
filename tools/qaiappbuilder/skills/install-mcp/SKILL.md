@@ -40,10 +40,10 @@ that correctly (own venv, entry-point lookup, registration, connection test).
    - **If installing fails because this server needs different versions** of packages the
      shared environment already holds, do NOT force it: install it again into its own
      environment with `environment="<some-new-name>"` and tell the user why.
-   - **Companion packages (`extra_wheels`):** when the README or an error says this server
-     needs another package "in the same Python environment" and that package is not installed
-     yet, pass its local `.whl` in `extra_wheels=[...]` so both are installed together. Do not
-     use `PYTHONPATH` tricks, and do not copy that package's contents by hand.
+   - **Companion packages:** when the README or an error says this server needs another
+     package "in the same Python environment", install that package's `.whl` as its own
+     server with `install_wheel` (it lands in the same shared environment). Do not use
+     `PYTHONPATH` tricks, and do not copy that package's contents by hand.
    - **Large results:** results over the model's normal per-result budget (30K characters
      for qwen/deepseek/glm, 50K for claude/gpt) are cut head+tail and the full text is saved to
      a file named in the footer (`[full_output_saved] path=...` -> `read` it). For a server whose
@@ -91,8 +91,8 @@ that correctly (own venv, entry-point lookup, registration, connection test).
 - **`ModuleNotFoundError` / "install … in the same Python environment"** (from a tool call or
   `test`) — the server imports a package that is not in its environment. If the result of
   `install_wheel` said the server kept an older per-server environment, install it again with
-  `environment="shared"`; otherwise find that package's `.whl` and run `install_wheel` again
-  with it in `extra_wheels` (the existing environment is reused and upgraded). If a tool takes a skill /
+  `environment="shared"`; otherwise find that package's `.whl` and run `install_wheel` for it
+  too (it joins the same shared environment). If a tool takes a skill /
   document reference, prefer the **reference the server documents** (an id or a path to the
   original file) over re-typing the document's text into a new file — re-typing is slow and
   silently alters the content.

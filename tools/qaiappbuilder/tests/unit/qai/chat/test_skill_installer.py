@@ -302,3 +302,30 @@ def test_deeply_nested_files_beyond_260_characters(roots) -> None:
     res = _install(roots, z)
     assert res.ok, res.error
     assert os.path.isfile(si._lp(roots[0] / "deepskill" / deep))
+
+
+def test_a_transient_access_denied_while_moving_into_place_is_retried(roots, monkeypatch: pytest.MonkeyPatch) -> None:
+    real, calls = os.replace, {"n": 0}
+
+    def flaky(src, dst):  # a scanner holds a handle inside the freshly written tree for a moment
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise PermissionError(5, "access denied")
+        return real(src, dst)
+
+    monkeypatch.setattr(si.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(si.os, "replace", flaky)
+    res = _install(roots, _folder(roots[2]))
+    assert res.ok, res.error
+    assert calls["n"] == 3 and (roots[0] / "my-skill" / "SKILL.md").is_file()
+
+
+def test_a_permanent_access_denied_fails_cleanly_and_leaves_nothing(roots, monkeypatch: pytest.MonkeyPatch) -> None:
+    def denied(_src, _dst):
+        raise PermissionError(5, "access denied")
+
+    monkeypatch.setattr(si.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(si.os, "replace", denied)
+    res = _install(roots, _folder(roots[2]))
+    assert not res.ok and res.step == "unexpected"
+    assert list(roots[0].iterdir()) == []
