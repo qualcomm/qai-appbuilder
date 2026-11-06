@@ -34,12 +34,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from qai.chat.domain.mcp_server import (
-    MAX_RESULT_CHARS_MAX,
-    MAX_RESULT_CHARS_MIN,
-    McpServerConfig,
-    McpTransport,
-)
+from qai.chat.domain.mcp_server import McpServerConfig, McpTransport
 from qai.platform.logging import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -144,21 +139,6 @@ MCP_MANAGE_TOOL_SCHEMA: dict[str, Any] = {
                         "Letters, digits, '_', '.', '-'."
                     ),
                 },
-                "extra_wheels": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": (
-                        "install_wheel: further LOCAL .whl files to install into "
-                        "this server's SAME environment, in the same step. Every "
-                        "MCP server gets its own isolated Python environment, so "
-                        "a package installed for one server is NOT visible to "
-                        "another. List here any companion/catalog package this "
-                        "server imports at run time -- typical clue: its README "
-                        "or an error says to install some package 'in the same "
-                        "Python environment' as the server. Absolute paths; at "
-                        "most 8. Console scripts of these wheels are ignored."
-                    ),
-                },
                 "entry": {
                     "type": "string",
                     "description": (
@@ -203,17 +183,6 @@ MCP_MANAGE_TOOL_SCHEMA: dict[str, Any] = {
                         "package README says its tools run very long."
                     ),
                 },
-                "max_result_chars": {
-                    "type": "integer",
-                    "description": (
-                        "install_wheel / add: cap, in characters, on ONE tool "
-                        "result shown to the model for this server (10000-2000000). "
-                        "Unset keeps the normal model budget (30K-50K); set it for "
-                        "a server whose tools return whole documents so they are "
-                        "not cut in the middle. 0 clears it. Omit to keep the "
-                        "current value."
-                    ),
-                },
                 "enabled": {
                     "type": "boolean",
                     "description": "set_global_enabled: the new master-switch state.",
@@ -237,7 +206,6 @@ def _fmt_status(st: McpServerStatus) -> str:
         f"- {cfg.name} [{cfg.transport.value}] {state}"
         f"{'' if cfg.enabled else ' (disabled)'}"
         f" | tools: {st.tool_count} | timeout {cfg.timeout_s:g}s"
-        f"{f' | result cap {cfg.max_result_chars}' if cfg.max_result_chars else ''}"
         f" | {where}"
     )
     if st.tool_names:
@@ -260,25 +228,6 @@ def _resolve_timeout(value: Any, default: float) -> float:
     if t != t or t <= 0:  # NaN or non-positive
         return default
     return min(t, _TIMEOUT_MAX_S)
-
-
-def _resolve_result_cap(value: Any) -> int | None:
-    """``max_result_chars`` from tool args.
-
-    ``None`` = not provided / junk (the registry then keeps any existing value);
-    ``0`` = explicitly clear; otherwise clamped into the allowed range.
-    """
-    if value is None or isinstance(value, bool):
-        return None
-    try:
-        n = int(value)
-    except (TypeError, ValueError, OverflowError):
-        return None
-    if n == 0:
-        return 0
-    if n < 0:
-        return None
-    return max(MAX_RESULT_CHARS_MIN, min(n, MAX_RESULT_CHARS_MAX))
 
 
 def _as_str_dict(value: Any) -> dict[str, str]:
@@ -395,18 +344,6 @@ class McpManageToolHandler:
             from qai.chat.adapters.mcp_wheel_installer import install_wheel_as_mcp
 
             install = install_wheel_as_mcp
-        extras_raw = args.get("extra_wheels")
-        if extras_raw is None:
-            extras: list[str] = []
-        elif isinstance(extras_raw, list) and all(
-            isinstance(p, str) and p.strip() for p in extras_raw
-        ):
-            extras = [p.strip() for p in extras_raw]
-        else:
-            return (
-                "[mcp_manage] extra_wheels must be a list of non-empty .whl path "
-                "strings."
-            )
         env_raw = args.get("environment")
         if env_raw is not None and not (isinstance(env_raw, str) and env_raw.strip()):
             return "[mcp_manage] environment must be a non-empty name (letters, digits, '_', '.', '-')."
@@ -415,7 +352,6 @@ class McpManageToolHandler:
             server_name=name.strip(),
             data_dir=self._data_dir,
             entry=args.get("entry") if isinstance(args.get("entry"), str) else None,
-            extra_wheels=extras,
             environment=env_raw.strip() if isinstance(env_raw, str) else None,
         )
         if not res.ok:
@@ -431,7 +367,6 @@ class McpManageToolHandler:
             args=tuple(res.args) + extra_args,
             env=_as_str_dict(args.get("env")),
             timeout_s=_resolve_timeout(args.get("timeout_s"), _WHEEL_DEFAULT_TIMEOUT_S),
-            max_result_chars=_resolve_result_cap(args.get("max_result_chars")),
         )
         st = await reg.add_server(cfg)
         gate = reg.global_enabled()
@@ -458,14 +393,6 @@ class McpManageToolHandler:
                     "environment='shared'."
                 ]
                 if res.env_is_legacy
-                else []
-            ),
-            *(
-                [
-                    "Also installed into the same environment: "
-                    + ", ".join(f"{d} {v}" for d, v in res.extra_wheels)
-                ]
-                if res.extra_wheels
                 else []
             ),
             f"Registered MCP server '{cfg.name}': {cfg.command} {' '.join(cfg.args)}".rstrip(),
@@ -521,7 +448,6 @@ class McpManageToolHandler:
             env=_as_str_dict(args.get("env")),
             url=args.get("url") if isinstance(args.get("url"), str) else None,
             timeout_s=_resolve_timeout(args.get("timeout_s"), _ADD_DEFAULT_TIMEOUT_S),
-            max_result_chars=_resolve_result_cap(args.get("max_result_chars")),
         )
         st = await reg.add_server(cfg)
         out = ["Registered MCP server:", _fmt_status(st)]

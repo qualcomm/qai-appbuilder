@@ -53,9 +53,8 @@ pytestmark = pytest.mark.e2e
 M = "/api/chat/mcp"
 NOPE = "C:\\e2e-nope\\never-run.exe"
 GATE_OFF = "mcp disabled (chat_mcp_enabled=false)"
-# ``max_result_chars`` was appended (additive; per-server cap on one tool result shown to the model).
-STATUS_KEYS = {"name", "transport", "command", "args", "env", "cwd", "url", "headers", "timeout_s", "max_result_chars", "connected",
-               "tool_count", "tool_names", "resource_count", "prompt_count", "enabled", "error"}
+STATUS_KEYS = {"name", "transport", "command", "args", "env", "cwd", "url", "headers", "timeout_s", "connected", "tool_count", "tool_names",
+               "resource_count", "prompt_count", "enabled", "error"}
 
 
 def _cred_targets() -> frozenset[str]:
@@ -128,26 +127,6 @@ def test_adding_a_stdio_server_returns_its_status_row(mcp: tuple, servers: Calla
     assert (row["args"], row["env"], row["cwd"], row["timeout_s"]) == (["--x", "y"], {"PLAIN": "1"}, "C:\\e2e-nope", 12.5)
     assert (row["connected"], row["tool_count"], row["tool_names"], row["enabled"], row["error"]) == (False, 0, [], True, GATE_OFF)
     assert (row["url"], row["headers"], row["resource_count"], row["prompt_count"]) == (None, {}, 0, 0)
-    assert row["max_result_chars"] is None  # unset by default -> the normal per-model result budget applies
-
-
-def test_max_result_chars_is_stored_kept_across_a_resave_and_clearable(mcp: tuple, servers: Callable) -> None:
-    _ob, cl = mcp
-    assert servers("e2e-cap", max_result_chars=60000).json()["max_result_chars"] == 60000
-    # A re-save that does not mention the field (what the UI panel does) must not silently reset it.
-    assert servers("e2e-cap", timeout_s=20).json()["max_result_chars"] == 60000
-    row = next(r for r in cl.get(f"{M}/servers").json()["servers"] if r["name"] == "e2e-cap")
-    assert row["max_result_chars"] == 60000 and row["timeout_s"] == 20
-    assert servers("e2e-cap", max_result_chars=0).json()["max_result_chars"] is None  # explicit clear
-    assert servers("e2e-cap").json()["max_result_chars"] is None  # ... and it stays cleared
-
-
-def test_max_result_chars_out_of_range_is_rejected(mcp: tuple, servers: Callable) -> None:
-    # The API reports every invalid-input case as 400 (see the name / transport validation tests).
-    assert servers("e2e-cap-bad", max_result_chars=3_000_000).status_code == 400  # above the ceiling (HTTP model)
-    assert servers("e2e-cap-bad", max_result_chars=-1).status_code == 400  # negative (HTTP model)
-    assert servers("e2e-cap-bad", max_result_chars=5).status_code == 400  # below the 10000 floor (domain rule)
-    assert "e2e-cap-bad" not in _names(mcp[1])
 
 
 def test_adding_a_remote_server_without_headers(mcp: tuple, servers: Callable) -> None:
