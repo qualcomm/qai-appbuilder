@@ -129,6 +129,21 @@ MCP_MANAGE_TOOL_SCHEMA: dict[str, Any] = {
                         "install_wheel: absolute path of the local .whl file."
                     ),
                 },
+                "environment": {
+                    "type": "string",
+                    "description": (
+                        "install_wheel: which Python environment the server lives "
+                        "in. Servers in the SAME environment can import each "
+                        "other's packages and share one copy of common "
+                        "dependencies. Omit to use the shared environment "
+                        "('shared'). Give a different name to keep a server "
+                        "apart -- do that when installing it fails because it "
+                        "needs different versions of packages the shared "
+                        "environment already holds (those versions are kept "
+                        "fixed so one install cannot break another server). "
+                        "Letters, digits, '_', '.', '-'."
+                    ),
+                },
                 "extra_wheels": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -392,12 +407,16 @@ class McpManageToolHandler:
                 "[mcp_manage] extra_wheels must be a list of non-empty .whl path "
                 "strings."
             )
+        env_raw = args.get("environment")
+        if env_raw is not None and not (isinstance(env_raw, str) and env_raw.strip()):
+            return "[mcp_manage] environment must be a non-empty name (letters, digits, '_', '.', '-')."
         res: WheelInstallResult = await install(
             wheel_path.strip(),
             server_name=name.strip(),
             data_dir=self._data_dir,
             entry=args.get("entry") if isinstance(args.get("entry"), str) else None,
             extra_wheels=extras,
+            environment=env_raw.strip() if isinstance(env_raw, str) else None,
         )
         if not res.ok:
             return (
@@ -418,6 +437,29 @@ class McpManageToolHandler:
         gate = reg.global_enabled()
         lines = [
             f"Installed {res.dist_name} {res.version} into {res.venv_dir}",
+            *(
+                [
+                    f"Environment: {res.environment}"
+                    + (
+                        " (also holds: "
+                        + ", ".join(f"{d} {v}" for d, v in res.env_wheels)
+                        + ")"
+                        if res.env_wheels
+                        else ""
+                    )
+                ]
+                if res.environment
+                else []
+            ),
+            *(
+                [
+                    "Note: this server kept its existing per-server environment. "
+                    "To move it into the shared one, install it again with "
+                    "environment='shared'."
+                ]
+                if res.env_is_legacy
+                else []
+            ),
             *(
                 [
                     "Also installed into the same environment: "

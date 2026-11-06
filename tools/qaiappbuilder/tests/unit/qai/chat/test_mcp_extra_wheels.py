@@ -272,11 +272,19 @@ def test_the_schema_explains_isolation_and_gives_a_generic_clue() -> None:
 # ── real venv, real pip: the companion is actually importable ───────────────
 
 
-def _write_wheel(dir_: Path, name: str, version: str, files: dict[str, str], scripts: dict[str, str] | None = None) -> Path:
-    """A real, installable, dependency-free pure-Python wheel (valid WHEEL + RECORD)."""
+def _write_wheel(
+    dir_: Path,
+    name: str,
+    version: str,
+    files: dict[str, str],
+    scripts: dict[str, str] | None = None,
+    requires: tuple[str, ...] = (),
+) -> Path:
+    """A real, installable pure-Python wheel (valid WHEEL + RECORD); ``requires`` = Requires-Dist lines."""
     dist = f"{name}-{version}.dist-info"
     members: dict[str, str] = dict(files)
-    members[f"{dist}/METADATA"] = f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n"
+    reqs = "".join(f"Requires-Dist: {r}\n" for r in requires)
+    members[f"{dist}/METADATA"] = f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n{reqs}"
     members[f"{dist}/WHEEL"] = "Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
     members[f"{dist}/top_level.txt"] = name + "\n"
     if scripts:
