@@ -40,6 +40,7 @@ from typing import Any
 
 from qai.platform.process import (
     best_effort_tree_kill,
+    create_subprocess_for_argv,
     no_window_creationflags,
     terminate_process_tree,
 )
@@ -293,8 +294,10 @@ async def _stream_impl(
         # No intermediate OS shell: the argv came from ``_select_shell`` and
         # already names the interpreter explicitly, so a multi-line payload
         # reaches that interpreter with its real newlines intact.
-        proc = await asyncio.create_subprocess_exec(
-            *argv,
+        # ``create_subprocess_for_argv`` == ``create_subprocess_exec(*argv)`` except a
+        # quote-bearing ``cmd /c`` call, whose quotes list2cmdline would corrupt.
+        proc = await create_subprocess_for_argv(
+            argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd,

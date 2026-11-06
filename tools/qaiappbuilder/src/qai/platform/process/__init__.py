@@ -57,6 +57,7 @@ from .ports import (
     ProcessStdoutFrame,
     ProcessTerminatedFrame,
 )
+from .spawn import cmd_raw_command, create_subprocess_for_argv
 from .spawn_flags import no_window_creationflags
 from .tree_kill import best_effort_tree_kill, terminate_process_tree
 
@@ -73,6 +74,8 @@ __all__ = [
     "ProcessTerminatedFrame",
     "best_effort_tree_kill",
     "bundled_bin_dirs",
+    "cmd_raw_command",
+    "create_subprocess_for_argv",
     "current_arch",
     "is_admin",
     "no_window_creationflags",

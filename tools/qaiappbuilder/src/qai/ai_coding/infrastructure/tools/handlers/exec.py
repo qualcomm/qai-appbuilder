@@ -53,6 +53,7 @@ from qai.platform.child_process_deny_audit import (
 from qai.platform.logging import get_logger
 from qai.platform.process import (
     best_effort_tree_kill,
+    create_subprocess_for_argv,
     no_window_creationflags,
     terminate_process_tree,
 )
@@ -967,8 +968,8 @@ async def _dispatch_exec(
     spawn_started_at = datetime.now(tz=timezone.utc)
 
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *argv,
+        proc = await create_subprocess_for_argv(
+            argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=cwd_str,
