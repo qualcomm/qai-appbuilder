@@ -15,13 +15,10 @@ keeps the installed versions fixed: a conflict FAILS rather than breaking a neig
 from __future__ import annotations
 
 import asyncio
-import base64
-import hashlib
 import json
 import sys
 import threading
 import time
-import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -31,38 +28,8 @@ import pytest
 from qai.chat.adapters import mcp_wheel_installer as inst
 from qai.chat.adapters.mcp_manage_tool import MCP_MANAGE_TOOL_SCHEMA, McpManageToolHandler
 from qai.chat.adapters.mcp_wheel_installer import WheelInstallResult, install_wheel_as_mcp
+from tests.unit.qai.chat.test_mcp_extra_wheels import _write_wheel
 from tests.unit.qai.chat.test_mcp_wheel_installer import _FakeRunner, _make_wheel
-
-
-def _write_wheel(
-    dir_: Path,
-    name: str,
-    version: str,
-    files: dict[str, str],
-    scripts: dict[str, str] | None = None,
-    requires: tuple[str, ...] = (),
-) -> Path:
-    """A real, installable pure-Python wheel (valid WHEEL + RECORD); ``requires`` = Requires-Dist lines."""
-    dist = f"{name}-{version}.dist-info"
-    members: dict[str, str] = dict(files)
-    reqs = "".join(f"Requires-Dist: {r}\n" for r in requires)
-    members[f"{dist}/METADATA"] = f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n{reqs}"
-    members[f"{dist}/WHEEL"] = "Wheel-Version: 1.0\nGenerator: test\nRoot-Is-Purelib: true\nTag: py3-none-any\n"
-    members[f"{dist}/top_level.txt"] = name + "\n"
-    if scripts:
-        members[f"{dist}/entry_points.txt"] = "[console_scripts]\n" + "".join(f"{k} = {v}\n" for k, v in scripts.items())
-    record = []
-    for path, body in members.items():
-        raw = body.encode("utf-8")
-        digest = base64.urlsafe_b64encode(hashlib.sha256(raw).digest()).rstrip(b"=").decode()
-        record.append(f"{path},sha256={digest},{len(raw)}")
-    record.append(f"{dist}/RECORD,,")
-    members[f"{dist}/RECORD"] = "\n".join(record) + "\n"
-    whl = dir_ / f"{name}-{version}-py3-none-any.whl"
-    with zipfile.ZipFile(whl, "w") as zf:
-        for path, body in members.items():
-            zf.writestr(path, body)
-    return whl
 
 
 def _run(coro: Any) -> Any:
@@ -410,10 +377,9 @@ def test_two_servers_share_a_venv_and_a_conflicting_third_cannot_break_them(
     assert ra.ok, ra.error
     assert ra.environment == "shared"
 
-    # The catalog package is its own server; B imports it from the SAME environment.
-    rcat = _run(install_wheel_as_mcp(catalog, server_name="catalog", data_dir=tmp_path))
-    assert rcat.ok, rcat.error
-    rb = _run(install_wheel_as_mcp(b, server_name="b", data_dir=tmp_path))
+    # B gets the catalog package from the same environment A lives in -- no extra_wheels
+    # needed for B to import what ANOTHER server ships once that package is in the env.
+    rb = _run(install_wheel_as_mcp(b, server_name="b", data_dir=tmp_path, extra_wheels=[catalog]))
     assert rb.ok, rb.error
     assert Path(ra.venv_dir) == Path(rb.venv_dir)  # ONE venv
     assert ("qai_synth_a", "1.0") in rb.env_wheels

@@ -6,7 +6,7 @@
 """Source tripwires for wiring that no unit test can drive end to end.
 
 The behaviour behind each of these is covered elsewhere (``test_mcp_large_reply``,
-``test_failed_tool_result_text``); what those cannot see is
+``test_failed_tool_result_text``, ``test_mcp_result_cap``); what those cannot see is
 whether the production call sites still USE it -- ``StreamChatUseCase`` is an
 11k-line orchestrator and ``build_chat_services`` needs a full container. If one
 of these fails, someone removed the call site: re-wire it (or replace the tripwire
@@ -20,6 +20,7 @@ from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parents[4]
 _STREAMING = _ROOT / "src/qai/chat/application/use_cases/streaming.py"
+_CHAT_DI = _ROOT / "apps/api/_chat_di.py"
 _INFRA_MCP = _ROOT / "src/qai/chat/infrastructure/mcp_client.py"
 
 
@@ -43,4 +44,14 @@ def test_stdio_children_are_spawned_with_a_raised_stream_limit() -> None:
     spawn = src[src.index("create_subprocess_exec(\n") :]
     assert "limit=_MAX_LINE_BYTES" in spawn[: spawn.index(")\n")], (
         "the stdio child is spawned without limit=: replies over 64 KiB will fail again"
+    )
+
+
+def test_truncator_is_given_the_registrys_per_server_budget_lookup() -> None:
+    src = _text(_CHAT_DI)
+    assert "tool_result_truncator.tool_budget_provider" in src
+    assert "mcp_server_registry.result_budget_for_tool" in src
+    # ... and only AFTER both objects exist (the registry is built after the truncator).
+    assert src.index("mcp_server_registry: McpServerRegistryPort = McpServerRegistry(") < src.index(
+        "mcp_server_registry.result_budget_for_tool"
     )

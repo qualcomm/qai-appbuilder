@@ -103,6 +103,9 @@ class McpServerConfigModel(BaseModel):
     url: str | None = Field(default=None, max_length=4096)
     headers: dict[str, str] = Field(default_factory=dict)
     timeout_s: float = Field(default=30.0, gt=0.0, le=600.0)
+    # Optional per-server cap on one tool result (chars); unset keeps any value
+    # already stored for this server (the UI has no field for it).
+    max_result_chars: int | None = Field(default=None, ge=0, le=2_000_000)
 
     def to_domain(self) -> McpServerConfig:
         return McpServerConfig(
@@ -115,6 +118,7 @@ class McpServerConfigModel(BaseModel):
             url=self.url,
             headers=dict(self.headers),
             timeout_s=self.timeout_s,
+            max_result_chars=self.max_result_chars,
         )
 
 
@@ -130,6 +134,7 @@ class McpServerStatusModel(BaseModel):
     url: str | None = None
     headers: dict[str, str] = Field(default_factory=dict)
     timeout_s: float = 30.0
+    max_result_chars: int | None = None
     connected: bool = False
     tool_count: int = 0
     tool_names: list[str] = Field(default_factory=list)
@@ -804,6 +809,7 @@ def _status_to_model(
         # Mask credential values — never echo a secret back to the client.
         headers={k: "__secret__" for k in cfg.headers},
         timeout_s=cfg.timeout_s,
+        max_result_chars=cfg.max_result_chars,
         connected=status_obj.connected,
         tool_count=status_obj.tool_count,
         tool_names=list(status_obj.tool_names),
