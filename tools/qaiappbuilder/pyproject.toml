@@ -57,6 +57,10 @@ dependencies = [
   "websockets>=13,<17",
   "httpx>=0.27,<1.0",
   "anyio>=4.4,<5.0",
+  # MCP SDK: capped below 2.0 -- mcp 2.x removed ``mcp.server.fastmcp`` which
+  # the MCP client/installer (chat/adapters/mcp_client.py) relies on.
+  # claude-agent-sdk (cc-sdk extra) only requires ``mcp>=1.19`` with no cap.
+  "mcp>=1.19,<2.0",
 
   # data / serialization
   "pydantic>=2.7,<3.0",
