@@ -216,14 +216,8 @@ function Stage-Arch([string]$a) {
     New-Item -ItemType Directory -Force (Join-Path $stage 'desktop') | Out-Null
     Copy-Item $shellExe (Join-Path $stage 'desktop\QAIModelBuilder.exe') -Force
 
-    # aria2c is x64; it also runs on Windows-on-ARM, so the same copy serves both packages.
-    $aria = Join-Path $Root 'data\bin\aria2c\aria2c.exe'
-    if (Test-Path $aria) {
-        New-Item -ItemType Directory -Force (Join-Path $stage 'data\bin\aria2c') | Out-Null
-        Copy-Item $aria (Join-Path $stage 'data\bin\aria2c\aria2c.exe') -Force
-    } else {
-        Info 'aria2c.exe not in data\bin - _setup_env.bat will download it at install time.'
-    }
+    # aria2c is NOT bundled: the local data\bin copy is whatever arch the BUILD machine is (e.g. ARM64), which would not
+    # run on an x64 target. _setup_env.bat downloads the x64 build at install time (it also runs on Windows-on-ARM).
 
     # uv must match the TARGET arch, so fetch it from PyPI instead of copying the local one.
     $plat = if ($a -eq 'x64') { 'win_amd64' } else { 'win_arm64' }
