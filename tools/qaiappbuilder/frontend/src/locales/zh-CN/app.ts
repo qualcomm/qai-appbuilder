@@ -170,7 +170,7 @@ const app = {
   quantW8a8b8: "权重 Int8，激活 Int8，偏置 Int8（显式量化偏置）",
   rebootCancel: "取消",
   rebootConfirm: "重启",
-  rebootMessage: "确定要重启 QAI ModelBuilder 吗？当前会话将会中断，服务恢复后请手动刷新页面。",
+  rebootMessage: "确定要重启 QAI AppBuilder 吗？当前会话将会中断，服务恢复后请手动刷新页面。",
   rebootTitle: "重启服务",
   repoImported: "已引入仓库：{url}",
   title: "QAIModelBuilder",

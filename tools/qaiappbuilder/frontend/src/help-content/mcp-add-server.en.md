@@ -1,6 +1,6 @@
 # MCP servers: adding and troubleshooting
 
-**MCP** (Model Context Protocol) is an open protocol that lets an AI assistant plug into external tools and data sources. Each MCP server is a separate process; QAI ModelBuilder talks to it over stdio (or HTTP), and loads its tools into the current chat session's toolset.
+**MCP** (Model Context Protocol) is an open protocol that lets an AI assistant plug into external tools and data sources. Each MCP server is a separate process; QAI AppBuilder talks to it over stdio (or HTTP), and loads its tools into the current chat session's toolset.
 
 ## Adding a server
 
@@ -13,7 +13,7 @@ Click **+ Add** to open the form and fill in each field:
 - **Arguments**: the command-line arguments. One per line reads best. Example: `-y @modelcontextprotocol/server-filesystem C:\Users\me\projects`.
 - **Environment variables**: if the process needs env vars, add them as `KEY=VALUE` (one per line). Secret-looking values are not logged.
 
-Before saving, click **🔌 Test connectivity**. QAI ModelBuilder will spawn the process, complete the handshake, list the tools it advertises, and echo any handshake error just under the button.
+Before saving, click **🔌 Test connectivity**. QAI AppBuilder will spawn the process, complete the handshake, list the tools it advertises, and echo any handshake error just under the button.
 
 ## Not connecting? Walk this checklist
 

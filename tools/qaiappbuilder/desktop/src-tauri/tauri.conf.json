@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "QAI ModelBuilder",
+  "productName": "QAI AppBuilder",
   "version": "3.2.0",
   "identifier": "com.qaimodelbuilder.desktop",
   "build": { "frontendDist": "../splash" },

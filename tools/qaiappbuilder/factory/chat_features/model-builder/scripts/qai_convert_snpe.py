@@ -5,7 +5,7 @@
 
 #!/usr/bin/env python3
 """
-QAI ModelBuilder SNPE Model Converter
+QAI AppBuilder SNPE Model Converter
 Converts ONNX models to SNPE DLC format using qairt-converter
 Supports multiple platforms: Windows, Linux (x86_64), and macOS
 """

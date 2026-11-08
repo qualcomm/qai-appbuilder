@@ -55,12 +55,12 @@ pub fn texts(l: Lang) -> &'static T {
 }
 
 static ZH: T = T {
-    app_title: "QAI ModelBuilder",
+    app_title: "QAI AppBuilder",
     tray_show: "显示窗口",
     tray_quit: "退出",
-    tray_tip: "QAI ModelBuilder(后台运行中)",
-    close_title: "QAI ModelBuilder",
-    close_main: "要关闭 QAI ModelBuilder 吗?",
+    tray_tip: "QAI AppBuilder(后台运行中)",
+    close_title: "QAI AppBuilder",
+    close_main: "要关闭 QAI AppBuilder 吗?",
     close_content: "退出会停止后台服务;最小化到托盘则服务继续运行,可从系统托盘重新打开。",
     btn_minimize: "最小化到托盘",
     btn_minimize_note: "服务继续在后台运行",
@@ -79,12 +79,12 @@ static ZH: T = T {
 };
 
 static EN: T = T {
-    app_title: "QAI ModelBuilder",
+    app_title: "QAI AppBuilder",
     tray_show: "Show window",
     tray_quit: "Quit",
-    tray_tip: "QAI ModelBuilder (running in background)",
-    close_title: "QAI ModelBuilder",
-    close_main: "Close QAI ModelBuilder?",
+    tray_tip: "QAI AppBuilder (running in background)",
+    close_title: "QAI AppBuilder",
+    close_main: "Close QAI AppBuilder?",
     close_content: "Quitting stops the background service; minimizing to the tray keeps it running and you can reopen the window from the system tray.",
     btn_minimize: "Minimize to tray",
     btn_minimize_note: "The service keeps running in the background",

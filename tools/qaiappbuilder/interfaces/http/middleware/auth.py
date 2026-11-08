@@ -467,7 +467,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # UX contract (2026-07-17): **the application must always render
         # its own shell first**. A user who opens the app URL — or any
         # SPA-router deep link like ``/chat`` / ``/settings`` / any other
-        # front-end path — must see the QAI ModelBuilder interface, not
+        # front-end path — must see the QAI AppBuilder interface, not
         # be silently teleported to Okta / account.qualcomm.com before
         # the SPA ever loads. The latter feels to end users like the
         # shortcut is broken or the URL was hijacked ("I clicked

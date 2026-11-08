@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  MCP add-server form wireframe — a simplified sketch of the QAI ModelBuilder
+  MCP add-server form wireframe — a simplified sketch of the QAI AppBuilder
   MCP server side-panel: name / command / args inputs, a "Test connectivity"
   button, and a "Save" button. Referenced from the MCP help dialog so users
   can see at a glance which fields the docs are talking about.

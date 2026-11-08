@@ -159,7 +159,7 @@ def build_manifest_dict(
         "longDescription": (
             f"{display_name} running on Snapdragon QNN HTP backend, "
             f"{default_precision.label.upper()} precision. Exported "
-            "from QAI ModelBuilder."
+            "from QAI AppBuilder."
         ),
         "tags": [
             legacy_category.lower() if legacy_category else "uncategorised",

@@ -710,7 +710,7 @@ const AI_AVATAR_SVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="non
 // actual responder rather than a stripped hint or the user's other selection.
 const QUERY_SERVICE_LABELS: Readonly<Record<string, string>> = {
   "query::cebot": "CEBot",
-  "query::mb_pro": "QAI ModelBuilder Pro",
+  "query::mb_pro": "QAI AppBuilder Pro",
   "query::gomaster": "GoMaster",
 };
 
@@ -751,7 +751,7 @@ function assistantAvatarSvg(msg: ChatMessage): string {
 function roleLabel(msg: ChatMessage): string {
   if (msg.role === "user") return t("chat.you");
   // Query-service backends (CEBot / MB Pro) show a fixed brand name keyed off
-  // the stable per-message `modelId` (e.g. MB Pro must show "QAI ModelBuilder
+  // the stable per-message `modelId` (e.g. MB Pro must show "QAI AppBuilder
   // Pro", not the user's other-selected model). Reliable across realtime/
   // reload because the modelId is stamped/persisted as query::<id>.
   // `hasOwnProperty` (not `in`) so a modelId that happens to collide with an

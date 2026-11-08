@@ -455,7 +455,7 @@ if exist "%REPO_ROOT%\factory\chat_features\app-builder\models\" set "APP_BUILDE
 if exist "%REPO_ROOT%\data\app_builder\user_model_weights\" set "APP_BUILDER_USER_MODEL_ROOT=%REPO_ROOT%\data\app_builder\user_model_weights"
 if exist "%REPO_ROOT%\data\app_builder\user_models\" set "APP_BUILDER_USER_PACK_ROOT=%REPO_ROOT%\data\app_builder\user_models"
 
-REM Prefer QAI ModelBuilder host-arch venv; fall back to PATH python.
+REM Prefer QAI AppBuilder host-arch venv; fall back to PATH python.
 REM Priority: 1) data\config\host_arch file  2) PROCESSOR_ARCHITECTURE detection
 REM ensure_deps.py self-heals missing packages.
 set "VENV_NAME=.venv_arm64_313"
@@ -547,7 +547,7 @@ python3 -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 
 ### `README.md`
 
-Write a README in the app dir covering: how to run (host UI or manual `run.bat`), required model IDs + weight paths, input/output format, known limitations, and a **packaging note**: the zip is NOT fully offline — target needs a QAI ModelBuilder Python env (Python + `qai_appbuilder` + QNN runtime; zip does not bundle them).
+Write a README in the app dir covering: how to run (host UI or manual `run.bat`), required model IDs + weight paths, input/output format, known limitations, and a **packaging note**: the zip is NOT fully offline — target needs a QAI AppBuilder Python env (Python + `qai_appbuilder` + QNN runtime; zip does not bundle them).
 
 ---
 

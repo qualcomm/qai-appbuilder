@@ -1,6 +1,6 @@
 # Feishu channel: how it works
 
-QAI ModelBuilder connects to Feishu (Lark) via a **custom self-built app** on the Feishu Open Platform. Bot events (user DMs, @ mentions, group messages) are routed to whichever AI model you pick in this panel. The **first connection** requires you to create the app on the Open Platform and paste four credentials into this panel; after that the credentials are stored locally and the channel auto-reconnects on restart.
+QAI AppBuilder connects to Feishu (Lark) via a **custom self-built app** on the Feishu Open Platform. Bot events (user DMs, @ mentions, group messages) are routed to whichever AI model you pick in this panel. The **first connection** requires you to create the app on the Open Platform and paste four credentials into this panel; after that the credentials are stored locally and the channel auto-reconnects on restart.
 
 ## Connection flow
 
@@ -15,7 +15,7 @@ QAI ModelBuilder connects to Feishu (Lark) via a **custom self-built app** on th
 
 ## Why WebSocket long-connection?
 
-Feishu's Open Platform supports both "HTTP webhook callbacks" (which require a public IP) and "WebSocket long-connection" (which does not). QAI ModelBuilder typically runs on a developer's **local machine** without a stable public IP. The WebSocket mode is client-initiated — your machine dials out to the Feishu gateway and messages are pushed down that connection — so **you do not expose any inbound endpoint**.
+Feishu's Open Platform supports both "HTTP webhook callbacks" (which require a public IP) and "WebSocket long-connection" (which does not). QAI AppBuilder typically runs on a developer's **local machine** without a stable public IP. The WebSocket mode is client-initiated — your machine dials out to the Feishu gateway and messages are pushed down that connection — so **you do not expose any inbound endpoint**.
 
 ## Common issues
 

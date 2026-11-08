@@ -6,7 +6,7 @@ REM SPDX-License-Identifier: BSD-3-Clause
 REM ---------------------------------------------------------------------
 
 REM ===========================================================================
-REM   QAI ModelBuilder v2 -- Uninstaller (Clean Cutover)
+REM   QAI AppBuilder v2 -- Uninstaller (Clean Cutover)
 REM
 REM   Thin wrapper that delegates to ``scripts/init/uninstall.py``.
 REM   Rolls back ONLY what Setup.bat installed OUTSIDE the project directory:
@@ -68,7 +68,7 @@ for %%a in (%*) do (
 
 echo.
 echo  +--------------------------------------------------+
-echo  ^|   QAI ModelBuilder v2 - Uninstaller             ^|
+echo  ^|   QAI AppBuilder v2 - Uninstaller             ^|
 echo  +--------------------------------------------------+
 echo  ^|   Removes what Setup.bat installed OUTSIDE the  ^|
 echo  ^|   project (venvs, PortableGit, temp). Your      ^|

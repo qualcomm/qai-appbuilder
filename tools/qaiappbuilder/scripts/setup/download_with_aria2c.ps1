@@ -566,7 +566,7 @@ function Invoke-PowerShellFallback {
         $req.Timeout = 30000
         $req.ReadWriteTimeout = 60000
         $req.AllowAutoRedirect = $true
-        $req.UserAgent = 'QAIModelBuilder-Setup/1.0'
+        $req.UserAgent = 'QAIAppBuilder-Setup/1.0'
         if ($ProxyUrl) {
             $req.Proxy = New-Object System.Net.WebProxy($ProxyUrl, $true)
         }

@@ -12,7 +12,7 @@ Entities
 --------
 * ``RemoteHost``     — connection parameters for a remote target (IP, user,
   auth). Immutable value object; carries no mutable state.
-* ``RemoteInstance`` — a running QAI ModelBuilder process on a remote host,
+* ``RemoteInstance`` — a running QAI AppBuilder process on a remote host,
   identified by ``instance_id`` (UUID), with its URL and lifecycle state.
 * ``DeploymentState``— lifecycle enum: CONNECTING / INSTALLING / STARTING /
   RUNNING / STOPPED / FAILED.
@@ -42,7 +42,7 @@ class AuthMethod(str, Enum):
 
 
 class DeploymentState(str, Enum):
-    """Lifecycle state of a remote QAI ModelBuilder instance.
+    """Lifecycle state of a remote QAI AppBuilder instance.
 
     ``INSTALLED`` is a resting state: the bundle is unpacked and ``setup.sh``
     succeeded, but nothing is listening yet. It exists so install and start can
@@ -88,7 +88,7 @@ class RemoteHost:
 
 @dataclass(slots=True)
 class RemoteInstance:
-    """A running (or stopped) QAI ModelBuilder instance on a remote host."""
+    """A running (or stopped) QAI AppBuilder instance on a remote host."""
 
     instance_id: str
     host: str

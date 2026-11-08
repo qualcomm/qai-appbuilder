@@ -45,7 +45,7 @@ setlocal EnableDelayedExpansion
 
 echo.
 echo  +------------------------------------------+
-echo  ^|   QAI ModelBuilder  -  Starting...       ^|
+echo  ^|   QAI AppBuilder  -  Starting...       ^|
 echo  +------------------------------------------+
 echo.
 
@@ -234,7 +234,7 @@ start "" /b cmd /c ""%PYTHON%" -m apps.cli._endpoint_helper wait-and-open --time
 
 REM -- 5. Launch the server in THIS console (foreground) ---------------------
 REM CRITICAL FIX (orphan daemon on window close):
-REM   Previously this used ``start "QAI ModelBuilder" cmd /k <command>`` which
+REM   Previously this used ``start "QAI AppBuilder" cmd /k <command>`` which
 REM   spawned the supervisor in a SEPARATE, NEW console window and let this
 REM   .bat exit immediately. That detached the supervisor from the window the
 REM   user actually launched from: closing the original/launch window sent NO

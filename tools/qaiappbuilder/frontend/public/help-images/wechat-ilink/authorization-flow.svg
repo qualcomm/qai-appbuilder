@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
   iLink Bot authorisation flow — a sequence diagram showing how a user's
-  WeChat account is bound to the QAI ModelBuilder service through the
+  WeChat account is bound to the QAI AppBuilder service through the
   iLink Bot web console. Rendered on the "Help" dialog in WechatConfigPanel.
 
   Design notes:
@@ -50,7 +50,7 @@
     </marker>
   </defs>
 
-  <!-- Actor headers (three lifelines: User / iLink Web / QAI ModelBuilder) -->
+  <!-- Actor headers (three lifelines: User / iLink Web / QAI AppBuilder) -->
   <g>
     <rect class="actor-box" x="40"  y="20" width="160" height="40" rx="6" />
     <text class="actor-txt" x="120" y="45">👤 User (WeChat)</text>
@@ -59,7 +59,7 @@
     <text class="actor-txt" x="360" y="45">🌐 iLink Bot Web</text>
 
     <rect class="actor-box" x="520" y="20" width="160" height="40" rx="6" />
-    <text class="actor-txt" x="600" y="45">🖥 QAI ModelBuilder</text>
+    <text class="actor-txt" x="600" y="45">🖥 QAI AppBuilder</text>
   </g>
 
   <!-- Lifelines -->
@@ -67,7 +67,7 @@
   <line class="lifeline" x1="360" y1="60"  x2="360" y2="400" />
   <line class="lifeline" x1="600" y1="60"  x2="600" y2="400" />
 
-  <!-- Step 1: User visits QAI ModelBuilder WeChat panel and clicks Connect -->
+  <!-- Step 1: User visits QAI AppBuilder WeChat panel and clicks Connect -->
   <text class="step-num" x="50" y="95">1</text>
   <path class="arrow" d="M120 100 L600 100" />
   <text class="msg" x="250" y="93">Click "Connect WeChat" in settings</text>
@@ -92,7 +92,7 @@
   <path class="arrow" d="M120 270 L360 270" />
   <text class="msg" x="150" y="263">Tap "Confirm"</text>
 
-  <!-- Step 6: iLink issues session token to QAI ModelBuilder -->
+  <!-- Step 6: iLink issues session token to QAI AppBuilder -->
   <text class="step-num" x="380" y="305">6</text>
   <path class="arrow" d="M360 310 L600 310" />
   <text class="msg" x="380" y="303">Deliver session token (webhook)</text>

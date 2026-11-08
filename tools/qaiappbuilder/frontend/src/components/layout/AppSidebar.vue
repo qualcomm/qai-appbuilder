@@ -94,14 +94,14 @@ const { toolbarModules, load: loadForgeConfig } = useForgeConfig();
 // from the ui store.
 //
 // MB Pro (internal-only): when the build ships the MB Pro / 增强 capability,
-// the Model Builder brand becomes "QAI ModelBuilder Pro" (`sidebar.titlePro`).
+// the Model Builder brand becomes "QAI AppBuilder Pro" (`sidebar.titlePro`).
 // Detection follows the project's edition-agnostic convention (NO frontend
 // edition flag — see ModelDropdown 查询服务 precedent): we read whether the
 // backend forge-config exposed the ``pro`` toolbar module, which it injects
 // ONLY on internal editions (forge_config.py `_inject_toolbar_defaults`,
 // gated by `settings.is_internal`). On external/Release builds the ``pro``
 // key is absent (the frontend defaults carry no `pro` fallback), so the Model
-// Builder brand stays "QAI ModelBuilder".
+// Builder brand stays "QAI AppBuilder".
 const mbProAvailable = computed<boolean>(
   () => toolbarModules.value["pro"]?.enabled === true,
 );

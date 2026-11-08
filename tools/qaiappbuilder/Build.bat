@@ -108,7 +108,7 @@ goto parse_args
 
 echo.
 echo  +------------------------------------------+
-echo  ^|   QAI ModelBuilder  -  Building WebUI    ^|
+echo  ^|   QAI AppBuilder  -  Building WebUI    ^|
 echo  +------------------------------------------+
 echo.
 
@@ -235,7 +235,7 @@ REM ===========================================================================
 :desktop
 echo.
 echo  +------------------------------------------+
-echo  ^|   QAI ModelBuilder  -  Building Desktop  ^|
+echo  ^|   QAI AppBuilder  -  Building Desktop  ^|
 echo  +------------------------------------------+
 echo.
 

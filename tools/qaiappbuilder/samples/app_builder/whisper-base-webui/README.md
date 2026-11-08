@@ -4,7 +4,7 @@ A standalone App Builder WebUI for `whisper-base`, the on-device English Whisper
 
 ## How to run
 
-Preferred: open QAI ModelBuilder, go to the **Apps / 应用** menu, then run, preview, stop, or package `whisper-base-webui` from there. The app requests preferred port `1979`; the host waits for `/health` and opens the browser.
+Preferred: open QAI AppBuilder, go to the **Apps / 应用** menu, then run, preview, stop, or package `whisper-base-webui` from there. The app requests preferred port `1979`; the host waits for `/health` and opens the browser.
 
 Manual debug run:
 
@@ -81,4 +81,4 @@ Canonical JSON shape:
 
 ## Packaging note
 
-The produced package is not a fully offline runtime. The target machine still needs a QAI ModelBuilder Python environment, including the Python interpreter, `qai_appbuilder`, and the QNN runtime. The package does not bundle Python or the QNN SDK.
+The produced package is not a fully offline runtime. The target machine still needs a QAI AppBuilder Python environment, including the Python interpreter, `qai_appbuilder`, and the QNN runtime. The package does not bundle Python or the QNN SDK.

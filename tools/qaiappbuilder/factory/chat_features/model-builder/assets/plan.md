@@ -1,4 +1,4 @@
-# QAI ModelBuilder — Agent Workspace Notes
+# QAI AppBuilder — Agent Workspace Notes
 
 > This file is for LLM Agent context and progress tracking only.
 > It is NOT consumed by any code or scripts.

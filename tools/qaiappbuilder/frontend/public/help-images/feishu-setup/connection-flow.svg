@@ -2,7 +2,7 @@
 <!--
   Feishu channel connection flow — a sequence diagram showing how a
   developer registers a Feishu custom app, records the four credentials,
-  and lets QAI ModelBuilder open a WebSocket long-connection to the
+  and lets QAI AppBuilder open a WebSocket long-connection to the
   Feishu event gateway. Rendered on the "Help" dialog in FeishuConfigPanel.
 
   Structure mirrors wechat-ilink/authorization-flow.svg deliberately so
@@ -23,7 +23,7 @@
 <svg xmlns="http://www.w3.org/2000/svg"
      viewBox="0 0 720 420"
      role="img"
-     aria-label="Feishu channel connection sequence diagram: developer registers a custom app, pastes credentials, and QAI ModelBuilder opens a WebSocket long-connection to the Feishu event gateway"
+     aria-label="Feishu channel connection sequence diagram: developer registers a custom app, pastes credentials, and QAI AppBuilder opens a WebSocket long-connection to the Feishu event gateway"
      font-family="system-ui, -apple-system, 'Segoe UI', sans-serif"
      font-size="14">
   <style>
@@ -58,7 +58,7 @@
     </marker>
   </defs>
 
-  <!-- Actor headers (three lifelines: Developer / Feishu Open Platform / QAI ModelBuilder + gateway).
+  <!-- Actor headers (three lifelines: Developer / Feishu Open Platform / QAI AppBuilder + gateway).
        Wide middle actor to fit "Feishu Open Platform"; other two mirror the
        WeChat diagram's widths so the paired SVGs align visually. -->
   <g>
@@ -69,7 +69,7 @@
     <text class="actor-txt" x="360" y="45">🪶 Feishu Open Platform</text>
 
     <rect class="actor-box" x="520" y="20" width="160" height="40" rx="6" />
-    <text class="actor-txt" x="600" y="45">🖥 QAI ModelBuilder</text>
+    <text class="actor-txt" x="600" y="45">🖥 QAI AppBuilder</text>
   </g>
 
   <!-- Lifelines -->

@@ -5283,7 +5283,7 @@ class OrchestrateDiscussionUseCase:
         Uses :class:`SystemPromptBuilderPort` (when wired) so each speaker
         receives the SAME knowledge sections single-assistant chat gets —
         SKILL catalog, Python env, workspace context, Few-shot — but
-        ``skip_identity=True`` drops the "You are QAI ModelBuilder…" intro
+        ``skip_identity=True`` drops the "You are QAI AppBuilder…" intro
         (speakers are user-defined roles). The persona text (framing +
         speaker.persona + NPU/HTP runtime hint) is injected via
         ``extra["persona"]`` so it appears AFTER the catalog (gives the

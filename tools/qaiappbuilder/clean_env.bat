@@ -97,7 +97,7 @@ set "QAIRT_DIR=C:\Qualcomm\AIStack\QAIRT\%QAIRT_VERSION%"
 :qairt_resolved
 
 echo.
-echo  QAI ModelBuilder - clean_env   ^(arch=%HOST_ARCH%^)
+echo  QAI AppBuilder - clean_env   ^(arch=%HOST_ARCH%^)
 echo  ------------------------------------------------------------
 echo  will remove:
 if "%ALL_ENVS%"=="1" ( echo    - %ENVS_DIR%  ^(all venvs^) ) else ( echo    - %VENV_DIR%  and  %VENV_310_DIR% )

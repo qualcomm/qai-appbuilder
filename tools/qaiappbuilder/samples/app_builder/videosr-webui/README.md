@@ -40,10 +40,10 @@ videosr-webui/
 ### Model Setup (Required)
 
 This app requires a Real-ESRGAN x4plus QNN context binary that is **not
-bundled or auto-downloaded**. You must convert it using QAI ModelBuilder's
+bundled or auto-downloaded**. You must convert it using QAI AppBuilder's
 model-builder feature:
 
-1. Open QAI ModelBuilder chat, switch to **model-builder** mode
+1. Open QAI AppBuilder chat, switch to **model-builder** mode
 2. Enter: `Convert Real-ESRGAN x4plus to QNN context binary, input size 480×640, fp16`
 3. The Agent will download the ONNX model, convert to QNN, and generate the `.bin`
 4. Place the output file as:
@@ -72,7 +72,7 @@ Default port: 1975. Access at `http://127.0.0.1:1975/`
 
 ### With App Builder Host
 
-The app is designed to run under the QAI ModelBuilder App Builder host:
+The app is designed to run under the QAI AppBuilder App Builder host:
 ```yaml
 entry:
   app_module: backend.main:app

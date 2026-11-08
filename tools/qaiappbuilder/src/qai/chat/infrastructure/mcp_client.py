@@ -1180,7 +1180,7 @@ def _render_prompt_get_sdk(result: Any) -> str:
 _OAUTH_REDIRECT_PORT_RANGE: tuple[int, int] = (49152, 49200)  # ephemeral range
 
 _OAUTH_CALLBACK_PATH: str = "/mcp_oauth_callback"
-_OAUTH_CLIENT_NAME: str = "QAI ModelBuilder"
+_OAUTH_CLIENT_NAME: str = "QAI AppBuilder"
 _OAUTH_SCOPE: str = "mcp"
 
 
@@ -1339,7 +1339,7 @@ def _start_callback_server_thread(
             state: str | None = (params.get("state") or [None])[0]
             body = (
                 b"<html><body style='font-family:sans-serif;padding:2em'>"
-                b"<h2>&#10003; QAI ModelBuilder authorised</h2>"
+                b"<h2>&#10003; QAI AppBuilder authorised</h2>"
                 b"<p>You can close this tab and return to the app.</p>"
                 b"</body></html>"
             )

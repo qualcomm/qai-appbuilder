@@ -4,7 +4,7 @@ A standalone App Builder WebUI for the `ppocrv4` model pack. It uses a FastAPI b
 
 ## Run
 
-Preferred: open the QAI ModelBuilder host UI and use the **Apps / 应用** menu to run, preview, stop, or package this app. The host allocates a port, waits for `/health`, then opens the browser.
+Preferred: open the QAI AppBuilder host UI and use the **Apps / 应用** menu to run, preview, stop, or package this app. The host allocates a port, waits for `/health`, then opens the browser.
 
 Manual run is also available:
 
@@ -47,4 +47,4 @@ PP-OCRv4 is mainly for printed Chinese/English text. Handwriting, severe blur, e
 
 ## Packaging note
 
-The produced package is not a fully offline bundle. The target machine still needs a QAI ModelBuilder Python environment with `qai_appbuilder` and the QNN runtime. The zip does not bundle Python or the QNN SDK.
+The produced package is not a fully offline bundle. The target machine still needs a QAI AppBuilder Python environment with `qai_appbuilder` and the QNN runtime. The zip does not bundle Python or the QNN SDK.

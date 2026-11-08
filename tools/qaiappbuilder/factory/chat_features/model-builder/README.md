@@ -1,6 +1,6 @@
 # Model Builder Skill (`model-builder`)
 
-The agent skill behind QAI ModelBuilder's **Model Builder** chat mode: convert a
+The agent skill behind QAI AppBuilder's **Model Builder** chat mode: convert a
 **custom** ONNX / PyTorch model to QNN or SNPE, quantize it, generate a context
 binary, and validate it against the ONNX baseline on Qualcomm hardware.
 

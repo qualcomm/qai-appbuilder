@@ -1,6 +1,6 @@
 # MCP 服务器：添加与排查
 
-**MCP**（Model Context Protocol）是一种让 AI 助手连接外部工具与数据源的开放协议。每个 MCP 服务器都是一个独立的进程，QAI ModelBuilder 通过 stdio 或 HTTP 通道与它对话，把它暴露的工具装载到当前会话可用的工具集里。
+**MCP**（Model Context Protocol）是一种让 AI 助手连接外部工具与数据源的开放协议。每个 MCP 服务器都是一个独立的进程，QAI AppBuilder 通过 stdio 或 HTTP 通道与它对话，把它暴露的工具装载到当前会话可用的工具集里。
 
 ## 添加一台服务器
 
@@ -13,7 +13,7 @@
 - **Arguments**：命令行参数，一行一个更清晰。常见示例：`-y @modelcontextprotocol/server-filesystem C:\Users\me\projects`。
 - **Environment variables**：如需给子进程注入变量，按 `KEY=VALUE` 一行一条填写。密钥类变量不会被记录到日志。
 
-保存前请先点击 **🔌 测试连通性**：QAI ModelBuilder 会尝试启动该进程、握手、列出它提供的工具，并把握手错误直接回显在按钮下方。
+保存前请先点击 **🔌 测试连通性**：QAI AppBuilder 会尝试启动该进程、握手、列出它提供的工具，并把握手错误直接回显在按钮下方。
 
 ## 连不通？按此排查
 

@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 """
-qai_runner.py — QAI ModelBuilder Inference Runner
+qai_runner.py — QAI AppBuilder Inference Runner
 
 Runs a user inference script with `onnxruntime` hot-patched to the
 QAI/QNN wrapper (onnxwrapper.py), enabling existing onnxruntime-based

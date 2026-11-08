@@ -3,7 +3,7 @@ REM ---------------------------------------------------------------------
 REM Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 REM SPDX-License-Identifier: BSD-3-Clause
 REM ---------------------------------------------------------------------
-REM _setup_env.bat - lean, network-tolerant environment setup for QAI ModelBuilder.
+REM _setup_env.bat - lean, network-tolerant environment setup for QAI AppBuilder.
 REM
 REM Differences from Setup.bat (which is left untouched):
 REM   * network preflight + proxy / mirror profile (scripts\setup\net_config.ps1)
@@ -145,7 +145,7 @@ set "VDEPS_URL=https://www.aidevhome.com/data/adh2/attr/vendor-deps.7z"
 
 echo.
 echo  +--------------------------------------------------+
-echo  ^|   QAI ModelBuilder  -  setup_env                 ^|
+echo  ^|   QAI AppBuilder  -  setup_env                 ^|
 echo  +--------------------------------------------------+
 echo [INFO] arch=%HOST_ARCH%  venv=%VENV_DIR%
 echo [INFO] source=%ROOT_DIR%
