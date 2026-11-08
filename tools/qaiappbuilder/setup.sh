@@ -22,7 +22,7 @@ for arg in "$@"; do
       cat <<'EOF'
 Usage: bash setup.sh [--frontend]
 
-Set up QAI ModelBuilder on Linux. Frontend installation and build are skipped
+Set up QAI AppBuilder on Linux. Frontend installation and build are skipped
 by default; pass --frontend to bootstrap project-local Node/pnpm and build it.
 
 Options:

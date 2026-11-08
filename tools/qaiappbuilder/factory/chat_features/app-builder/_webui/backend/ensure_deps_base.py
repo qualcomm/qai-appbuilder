@@ -18,7 +18,7 @@ HOW TO USE
 What it does (idempotent, standard-Python dependency management)
 ----------------------------------------------------------------
 The packaged app may be unzipped on ANOTHER machine where we can only assume a
-Python interpreter exists — the QAI ModelBuilder shared venv, and even
+Python interpreter exists — the QAI AppBuilder shared venv, and even
 ``qai_appbuilder`` itself, may be absent. So at startup we:
 
   1. Read  <app>/requirements.txt  AND every bundled  pack/<id>/requirements.txt

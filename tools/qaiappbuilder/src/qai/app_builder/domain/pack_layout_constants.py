@@ -10,7 +10,7 @@ that identify **where a pack lives** on disk:
 
 * built-in pack tree  — pack metadata + weights (release-shipped, version-locked)
 * user-imported pack tree — pack metadata + weights (P4; added via
-  ``app_import_adapter`` from QAI ModelBuilder or ModelHub exports)
+  ``app_import_adapter`` from QAI AppBuilder or ModelHub exports)
 
 The two anchor pairs (built-in ``pack_root`` / ``model_root``; user
 ``user_pack_root`` / ``user_weights_root``) are the runtime real-value sources

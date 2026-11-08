@@ -197,7 +197,7 @@ _log = get_logger(__name__)
 # the f-string pipeline — there is ONE place system prompts are built.
 #
 # The "general" sub-agent design: the main-agent identity
-# (_DEFAULT_IDENTITY / "You are QAI ModelBuilder...") is prepended by the builder
+# (_DEFAULT_IDENTITY / "You are QAI AppBuilder...") is prepended by the builder
 # for the general path, so the sub-agent knows who it is without a separate "you
 # are a sub-agent" role line. Profile-specific sub-agents (e.g. explore) supply
 # their own role via profile.system_prompt.

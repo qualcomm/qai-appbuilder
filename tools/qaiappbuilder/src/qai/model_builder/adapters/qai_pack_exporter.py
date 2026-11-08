@@ -734,7 +734,7 @@ class QaiPackExporter:
             f"Model ID: `{meta.pack_id}`  \n"
             f"I/O: `{meta.input_kind}` → `{meta.output_kind}`  \n"
             f"Default precision: `{default_precision}`  \n"
-            "Origin: **user-imported via QAI ModelBuilder (P4 pack)**. "
+            "Origin: **user-imported via QAI AppBuilder (P4 pack)**. "
             "Weights live under "
             "`${APP_BUILDER_USER_MODEL_ROOT}/models/"
             f"{meta.pack_id}/` at dev-time; pack metadata under "

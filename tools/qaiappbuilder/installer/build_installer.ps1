@@ -4,7 +4,7 @@
 # ---------------------------------------------------------------------
 <#
 .SYNOPSIS
-    Build the QAI ModelBuilder Windows installer(s) (Inno Setup), one per architecture.
+    Build the QAI AppBuilder Windows installer(s) (Inno Setup), one per architecture.
 
 .DESCRIPTION
     1. (optional) refresh frontend\dist via Build.bat
@@ -14,14 +14,14 @@
          - pyproject.toml, build_info.json, launcher .bat files, READMEs
          - data\bin\uv\uv.exe (fetched from PyPI for the TARGET arch), data\bin\aria2c\aria2c.exe
        Tests, docs, samples, models, .qai, desktop sources, vendor, node_modules are NOT staged (the built desktop shell exe is).
-    4. run ISCC.exe  ->  dist\installer\QAIModelBuilder-<version>-qairt<A.B.C>-<arch>-setup.exe
+    4. run ISCC.exe  ->  dist\installer\QAIAppBuilder-<version>-qairt<A.B.C>-<arch>-setup.exe
        (A.B.C = first three parts of the QAIRT SDK version, e.g. qairt2.48.40)
 
     The installer copies the files, then runs _setup_env.bat (no --builder: QAIRT is NOT installed).
 
 .PARAMETER Arch          x64 | arm64 | both (default both)
 .PARAMETER SkipFrontend  do not run Build.bat; use the existing frontend\dist
-.PARAMETER SkipDesktop   do not run desktop\build.ps1; use the existing dist\desktop\<arch>\QAIModelBuilder.exe
+.PARAMETER SkipDesktop   do not run desktop\build.ps1; use the existing dist\desktop\<arch>\QAIAppBuilder.exe
                          (needed on a machine without Rust / the VS C++ tools)
 .PARAMETER Version       override the version (default: build_info.json "version")
 .PARAMETER KeepStage     keep .build\installer\stage_<arch> after compiling
@@ -53,18 +53,18 @@ param(
 
 function Show-Usage {
     @'
-QAI ModelBuilder installer build
+QAI AppBuilder installer build
 
 Usage:
   .\installer\build_installer.ps1 [options]
 
 Builds, in order: the frontend (Build.bat), the desktop window exe (desktop\build.ps1), then the Inno Setup installer(s).
-Output: dist\installer\QAIModelBuilder-<version>-qairt<A.B.C>-<arch>-setup.exe   (A.B.C from the QAIRT version)
+Output: dist\installer\QAIAppBuilder-<version>-qairt<A.B.C>-<arch>-setup.exe   (A.B.C from the QAIRT version)
 
 Options:
   -Arch <x64|arm64|both>  architecture(s) to build                       (default: both)
   -SkipFrontend           do not run Build.bat; use the existing frontend\dist
-  -SkipDesktop            do not run desktop\build.ps1; use the existing dist\desktop\<arch>\QAIModelBuilder.exe
+  -SkipDesktop            do not run desktop\build.ps1; use the existing dist\desktop\<arch>\QAIAppBuilder.exe
                           (for machines without Rust / the VS C++ tools)
   -Version <x.y.z>        override the version                           (default: build_info.json "version")
   -KeepStage              keep .build\installer\stage_<arch> after compiling
@@ -167,8 +167,8 @@ if (-not $SkipDesktop) {
     if ($LASTEXITCODE -ne 0) { Fail "desktop\build.ps1 failed (exit $LASTEXITCODE). Fix it, or pass -SkipDesktop to package the exes already in dist\desktop." }
 }
 foreach ($da in $desktopArches) {
-    if (-not (Test-Path (Join-Path $Root "dist\desktop\$da\QAIModelBuilder.exe"))) {
-        Fail "dist\desktop\$da\QAIModelBuilder.exe is missing - run without -SkipDesktop (needs Rust + VS C++ tools), or run desktop\build.ps1 -Arch $da first."
+    if (-not (Test-Path (Join-Path $Root "dist\desktop\$da\QAIAppBuilder.exe"))) {
+        Fail "dist\desktop\$da\QAIAppBuilder.exe is missing - run without -SkipDesktop (needs Rust + VS C++ tools), or run desktop\build.ps1 -Arch $da first."
     }
 }
 
@@ -211,10 +211,10 @@ function Stage-Arch([string]$a) {
     }
 
     # The desktop shell (Tauri/WebView2 window around the local backend), built per architecture by desktop\build.ps1.
-    $shellExe = Join-Path $Root "dist\desktop\$a\QAIModelBuilder.exe"
+    $shellExe = Join-Path $Root "dist\desktop\$a\QAIAppBuilder.exe"
     if (-not (Test-Path $shellExe)) { Fail "desktop shell missing: $shellExe - run desktop\build.ps1 -Arch $a first" }
     New-Item -ItemType Directory -Force (Join-Path $stage 'desktop') | Out-Null
-    Copy-Item $shellExe (Join-Path $stage 'desktop\QAIModelBuilder.exe') -Force
+    Copy-Item $shellExe (Join-Path $stage 'desktop\QAIAppBuilder.exe') -Force
 
     # aria2c is NOT bundled: the local data\bin copy is whatever arch the BUILD machine is (e.g. ARM64), which would not
     # run on an x64 target. _setup_env.bat downloads the x64 build at install time (it also runs on Windows-on-ARM).
@@ -325,7 +325,7 @@ function Stage-Arch([string]$a) {
 $OutDir = Join-Path $Root 'dist\installer'
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $arches = if ($Arch -eq 'both') { @('x64', 'arm64') } else { @($Arch) }
-$iss = Join-Path $PSScriptRoot 'qaimodelbuilder.iss'
+$iss = Join-Path $PSScriptRoot 'qaiappbuilder.iss'
 
 foreach ($a in $arches) {
     $stage = Stage-Arch $a | Select-Object -Last 1
@@ -336,6 +336,6 @@ foreach ($a in $arches) {
 }
 
 Info 'done:'
-Get-ChildItem $OutDir -Filter "QAIModelBuilder-$Version-qairt$AbTag-*-setup.exe" |
+Get-ChildItem $OutDir -Filter "QAIAppBuilder-$Version-qairt$AbTag-*-setup.exe" |
     ForEach-Object { '  {0}  {1:N1} MB' -f $_.FullName, ($_.Length / 1MB) }
 

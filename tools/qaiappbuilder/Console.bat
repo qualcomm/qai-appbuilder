@@ -20,7 +20,7 @@ REM       characters from command output on some Windows versions (known OS bug)
 
 echo.
 echo  +--------------------------------------------------+
-echo  ^|   QAI ModelBuilder  -  Environment Console       ^|
+echo  ^|   QAI AppBuilder  -  Environment Console       ^|
 echo  +--------------------------------------------------+
 echo.
 echo  [INFO] Entering isolated Python 3.13 environment...

@@ -147,9 +147,10 @@ def test_the_daemon_dies_with_the_backend() -> None:
 
 
 def test_start_fails_when_the_bin_directory_does_not_exist_even_though_the_binary_is_found() -> None:
-    """KNOWN GAP (current behaviour, pinned) - MH-ISS-06: the daemon is spawned with ``cwd=<data>/bin``; when that folder is absent
-    ``subprocess.Popen`` raises ``NotADirectoryError`` (WinError 267) and the route answers ``error`` / ``aria2c daemon failed to start``.
-    ``status`` meanwhile finds the binary and offers no explanation. Creating the folder is all it takes (the previous tests do)."""
+    """MH-ISS-06 (spawn failures are now explained): the daemon is spawned with ``cwd=<data>/bin``; when that folder is absent
+    ``subprocess.Popen`` raises ``NotADirectoryError`` (WinError 267). The route answers ``error`` with the real reason
+    (``aria2c failed to start: [WinError 267] ...``) and ``status`` carries the same text in ``install_error``.
+    Creating the folder is all it takes to fix it (the previous tests do)."""
     import tempfile
 
     with owned_backend() as ob:
@@ -157,8 +158,11 @@ def test_start_fails_when_the_bin_directory_does_not_exist_even_though_the_binar
         cl = ob.start(path_prepend=ARIA_DIR, cwd=Path(tempfile.gettempdir()))
         before = _aria_pids()
         r = cl.post(f"{A}/start")
-        assert r.status_code == 200 and r.json() == {"status": "error", "pid": None, "message": "aria2c daemon failed to start"}
+        body = r.json()
+        assert r.status_code == 200 and (body["status"], body["pid"]) == ("error", None)
+        assert body["message"].startswith("aria2c failed to start") and "267" in body["message"], body
         assert _aria_pids() == before and c._port_is_free(c.E2E_HOST, RPC)
         s = cl.get(f"{A}/status").json()
-        assert (s["daemon_running"], s["install_error"], s["available"]) == (False, "", True), "no hint about why"
+        assert (s["daemon_running"], s["available"]) == (False, True)
+        assert s["install_error"].startswith("aria2c failed to start") and "267" in s["install_error"], s
         assert "failed to start aria2c" in ob.log_text() and "267" in ob.log_text()

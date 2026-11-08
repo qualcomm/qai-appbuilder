@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: BSD-3-Clause
 // ---------------------------------------------------------------------
 
-//! QAI ModelBuilder desktop shell.
+//! QAI AppBuilder desktop shell.
 //!
 //! The window is only a container for the page the backend already serves (`http://localhost:<port>/`), so the
 //! frontend is not touched. The shell:
@@ -375,7 +375,7 @@ pub fn run() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("failed to build the QAI ModelBuilder shell");
+        .expect("failed to build the QAI AppBuilder shell");
 
     let sh_run = sh.clone();
     app.run(move |app_handle, ev| {

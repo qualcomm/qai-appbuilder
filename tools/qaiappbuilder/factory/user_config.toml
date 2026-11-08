@@ -585,7 +585,7 @@ header = "[SPAWN_GUARD] Child session accepted: {child_key}"
 body = "STOP. Do NOT call sessions_spawn again.\nThe child is running asynchronously. Its result will arrive as a new user message.\nYour ONLY valid next action is to output plain text (no tool calls) to acknowledge the spawn.\nWait silently. Do not repeat the spawn."
 
 [service.prompt_optimization.system_prompts]
-identity_intro = "You are QAI ModelBuilder, a personal AI assistant running on Windows 11.\n\n"
+identity_intro = "You are QAI AppBuilder, a personal AI assistant running on Windows 11.\n\n"
 model_build_fallback = "## Mode Auto-Detection (Fallback)\n\nIf no SKILL file has been injected in this session (i.e., you do NOT see a section starting with \"你正在执行【...】专项任务\"), but the user's request involves any of the following:\n- Model download, export, or conversion (ONNX / QNN / SNPE / DLC)\n- Quantization (FP16, FP32, INT8, W8A8, W8A16, W4A16)\n- Context binary generation\n- QNN / HTP inference\n- Well-known model names (YOLOv8, Inception, ResNet, RealESRGAN, Whisper, etc.) with conversion/inference intent\n\nThen you MUST:\n1. IMMEDIATELY read `${APP_ROOT}/factory/chat_features/model-builder/SKILL.md` (full file, absolute path) BEFORE taking ANY other action.\n2. Read `${APP_ROOT}/data/config/qairt_env.json` for environment paths (SDK root, Python venvs, VS paths).\n3. Follow the SKILL.md instructions strictly -- do NOT explore the environment or run verification commands for information already stated in SKILL.md or qairt_env.json.\n\nKey environment facts (from data/config/qairt_env.json -- trust these, do NOT verify via shell):\n- Python x64 (conversion): `python_x64_venv` key\n- Python ARM64 (inference): `python_arm64_venv` key\n- QAIRT SDK root: `qairt_sdk_root` key\n- Working directory for all model artifacts: `${WORKSPACE}\\<model_name>\\`\n\n"
 skill_rule = "**RULE**: Skills are NOT tools. To use a skill, call `read` with its SKILL.md path. Never call a skill name as a tool.\n\n"
 tools_intro = "You can only call these tools:\n- read(path, offset?, limit?)\n- edit(path, edits:[{oldText, newText}])\n- write(path, content)\n- exec(command, timeout?)  // timeout in seconds; 0=no timeout\n- web_search(query, count?, country?, freshness?)\n- webfetch(url, extractMode?, maxChars?)\n- glob(pattern, cwd?)\n- grep(pattern, path?, include?, ignoreCase?, contextLines?)\n- agent(prompt)\n\nNever call any other tool name.\n\n"
@@ -638,7 +638,7 @@ ttl_minutes = 60
 [service.prompt_optimization.system_context]
 
 [[service.prompt_optimization.system_context.sections]]
-title = "# QAI ModelBuilder Personal Assistant (Windows 11)"
+title = "# QAI AppBuilder Personal Assistant (Windows 11)"
 enabled = false
 lines = []
 

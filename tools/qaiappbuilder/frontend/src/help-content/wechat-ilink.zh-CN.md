@@ -1,17 +1,17 @@
 # 微信通道：iLink Bot 如何工作
 
-QAI ModelBuilder 通过 **iLink Bot**（第三方 WebSocket 代理）接入你的微信个人号——不直接调用微信 SDK。首次连接需要一次**扫码授权**，之后本地会存住授权凭证，重启后自动重连。
+QAI AppBuilder 通过 **iLink Bot**（第三方 WebSocket 代理）接入你的微信个人号——不直接调用微信 SDK。首次连接需要一次**扫码授权**，之后本地会存住授权凭证，重启后自动重连。
 
 ## 授权时序图
 
 ![iLink Bot 授权时序](/help-images/wechat-ilink/authorization-flow.svg)
 
 1. 你在设置面板点击 **连接微信**。
-2. QAI ModelBuilder 打开 iLink Bot 的授权页面 URL。
+2. QAI AppBuilder 打开 iLink Bot 的授权页面 URL。
 3. 你用微信扫码。
 4. iLink Bot 弹出「是否允许绑定该机器人」的确认。
 5. 你点击**确认**。
-6. iLink Bot 通过 webhook 回调 QAI ModelBuilder，传回**长期会话 token**。
+6. iLink Bot 通过 webhook 回调 QAI AppBuilder，传回**长期会话 token**。
 7. 面板状态切到「已连接」，此后收到的微信消息会被路由给你在设置里配置的模型。
 
 ## 为什么绕一层 iLink？
