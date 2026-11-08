@@ -47,7 +47,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --help|-h)
       echo ""
-      echo " QAI ModelBuilder - build.sh"
+      echo " QAI AppBuilder - build.sh"
       echo " Compiles the V2 WebUI frontend (Vue/Vite -> frontend/dist)."
       echo " The Python backend is interpreted and needs NO build step; restart"
       echo " start.sh to pick up backend-only changes."
@@ -100,7 +100,7 @@ done
 # -- Project-local Node.js / pnpm bootstrap ----------------------------------
 echo ""
 echo "  +------------------------------------------+"
-echo "  |   QAI ModelBuilder  -  Building WebUI    |"
+echo "  |   QAI AppBuilder  -  Building WebUI    |"
 echo "  +------------------------------------------+"
 echo ""
 

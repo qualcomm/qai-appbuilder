@@ -1,6 +1,6 @@
 ---
 name: model-builder
-description: QAI ModelBuilder. Tools and workflows for conversion, inspection, operator patching, quantization, and inference validation of custom ONNX/PyTorch models on Qualcomm platforms. Use this skill for ONNX/PyTorch-to-QNN or SNPE conversion; route direct `.tflite` and `.pte` execution to the matching runtime sub-skill. NOT for AI Hub prebuilt packages — use model-hub skill instead.
+description: QAI AppBuilder. Tools and workflows for conversion, inspection, operator patching, quantization, and inference validation of custom ONNX/PyTorch models on Qualcomm platforms. Use this skill for ONNX/PyTorch-to-QNN or SNPE conversion; route direct `.tflite` and `.pte` execution to the matching runtime sub-skill. NOT for AI Hub prebuilt packages — use model-hub skill instead.
 ---
 
 # Model Builder

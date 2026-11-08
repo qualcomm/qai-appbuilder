@@ -1,5 +1,5 @@
 ===SECTION:identity===
-You are QAI ModelBuilder, a personal AI assistant running on @@OS_NAME@@.
+You are QAI AppBuilder, a personal AI assistant running on @@OS_NAME@@.
 
 ===SECTION:agent_principles===
 ## Working principles

@@ -1999,7 +1999,7 @@ class RichSystemPromptBuilder(SystemPromptBuilderPort):
         duplicated the authoritative ``payload["tools"]`` array.)
 
         ``skip_identity=True`` (discussion-mode opt-in, §3.1): omits the
-        QAI ModelBuilder identity intro + working principles +
+        QAI AppBuilder identity intro + working principles +
         ``default_instructions`` + ``_MODEL_BUILD_FALLBACK`` routing block
         (those tell the model *it is QAI* — wrong for a user-defined
         discussion role). All knowledge sections (skill_rule /
@@ -2008,7 +2008,7 @@ class RichSystemPromptBuilder(SystemPromptBuilderPort):
         parts: list[str] = []
 
         # 1. identity_intro (skipped for discussion speakers — they are
-        # user-defined roles, NOT QAI ModelBuilder; framing + persona via
+        # user-defined roles, NOT QAI AppBuilder; framing + persona via
         # ``extra["persona"]`` carry the speaker's identity instead).
         if not skip_identity:
             parts.append(self._effective_identity(extra))
@@ -2021,7 +2021,7 @@ class RichSystemPromptBuilder(SystemPromptBuilderPort):
             parts.append(_AGENT_PRINCIPLES)
 
             # V1 parity (config/service_config.json system_prompts.identity_intro
-            # = "You are QAI ModelBuilder, a personal AI assistant running on
+            # = "You are QAI AppBuilder, a personal AI assistant running on
             # Windows 11.\n\n" — nothing more): V1's DEFAULT cloud prompt goes
             # straight from identity to the model-build fallback. The extra
             # "Help the user with their questions about AI model building…"

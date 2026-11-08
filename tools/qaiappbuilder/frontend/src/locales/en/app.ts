@@ -170,7 +170,7 @@ const app = {
   quantW8a8b8: "W8A8B8 - Weight Int8, Activation Int8, Bias Int8 (explicit bias quantization)",
   rebootCancel: "Cancel",
   rebootConfirm: "Restart",
-  rebootMessage: "Are you sure you want to restart QAI ModelBuilder? Current sessions will be interrupted; please refresh the page once the service is back up.",
+  rebootMessage: "Are you sure you want to restart QAI AppBuilder? Current sessions will be interrupted; please refresh the page once the service is back up.",
   rebootTitle: "Restart Service",
   repoImported: "Repository imported: {url}",
   title: "QAIModelBuilder",

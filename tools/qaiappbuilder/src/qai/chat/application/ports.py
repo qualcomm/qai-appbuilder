@@ -1638,7 +1638,7 @@ class SystemPromptRequest:
     is_local_model: bool = False
     extra: dict[str, Any] | None = None
     skip_identity: bool = False
-    """Discussion-mode opt-in (additive, §3.1): skip the QAI ModelBuilder
+    """Discussion-mode opt-in (additive, §3.1): skip the QAI AppBuilder
     identity intro + the ``_MODEL_BUILD_FALLBACK`` routing block in the
     default branch (those are about *who QAI is* + V1 routing fallbacks).
     Keep everything else (skill_rule / tools_intro / Python env / workspace

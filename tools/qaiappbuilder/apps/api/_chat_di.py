@@ -2985,7 +2985,7 @@ def build_chat_services(container: Container) -> ChatServices:
         # Additive 2026-06-21 collaborators (judgement 1 — reuse over rebuild):
         # * ``system_prompt_builder`` lets each speaker see the same SKILL
         #   catalog / Python env / Few-shot the main agent sees (skip_identity
-        #   so the QAI ModelBuilder identity intro is dropped — speakers are
+        #   so the QAI AppBuilder identity intro is dropped — speakers are
         #   user-defined roles, not QAI);
         # * ``prompt_snapshot_store`` stamps a per-round ``request_id`` so the
         #   front-end 📄 button on every tool card / final bubble opens that

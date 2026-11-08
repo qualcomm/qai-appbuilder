@@ -11,7 +11,7 @@ REM       characters from command output on some Windows versions (known OS bug)
 
 echo.
 echo  +--------------------------------------------------+
-echo  ^|   QAI ModelBuilder  -  Setup Python Environment  ^|
+echo  ^|   QAI AppBuilder  -  Setup Python Environment  ^|
 echo  +--------------------------------------------------+
 echo.
 
@@ -1494,7 +1494,7 @@ echo  ================================================================
 echo.
 echo      *****   SETUP COMPLETED SUCCESSFULLY!   *****
 echo.
-echo      QAI ModelBuilder is fully installed and ready to use.
+echo      QAI AppBuilder is fully installed and ready to use.
 echo.
 echo  ================================================================
 echo.
