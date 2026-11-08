@@ -1,6 +1,6 @@
 # Model Builder Skill (`model-builder`)
 
-The agent skill behind QAI ModelBuilder's **Model Builder** chat mode: convert a
+The agent skill behind QAI AppBuilder's **Model Builder** chat mode: convert a
 **custom** ONNX / PyTorch model to QNN or SNPE, quantize it, generate a context
 binary, and validate it against the ONNX baseline on Qualcomm hardware.
 
@@ -153,7 +153,7 @@ prompt, never a fixed location — the documented default is only a fallback, an
 the agent must not create it when a custom working directory is configured
 (`references/operations_reference.md § Working Directory`).
 
-Writing anywhere else is forbidden: no paths containing `QAIModelBuilder`, no home
+Writing anywhere else is forbidden: no paths containing `QAIAppBuilder`, no home
 or Downloads directory, no working directory outside `${WORKSPACE}\`. The skill
 does **not** build a project "in place" next to your source tree.
 

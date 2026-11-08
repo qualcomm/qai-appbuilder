@@ -29,7 +29,7 @@ const openCode = {
     advancedSettings: "Advanced Settings",
     allowedDirsDesc: "One directory per line. Leave empty to allow any directory (not recommended).",
     allowedDirsLabel: "Allowed Working Directories",
-    autoStartDesc: "When enabled, QAIModelBuilder service automatically launches the Open Code process on startup (requires enabled=true and cli_path set).",
+    autoStartDesc: "When enabled, QAIAppBuilder service automatically launches the Open Code process on startup (requires enabled=true and cli_path set).",
     autoStartLabel: "Auto Start on Launch",
     autoStartOff: "Manual start",
     autoStartOn: "Auto-start Open Code process when service starts",

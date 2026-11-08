@@ -6,7 +6,7 @@
 
 > **平台前提**：Windows on Snapdragon（ARM64）。所有 `.bat` 均在仓库根目录双击或在
 > `cmd.exe` 里执行。脚本会自动下载 uv / Python 3.13 ARM64 / PortableGit / Node.js
-> 等工具到 `%LOCALAPPDATA%\QAIModelBuilder\`，**无需管理员权限、无需手装 Python**。
+> 等工具到 `%LOCALAPPDATA%\QAIAppBuilder\`，**无需管理员权限、无需手装 Python**。
 
 ---
 
@@ -40,7 +40,7 @@ Setup.bat
 ```
 
 会做完：下载 uv / 安装 Python 3.13（默认 ARM64，`--arch x64` 时装 x64 版）/ 建 venv 到
-`%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313`（或 `.venv_x64_313`）/
+`%LOCALAPPDATA%\QAIAppBuilder\envs\.venv_arm64_313`（或 `.venv_x64_313`）/
 安装 `pyproject.toml` 全部依赖 / 初始化 `data/`（`qai.db`、出厂种子、secret 命名空间）。
 默认只装「快速基础运行时」，足以运行预编译模型。
 

@@ -683,7 +683,7 @@ onMounted(() => {
                auto_start does. -->
           <div class="config-field">
             <div class="config-comment">
-              {{ t("openCode.config.autoStartDesc", "When enabled, the QAIModelBuilder service auto-starts the Open Code process on launch (requires enabled=true and cli_path set).") }}
+              {{ t("openCode.config.autoStartDesc", "When enabled, the QAIAppBuilder service auto-starts the Open Code process on launch (requires enabled=true and cli_path set).") }}
             </div>
           </div>
           <div class="config-field">

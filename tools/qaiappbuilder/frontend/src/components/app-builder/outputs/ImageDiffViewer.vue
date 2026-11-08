@@ -20,7 +20,7 @@
  *
  * Uses global `.ab-imgdiff-*` classes from styles/app-builder/app-builder.css.
  *
- * V1 source: QAIModelBuilder_v1_pure/frontend/js/components/app-builder/outputs/ImageDiffViewer.js
+ * V1 source: QAIAppBuilder_v1_pure/frontend/js/components/app-builder/outputs/ImageDiffViewer.js
  */
 import { computed, ref, onBeforeUnmount } from "vue";
 import { useI18n } from "vue-i18n";

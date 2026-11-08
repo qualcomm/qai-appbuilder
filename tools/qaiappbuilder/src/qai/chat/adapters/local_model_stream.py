@@ -235,9 +235,9 @@ class LocalModelStreamAdapter:
             "Accept": "text/event-stream",
             # V1 parity (chat_handler.py:1846-1848): identify the client
             # source so GenieAPIService's DetectClientSource() routes
-            # QAIModelBuilder requests through its OPTIMIZED PromptOptimizer
+            # QAIAppBuilder requests through its OPTIMIZED PromptOptimizer
             # path. V1 always sent this header on every local request.
-            "X-Genie-Client": "QAIModelBuilder",
+            "X-Genie-Client": "QAIAppBuilder",
         }
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"

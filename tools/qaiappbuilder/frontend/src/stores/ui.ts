@@ -216,7 +216,7 @@ export const useUiStore = defineStore("ui", {
     sidebarCollapsed: detectInitialSidebarCollapsed(),
     mobileSidebarOpen: false,
     resolvedTheme: "dark",
-    documentTitleSuffix: "QAIModelBuilder",
+    documentTitleSuffix: "QAIAppBuilder",
     fontSize: "md",
     activeToolMode: null,
     showToolMessages: detectInitialShowToolMessages(),

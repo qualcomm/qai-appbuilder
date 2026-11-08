@@ -2,7 +2,7 @@
 ; Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 ; SPDX-License-Identifier: BSD-3-Clause
 ; ---------------------------------------------------------------------
-; QAI ModelBuilder installer (browser edition), one per architecture.
+; QAI AppBuilder installer (browser edition), one per architecture.
 ; Build with installer\build_installer.ps1, which passes:
 ;   /DAppVersion=3.1.0  /DArch=x64|arm64  /DQairtTag=2.48.40  /DStageDir=<staged tree>  /DOutDir=<output dir>
 ;
@@ -27,7 +27,7 @@
   #define OutDir "..\dist\installer"
 #endif
 
-#define AppName "QAI ModelBuilder"
+#define AppName "QAI AppBuilder"
 ; Optional components the installer ALWAYS asks _setup_env.bat for (setup and the Start-menu repair shortcut use the
 ; same list, so a repair completes them too). Both come from PyPI (uv pip / the ast-grep-cli wheel); Chromium from
 ; `python -m playwright install chromium` (cdn.playwright.dev, or npmmirror with the cn profile). Non-fatal.
@@ -44,12 +44,12 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher=Qualcomm Technologies, Inc.
 VersionInfoVersion={#AppVersion}
-; Layout: the wizard picks the PARENT folder ({app}, default %LOCALAPPDATA%\QAIModelBuilder); every program file goes
+; Layout: the wizard picks the PARENT folder ({app}, default %LOCALAPPDATA%\QAIAppBuilder); every program file goes
 ; one level down into {app}\app. So {app}\app only ever holds what this product put there (installed files plus what
 ; it writes at run time: data\, models\, vendor\ ...), and the uninstaller can simply delete {app}\app as a whole
 ; (keeping data\ when the user asks to). The uninstaller itself lives in {app}\app too (UninstallFilesDir).
-; NOTE: not upgrade-compatible with builds that installed straight into ...\QAIModelBuilder\app - uninstall those first.
-DefaultDirName={localappdata}\QAIModelBuilder
+; NOTE: not upgrade-compatible with builds that installed straight into ...\QAIAppBuilder\app - uninstall those first.
+DefaultDirName={localappdata}\QAIAppBuilder
 UninstallFilesDir={app}\app
 ; The wizard shows the folder it will create; we create the app\ child ourselves, so do not warn about an existing parent.
 DirExistsWarning=no
@@ -58,7 +58,7 @@ DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir={#OutDir}
-OutputBaseFilename=QAIModelBuilder-{#AppVersion}-qairt{#QairtTag}-{#Arch}-setup
+OutputBaseFilename=QAIAppBuilder-{#AppVersion}-qairt{#QairtTag}-{#Arch}-setup
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
@@ -83,17 +83,17 @@ Name: "chinesesimp"; MessagesFile: "ChineseSimplified.isl"
 Source: "{#StageDir}\*"; DestDir: "{app}\app"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\app\desktop\QAIModelBuilder.exe"; WorkingDir: "{app}\app"; Comment: "Open QAI ModelBuilder (desktop window)"
+Name: "{group}\{#AppName}"; Filename: "{app}\app\desktop\QAIAppBuilder.exe"; WorkingDir: "{app}\app"; Comment: "Open QAI AppBuilder (desktop window)"
 ; The browser edition stays available through Start.bat in the install folder; it is no longer a shortcut.
 ; Repair goes through cmd.exe for the same reason as Uninstall below: a shortcut straight to the .bat with arguments is not listed.
 Name: "{group}\{cm:RepairName}"; Filename: "{sys}\cmd.exe"; Parameters: "/c """"{app}\app\installer\_setup_env.bat"" --arch {#Arch} {#SetupComponents}"""; WorkingDir: "{app}\app"
 ; Not a direct {uninstallexe} link: the shell hides a Start-menu shortcut that points straight at the registered uninstaller
 ; from the apps list. Going through cmd.exe keeps it listed (verified in an isolated install).
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{sys}\cmd.exe"; Parameters: "/c start """" ""{uninstallexe}"""; Flags: runminimized
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\app\desktop\QAIModelBuilder.exe"; WorkingDir: "{app}\app"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\app\desktop\QAIAppBuilder.exe"; WorkingDir: "{app}\app"
 
 [Run]
-Filename: "{app}\app\desktop\QAIModelBuilder.exe"; Description: "{cm:LaunchNow}"; WorkingDir: "{app}\app"; Flags: postinstall nowait skipifsilent; Check: EnvOk
+Filename: "{app}\app\desktop\QAIAppBuilder.exe"; Description: "{cm:LaunchNow}"; WorkingDir: "{app}\app"; Flags: postinstall nowait skipifsilent; Check: EnvOk
 
 [UninstallDelete]
 ; Everything under {app}\app except data\ is removed by the [Code] uninstall step (it deletes the folder as a
@@ -116,8 +116,8 @@ english.ProxyDesc=HTTP proxy, for example http://host:port
 english.ProxyLabel=Proxy URL:
 english.ProxyBad=The proxy must start with http:// or https://
 english.PathWarn=The install path contains spaces or non-ASCII characters, which can break some setup scripts.%n%nContinue anyway?
-english.OldLayout=An older version of QAI ModelBuilder is installed in:%n%1%n%nThis version uses a different folder layout and cannot upgrade it. Uninstall the old version first (Settings > Apps, or its Start-menu uninstall shortcut), then run this installer again.
-english.AppDirTaken=The folder%n%1%nalready contains files that were not installed by QAI ModelBuilder.%n%nQAI ModelBuilder installs into an "app" subfolder of the folder you choose and deletes that subfolder when uninstalled. Choose a different folder.
+english.OldLayout=An older version of QAI AppBuilder is installed in:%n%1%n%nThis version uses a different folder layout and cannot upgrade it. Uninstall the old version first (Settings > Apps, or its Start-menu uninstall shortcut), then run this installer again.
+english.AppDirTaken=The folder%n%1%nalready contains files that were not installed by QAI AppBuilder.%n%nQAI AppBuilder installs into an "app" subfolder of the folder you choose and deletes that subfolder when uninstalled. Choose a different folder.
 english.SettingUp=Setting up the Python environment and the browser (downloads about 1.2 GB, this can take 10-20 minutes)...
 english.StepFmt=Step %1 of 7: %2
 english.ElapsedFmt=Elapsed %1
@@ -132,7 +132,7 @@ english.Step7=Verifying the installation
 english.StepDone=Finishing
 english.SetupFailed=Environment setup did not finish (exit code %1).%n%nThe files are installed. Check your network, then run "Repair or complete environment setup" from the Start menu. It resumes where it stopped.%n%nLog: %2
 english.RepairName=Repair or complete environment setup
-english.LaunchNow=Start QAI ModelBuilder now
+english.LaunchNow=Start QAI AppBuilder now
 english.UninstTitle=Choose what else to remove
 english.UninstIntro=Untick what you want to keep for a later reinstall.
 english.UninstEnvs=Python environments
@@ -155,8 +155,8 @@ chinesesimp.ProxyDesc=HTTP 代理,例如 http://host:port
 chinesesimp.ProxyLabel=代理地址:
 chinesesimp.ProxyBad=代理地址必须以 http:// 或 https:// 开头
 chinesesimp.PathWarn=安装路径包含空格或非 ASCII 字符,可能导致部分安装脚本出错。%n%n仍要继续吗?
-chinesesimp.OldLayout=以下位置已安装旧版本的 QAI ModelBuilder:%n%1%n%n新版本使用不同的目录结构,无法直接升级。请先卸载旧版本(“设置 > 应用”,或开始菜单中的卸载快捷方式),然后重新运行本安装程序。
-chinesesimp.AppDirTaken=文件夹%n%1%n中已有不是 QAI ModelBuilder 安装的文件。%n%nQAI ModelBuilder 会安装到你所选文件夹下的 "app" 子文件夹,卸载时会删除该子文件夹。请选择其他文件夹。
+chinesesimp.OldLayout=以下位置已安装旧版本的 QAI AppBuilder:%n%1%n%n新版本使用不同的目录结构,无法直接升级。请先卸载旧版本(“设置 > 应用”,或开始菜单中的卸载快捷方式),然后重新运行本安装程序。
+chinesesimp.AppDirTaken=文件夹%n%1%n中已有不是 QAI AppBuilder 安装的文件。%n%nQAI AppBuilder 会安装到你所选文件夹下的 "app" 子文件夹,卸载时会删除该子文件夹。请选择其他文件夹。
 chinesesimp.SettingUp=正在配置 Python 环境和浏览器(需下载约 1.2 GB,可能需要 10-20 分钟)...
 chinesesimp.StepFmt=第 %1 步，共 7 步：%2
 chinesesimp.ElapsedFmt=已用时 %1
@@ -171,7 +171,7 @@ chinesesimp.Step7=验证安装
 chinesesimp.StepDone=正在收尾
 chinesesimp.SetupFailed=环境配置未完成(退出码 %1)。%n%n文件已安装。请检查网络后,从开始菜单运行"修复或完成环境配置",它会从中断处继续。%n%n日志：%2
 chinesesimp.RepairName=修复或完成环境配置
-chinesesimp.LaunchNow=立即启动 QAI ModelBuilder
+chinesesimp.LaunchNow=立即启动 QAI AppBuilder
 chinesesimp.UninstTitle=选择还要删除的内容
 chinesesimp.UninstIntro=取消勾选即可保留,供以后重新安装使用。
 chinesesimp.UninstEnvs=Python 环境
@@ -687,7 +687,7 @@ begin
   // user, so this item is offered UNticked.
   UvRoaming := ExpandConstant('{userappdata}\uv');
   UvLocal := ExpandConstant('{localappdata}\uv');
-  EnvDir := ExpandConstant('{localappdata}\QAIModelBuilder\envs');
+  EnvDir := ExpandConstant('{localappdata}\QAIAppBuilder\envs');
   DataDir := ExpandConstant('{app}\app\data');
   // _setup_env.bat --with-browser: `playwright install chromium` puts the browser in this per-user cache
   BrowserDir := ExpandConstant('{localappdata}\ms-playwright');
@@ -795,10 +795,10 @@ begin
     // The backend server / a conversion / a download may still be running from here: stop them first, or their
     // open files survive the delete. Envs are included (the server runs from envs\.venv_*).
     StopProcessesUnder(App);
-    StopProcessesUnder(ExpandConstant('{localappdata}\QAIModelBuilder\envs'));
+    StopProcessesUnder(ExpandConstant('{localappdata}\QAIAppBuilder\envs'));
     if UninstallSilent then Exit;  // silent: keep envs, data and the SDK (see usPostUninstall for the rest)
     AskUninstallChoices;
-    if DelEnvs then DelTree(ExpandConstant('{localappdata}\QAIModelBuilder\envs'), True, True, True);
+    if DelEnvs then DelTree(ExpandConstant('{localappdata}\QAIAppBuilder\envs'), True, True, True);
     if RemoveAllData then DelTree(ExpandConstant('{app}\app\data'), True, True, True);
     if DelBrowser then DelTree(ExpandConstant('{localappdata}\ms-playwright'), True, True, True);
     if DelUv then
@@ -828,7 +828,7 @@ begin
         DeleteDirContentsExcept(App, 'data');
     end;
     // The parent the user picked: removed only when nothing is left in it (RemoveDir fails on a non-empty dir),
-    // e.g. %LOCALAPPDATA%\QAIModelBuilder once app\ and envs\ are gone.
+    // e.g. %LOCALAPPDATA%\QAIAppBuilder once app\ and envs\ are gone.
     RemoveDir(ExpandConstant('{app}'));
   end;
 end;

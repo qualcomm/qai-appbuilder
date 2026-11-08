@@ -110,7 +110,7 @@ def preprocess(path, size=299):
 ## Inference Command (using infer_classify.py template)
 
 ```powershell
-# ${APP_ROOT} = QAIModelBuilder repo root (wherever this repo is checked out)
+# ${APP_ROOT} = QAIAppBuilder repo root (wherever this repo is checked out)
 # python_arm64_venv on ARM64 hosts; python_runtime_venv on x64 hosts — read from ${APP_ROOT}\data\config\qairt_env.json
 & "<python_arm64_venv>\Scripts\python.exe" `
   "${APP_ROOT}\factory\chat_features\model-builder\scripts\inference\infer_classify.py" `
@@ -141,7 +141,7 @@ C:\WoS_AI\inception_v3\infer_inception.py
 Run:
 ```cmd
 :: python_arm64_venv on ARM64 hosts; python_runtime_venv on x64 hosts — read from ${APP_ROOT}\data\config\qairt_env.json
-:: ${APP_ROOT} = QAIModelBuilder repo root
+:: ${APP_ROOT} = QAIAppBuilder repo root
 <python_arm64_venv>\Scripts\python.exe ^
   C:\WoS_AI\inception_v3\infer_inception.py ^
   --model C:\WoS_AI\inception_v3\inception_v3-qnn_dlc-float\inception_v3.dlc ^

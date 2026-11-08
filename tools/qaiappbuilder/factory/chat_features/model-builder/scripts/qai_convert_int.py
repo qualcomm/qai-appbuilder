@@ -81,7 +81,7 @@ import sys
 from pathlib import Path
 
 
-# ─── QAIModelBuilder env_config.json auto-discovery ──────────────────────────
+# ─── QAIAppBuilder env_config.json auto-discovery ──────────────────────────
 
 def _find_qairt_env_config() -> dict:
     """Auto-discover data/config/qairt_env.json by traversing up the directory tree."""
@@ -411,7 +411,7 @@ def convert_model(model_info, cwd, calibration_list_path, act_bw=16, weight_bw=8
         print(f"Auto-detected device toolchain: {device_toolchain}")
 
     # Determine QAIRT SDK root
-    # Auto-discover QAIModelBuilder env_config.json
+    # Auto-discover QAIAppBuilder env_config.json
     _apply_env_config(_find_qairt_env_config())
 
     if qnn_sdk_root is None:
@@ -561,7 +561,7 @@ def convert_model(model_info, cwd, calibration_list_path, act_bw=16, weight_bw=8
         import time as _time
         # Bug 8 fix: set cwd to the output root directory so qnn-onnx-converter
         # runs in the intended location rather than inheriting the server process
-        # CWD (QAIModelBuilder/backend/), which would cause any tool that
+        # CWD (QAIAppBuilder/backend/), which would cause any tool that
         # defaults to ./output/ to create stray directories there.
         proc = subprocess.Popen(
             converter_cmd,

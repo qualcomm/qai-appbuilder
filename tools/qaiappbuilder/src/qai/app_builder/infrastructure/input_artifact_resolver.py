@@ -29,7 +29,7 @@ V1 parity
 V1 avoided this because its ``/upload/audio`` returned ``rel_path`` =
 ``data/uploads/audio/…`` (relative to ``repo_root``) and the V1 runner
 resolved ``repo_root / "data/uploads/…"`` successfully
-(``QAIModelBuilder_v1_pure/backend/app_builder/api_routes.py:825-827`` +
+(``QAIAppBuilder_v1_pure/backend/app_builder/api_routes.py:825-827`` +
 the V1 runner's identical ``_resolve_input_audio``). V2 stores under
 ``data/blobs/`` and returns a ``data/blobs``-relative logical key, so the
 ``repo_root`` anchor no longer reaches the file.

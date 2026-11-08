@@ -7,7 +7,7 @@
 /**
  * VariantSwitcher — switch between model precision variants.
  *
- * V1 parity (`QAIModelBuilder_v1_pure/frontend/js/components/app-builder/
+ * V1 parity (`QAIAppBuilder_v1_pure/frontend/js/components/app-builder/
  * VariantSwitcher.js`, behaviour source of truth):
  *   - display mode by count: <=1 hidden / <=3 segmented chips / >3 dropdown
  *     (VariantSwitcher.js:74-79). The <=1-hidden case is handled by the parent

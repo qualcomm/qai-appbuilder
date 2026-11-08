@@ -6,13 +6,13 @@ REM SPDX-License-Identifier: BSD-3-Clause
 REM ---------------------------------------------------------------------
 
 REM ===========================================================================
-REM   QAI ModelBuilder v2 -- Uninstaller (Clean Cutover)
+REM   QAI AppBuilder v2 -- Uninstaller (Clean Cutover)
 REM
 REM   Thin wrapper that delegates to ``scripts/init/uninstall.py``.
 REM   Rolls back ONLY what Setup.bat installed OUTSIDE the project directory:
 REM     1. Stop running services
-REM     2. Delete venvs + signed Python (WDAC fallback) + PortableGit + Node.js (%LOCALAPPDATA%\QAIModelBuilder\)
-REM     3. Delete temp files (%TEMP%\QAIModelBuilder\)
+REM     2. Delete venvs + signed Python (WDAC fallback) + PortableGit + Node.js (%LOCALAPPDATA%\QAIAppBuilder\)
+REM     3. Delete temp files (%TEMP%\QAIAppBuilder\)
 REM     4. Clean install temp archives in data\downloads\ (whitelist)
 REM     5. Remove data\bin (uv / aria2c / 7zr Setup-installed tooling)
 REM     6. Remove uv-managed Python interpreters (%APPDATA%\uv\python\)
@@ -68,7 +68,7 @@ for %%a in (%*) do (
 
 echo.
 echo  +--------------------------------------------------+
-echo  ^|   QAI ModelBuilder v2 - Uninstaller             ^|
+echo  ^|   QAI AppBuilder v2 - Uninstaller             ^|
 echo  +--------------------------------------------------+
 echo  ^|   Removes what Setup.bat installed OUTSIDE the  ^|
 echo  ^|   project (venvs, PortableGit, temp). Your      ^|
@@ -91,7 +91,7 @@ REM      handles --all and --vs in pure batch / PowerShell.
 REM
 REM NOTE: the venv/interpreter locator only picks WHICH python drives
 REM uninstall.py; the actual cleanup deletes the whole
-REM %LOCALAPPDATA%\QAIModelBuilder tree -- venvs (.venv_arm64_313 /
+REM %LOCALAPPDATA%\QAIAppBuilder tree -- venvs (.venv_arm64_313 /
 REM .venv_x64_313 / .venv_x64_310), the WDAC-fallback signed Python under
 REM python\3.13 + python\3.10, PortableGit, Node.js -- and, below, uv
 REM interpreters for BOTH architectures, so removal is host-arch-independent.
@@ -140,7 +140,7 @@ set "UV_CPY_ARCH=aarch64"
 if /i "%HOST_ARCH%"=="x64" set "VENV_DIR_NAME=.venv_x64_313"
 if /i "%HOST_ARCH%"=="x64" set "UV_CPY_ARCH=x86_64"
 
-set "LOCALAPP_QAI=%LOCALAPPDATA%\QAIModelBuilder"
+set "LOCALAPP_QAI=%LOCALAPPDATA%\QAIAppBuilder"
 set "VENV_PYTHON=%LOCALAPP_QAI%\envs\%VENV_DIR_NAME%\Scripts\python.exe"
 set "UV_PYTHON_ROOT=%APPDATA%\uv\python"
 set "UV_CPY313=%UV_PYTHON_ROOT%\cpython-3.13-windows-%UV_CPY_ARCH%-none\python.exe"
@@ -318,7 +318,7 @@ if exist "%~dp0data\runtime\server.endpoint.json" (
 )
 if defined REBOOT_URL curl -s -X POST "!REBOOT_URL!" >nul 2>&1
 timeout /t 3 /nobreak >nul
-for /f "tokens=2" %%p in ('wmic process where "ExecutablePath like '%%%LOCALAPPDATA:\=\\%%%\\QAIModelBuilder%%'" get ProcessId 2^>nul ^| findstr /r "[0-9]"') do (
+for /f "tokens=2" %%p in ('wmic process where "ExecutablePath like '%%%LOCALAPPDATA:\=\\%%%\\QAIAppBuilder%%'" get ProcessId 2^>nul ^| findstr /r "[0-9]"') do (
     taskkill /f /pid %%p >nul 2>&1
 )
 timeout /t 2 /nobreak >nul
@@ -328,16 +328,16 @@ REM data\downloads\ install temp archives. data\ otherwise holds USER DATA
 REM (qai.db, logs, runtime model weights, config) and must survive.
 
 echo -- Manual fallback: removing venvs ----------------------------------------
-if exist "%LOCALAPPDATA%\QAIModelBuilder" (
-    rd /s /q "%LOCALAPPDATA%\QAIModelBuilder" 2>nul
+if exist "%LOCALAPPDATA%\QAIAppBuilder" (
+    rd /s /q "%LOCALAPPDATA%\QAIAppBuilder" 2>nul
     echo    [OK] Venvs removed.
 ) else (
     echo    [SKIP] Not present.
 )
 
 echo -- Manual fallback: removing temp files -----------------------------------
-if exist "%TEMP%\QAIModelBuilder" (
-    rd /s /q "%TEMP%\QAIModelBuilder" 2>nul
+if exist "%TEMP%\QAIAppBuilder" (
+    rd /s /q "%TEMP%\QAIAppBuilder" 2>nul
     echo    [OK] Temp files removed.
 ) else (
     echo    [SKIP] Not present.
@@ -749,7 +749,7 @@ REM  --help / -h / /?  (does nothing else; pure documentation)
 REM ===========================================================================
 :print_help
 echo.
-echo  QAIModelBuilder - Uninstall.bat
+echo  QAIAppBuilder - Uninstall.bat
 echo  Rolls back what Setup.bat installed OUTSIDE the project directory
 echo  (venvs, PortableGit, Node.js, temp, data\bin tooling, uv pythons).
 echo  Your project folder and its data\ ^(qai.db, logs, config,

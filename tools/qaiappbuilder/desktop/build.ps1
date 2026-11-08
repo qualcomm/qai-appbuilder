@@ -1,12 +1,12 @@
 <#
 .SYNOPSIS
-  Build the QAI ModelBuilder desktop shell (Tauri 2 / WebView2) for Windows ARM64 and x64.
+  Build the QAI AppBuilder desktop shell (Tauri 2 / WebView2) for Windows ARM64 and x64.
 
 .DESCRIPTION
   The shell is only a window around the page the backend serves, so the frontend is not touched. It needs:
     * Rust (rustup) with the targets aarch64-pc-windows-msvc and x86_64-pc-windows-msvc
     * Visual Studio 2022 Build Tools (C++ workload; ARM64 + x64 tools) and a Windows SDK
-  Output:  dist\desktop\<arch>\QAIModelBuilder.exe     (arch = arm64 | x64, ~3 MB each)
+  Output:  dist\desktop\<arch>\QAIAppBuilder.exe     (arch = arm64 | x64, ~3 MB each)
   Cargo's target dir is .build\desktop-target (see src-tauri\.cargo\config.toml), so desktop\ stays source-only.
 
 .PARAMETER Arch   arm64 | x64 | both (default both)
@@ -58,7 +58,7 @@ try {
         Info "cargo build --release ($a)"
         & cargo build --release --target $targets[$a]
         if ($LASTEXITCODE -ne 0) { Fail "cargo build failed for $a" }
-        $src = Join-Path $Root ".build\desktop-target\$($targets[$a])\release\QAIModelBuilder.exe"
+        $src = Join-Path $Root ".build\desktop-target\$($targets[$a])\release\QAIAppBuilder.exe"
         if (-not (Test-Path $src)) { Fail "build output missing: $src" }
 
         # PE machine type must match the architecture we asked for (0xAA64 = ARM64, 0x8664 = x64)
@@ -69,8 +69,8 @@ try {
 
         $out = Join-Path $Root "dist\desktop\$a"
         New-Item -ItemType Directory -Force $out | Out-Null
-        Copy-Item $src (Join-Path $out 'QAIModelBuilder.exe') -Force
-        Info ("{0}: {1}  ({2:N2} MB)" -f $a, (Join-Path $out 'QAIModelBuilder.exe'), ((Get-Item (Join-Path $out 'QAIModelBuilder.exe')).Length / 1MB))
+        Copy-Item $src (Join-Path $out 'QAIAppBuilder.exe') -Force
+        Info ("{0}: {1}  ({2:N2} MB)" -f $a, (Join-Path $out 'QAIAppBuilder.exe'), ((Get-Item (Join-Path $out 'QAIAppBuilder.exe')).Length / 1MB))
     }
 }
 finally { Pop-Location }

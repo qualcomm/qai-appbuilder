@@ -120,7 +120,7 @@ const serviceConfig = {
   minCompressThresholdHint: "Minimum compression-gain threshold; skip compression below this value",
   modelNameLabel: "Model Name",
   modelsDirTitle: "Models Directory",
-  modelsRootPathHint: "Root directory containing all local model subdirectories. The Service launcher scans this directory for subdirectories with config.json as available models. Leave empty to use QAIModelBuilder/models/ (default).",
+  modelsRootPathHint: "Root directory containing all local model subdirectories. The Service launcher scans this directory for subdirectories with config.json as available models. Leave empty to use QAIAppBuilder/models/ (default).",
   modelsRootPathLabel: "Models Root Path",
   oldCompressLenHint: "Old message compression threshold (characters)",
   optionalSuffix: " (Optional)",

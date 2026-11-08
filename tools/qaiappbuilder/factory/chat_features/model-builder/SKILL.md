@@ -1,6 +1,6 @@
 ---
 name: model-builder
-description: QAI ModelBuilder. Tools and workflows for conversion, inspection, operator patching, quantization, and inference validation of custom ONNX/PyTorch models on Qualcomm platforms. Use this skill for ONNX/PyTorch-to-QNN or SNPE conversion; route direct `.tflite` and `.pte` execution to the matching runtime sub-skill. NOT for AI Hub prebuilt packages — use model-hub skill instead.
+description: QAI AppBuilder. Tools and workflows for conversion, inspection, operator patching, quantization, and inference validation of custom ONNX/PyTorch models on Qualcomm platforms. Use this skill for ONNX/PyTorch-to-QNN or SNPE conversion; route direct `.tflite` and `.pte` execution to the matching runtime sub-skill. NOT for AI Hub prebuilt packages — use model-hub skill instead.
 ---
 
 # Model Builder
@@ -119,7 +119,7 @@ This SKILL is the main pipeline + index. For any specific step, error, or topic,
 - **Execution mode** (`MODE` in config, default `batch`): batch = run all phases autonomously, apply safe defaults, log decisions, only stop on a Blocking Condition — do NOT ask "proceed to next phase?" / "which precision?" (use config) / "run onnxsim?" (always). `interactive` = confirm at each phase. **Never silently fall back to ONNX/CPU when QNN/HTP fails** — diagnose & fix, or stop & report; substituting CPU for a failed HTP run is never an acceptable fix.
 - **Inference results MUST come from actual execution.** Never output Top-K/confidence/latency/cosine without first running the script via `exec`; every number traces to an `exec` log line. No guessing/estimating from model knowledge; no writing the report before running.
 - **Operator patching is exhaustive** — patch ALL unsupported ops until no pattern remains; never fall back to CPU; no fixed iteration cap; escalate only on B7/B4/B3. Rules + code -> `references/operator_patching.md`.
-- **Working directory:** all model artifacts under `${WORKSPACE}\<model_name>\` — NEVER under a `QAIModelBuilder` path, home/Downloads, or a CWD outside `${WORKSPACE}`. Self-check every write. Bootstrap with `qai_workspace_init.py`. Tables + init diagnosis -> `references/operations_reference.md § Working Directory`.
+- **Working directory:** all model artifacts under `${WORKSPACE}\<model_name>\` — NEVER under a `QAIAppBuilder` path, home/Downloads, or a CWD outside `${WORKSPACE}`. Self-check every write. Bootstrap with `qai_workspace_init.py`. Tables + init diagnosis -> `references/operations_reference.md § Working Directory`.
 - **Wrappers only:** conversion via `run_pipeline.py` (`run_pipeline_legacy.py` = Flow C, `windows-arm64` only); inference via `qai_runner.py`/`qai_appbuilder` (never `qnn-net-run`). Wrappers handle `--preserve_io`, layout, PYTHONPATH, arch dirs, and host_arch routing.
 - **Trust known facts; never re-verify via shell** (torch=2.x, Python x64=3.10/ARM64=3.13, tool paths — all in `qairt_env.json`). Timeouts: `timeout=0` for all conversion commands. Benign HTP errors, `os._exit` crash, encoding, escalation, SDK read-only rules -> `references/operations_reference.md § Guardrails`.
 

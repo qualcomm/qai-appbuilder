@@ -209,7 +209,7 @@ class ModelRuntimeLocalModelsLookupBridge:
     independent of the model's own configured context
     length. Mirrors :class:`ModelRuntimeLocalEndpointBridge` above: hold
     ``container`` and resolve ``model_runtime`` lazily on each call. See
-    ``docs/QAIModelBuilder/chat-application-notes.md``.
+    ``docs/QAIAppBuilder/chat-application-notes.md``.
     """
 
     __slots__ = ("_container",)

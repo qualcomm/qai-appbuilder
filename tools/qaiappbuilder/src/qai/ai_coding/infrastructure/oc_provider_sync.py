@@ -7,7 +7,7 @@
 
 Writes the Cloud Models providers into OpenCode's own config file
 (``~/.config/opencode/opencode.jsonc``) so the local OpenCode server can
-use the providers the operator configured in QAIModelBuilder.
+use the providers the operator configured in QAIAppBuilder.
 
 Why a file writer (not an API call)
 -----------------------------------
@@ -35,7 +35,7 @@ behaviour exactly:
   hand, only add missing ones and refresh a stale ``baseURL``;
 * ``apiKey`` is written as the ``"public"`` placeholder (V1 parity,
   ``:152-155``) — the real key is the operator's to set in
-  ``opencode.jsonc`` (OpenCode reads its own key; QAIModelBuilder keeps
+  ``opencode.jsonc`` (OpenCode reads its own key; QAIAppBuilder keeps
   credentials in the SecretStore and never writes them here, §3.3);
 * JSONC comments (``//`` and ``/* */``) in an existing file are stripped
   before parsing (V1 ``:170-172``).

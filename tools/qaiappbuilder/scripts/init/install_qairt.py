@@ -24,7 +24,7 @@ What the script does
    If a vendored zip exists at ``vendor/qairt/v<ver>.zip``, it is used
    directly without redownload.
 4. **qairt_env.json**: write to
-   ``%LOCALAPPDATA%\QAIModelBuilder\config\qairt_env.json`` (the
+   ``%LOCALAPPDATA%\QAIAppBuilder\config\qairt_env.json`` (the
    canonical Clean-Cutover location per S8 audit P0-L2). The file
    tells the SKILL system where to find the SDK and which Python venv
    to use for conversion.
@@ -131,7 +131,7 @@ def _qairt_sentinel(sdk_root: Path) -> Path:
     return sdk_root / relative
 
 # Canonical install locations (S8 audit P0-L2):
-LOCALAPPDATA_RELATIVE = Path("QAIModelBuilder")
+LOCALAPPDATA_RELATIVE = Path("QAIAppBuilder")
 ARM64_VENV_RELATIVE = LOCALAPPDATA_RELATIVE / "envs" / ".venv_arm64_313"
 X64_VENV_RELATIVE = LOCALAPPDATA_RELATIVE / "envs" / ".venv_x64_310"
 # x64 host runtime venv (Python 3.13, mirrors setup_qairt_env.py). Distinct
@@ -268,10 +268,10 @@ def _resolve_paths(args: argparse.Namespace) -> InstallPaths:
         default_config_path = repo / "data" / "config" / "qairt_env.json"
     else:
         lad = _localappdata()
-        arm64 = lad / "QAIModelBuilder" / "envs" / ".venv_arm64_313"
-        x64 = lad / "QAIModelBuilder" / "envs" / ".venv_x64_310"
+        arm64 = lad / "QAIAppBuilder" / "envs" / ".venv_arm64_313"
+        x64 = lad / "QAIAppBuilder" / "envs" / ".venv_x64_310"
         runtime = lad / _runtime_venv_relative()
-        default_config_path = lad / "QAIModelBuilder" / "config" / "qairt_env.json"
+        default_config_path = lad / "QAIAppBuilder" / "config" / "qairt_env.json"
 
     sdk_root_override = args.sdk_root or os.environ.get("QAIRT_SDK_ROOT")
     if sdk_root_override:
@@ -790,7 +790,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--config-path", default=None,
         help=(
             "Where to write qairt_env.json. Default: "
-            "%%LOCALAPPDATA%%\\QAIModelBuilder\\config\\qairt_env.json."
+            "%%LOCALAPPDATA%%\\QAIAppBuilder\\config\\qairt_env.json."
         ),
     )
     parser.add_argument(

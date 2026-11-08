@@ -1808,7 +1808,7 @@ const {
            `direction: rtl` + `unicode-bidi: plaintext` keeps character order
            intact while causing `text-overflow: ellipsis` to eat the START of
            the string — so the meaningful trailing directory name stays
-           visible ("…\Service\src\QAIModelBuilder" not "C:\Work\App…").
+           visible ("…\Service\src\QAIAppBuilder" not "C:\Work\App…").
            `min-width: 0` on the flex child is required or `flex: 1` won't
            actually shrink under `min-content` on WebKit. -->
       <button
@@ -2640,7 +2640,7 @@ const {
  *
  * Ellipsis strategy: `direction: rtl` + `unicode-bidi: plaintext` keeps
  * character order intact but flips the `text-overflow: ellipsis` cut edge,
- * so a long path collapses to "…\Service\src\QAIModelBuilder" rather than
+ * so a long path collapses to "…\Service\src\QAIAppBuilder" rather than
  * "C:\Work\App…". The full path is always available via `title`. */
 .workdir-chip {
   display: inline-flex;

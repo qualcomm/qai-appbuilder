@@ -38,7 +38,7 @@ used so the fix keeps working even without the file.
 
 Application-owned roots (State-Truth-First, AGENTS.md §5)
 ---------------------------------------------------------
-1. ``%LOCALAPPDATA%\\QAIModelBuilder`` — the per-user application data root the
+1. ``%LOCALAPPDATA%\\QAIAppBuilder`` — the per-user application data root the
    ARM64 venv + ``Setup.bat`` create (its ``node`` subdir holds the bundled
    portable Node.js toolchain: ``npx`` / ``npm`` / ``pnpm`` / ``node``).
 2. ``<data_root>/bin`` — the current project's download/binary directory.
@@ -76,7 +76,7 @@ _DATA_ROOT_TOKEN: str = "${DATA_ROOT}"
 #: the shipped ``exec_path_dirs.json`` so the fix keeps working without the file.
 _DEFAULT_ROOTS: tuple[dict[str, Any], ...] = (
     {
-        "path": r"%LOCALAPPDATA%\QAIModelBuilder",
+        "path": r"%LOCALAPPDATA%\QAIAppBuilder",
         "subdirs": ["", "bin", "Scripts", "node"],
         "globs": ["envs/*/Scripts", "envs/*/bin"],
     },
@@ -197,7 +197,7 @@ def bundled_bin_dirs(
 
     Roots + probe patterns come from ``factory/config/exec_path_dirs.json``
     (located under ``repo_root``); a missing / malformed file falls back to the
-    built-in defaults. ``%LOCALAPPDATA%\\QAIModelBuilder`` and ``<data_root>/bin``
+    built-in defaults. ``%LOCALAPPDATA%\\QAIAppBuilder`` and ``<data_root>/bin``
     are resolved at runtime — never hard-coded. Only directories that exist are
     returned (existence is the real state; a non-existent candidate is skipped).
 

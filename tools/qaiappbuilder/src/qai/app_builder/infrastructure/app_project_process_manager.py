@@ -169,7 +169,7 @@ class AppProjectProcessManager:
     without a real venv / QAIRT SDK:
 
     * ``manager`` — the shared background-process manager port.
-    * ``python_exe`` — the interpreter to launch (the QAI ModelBuilder
+    * ``python_exe`` — the interpreter to launch (the QAI AppBuilder
       ARM64 venv python in production).
     * ``repo_root`` — the install root (``${APP_ROOT}``).
     * ``model_root`` / ``pack_root`` / ``shared_dirs`` — runtime asset
@@ -724,7 +724,7 @@ class AppProjectProcessManager:
         """The command string handed to the background-process manager.
 
         ``uvicorn`` is invoked via the resolved venv python's ``-m`` so the
-        app runs under the QAI ModelBuilder interpreter. The cwd is set by
+        app runs under the QAI AppBuilder interpreter. The cwd is set by
         ``StartInput.cwd`` to the app dir, so ``backend.main:app`` resolves.
 
         The background-process manager embeds this string into a shell:

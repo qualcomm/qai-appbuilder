@@ -6,7 +6,7 @@
 
 > **Platform**: Windows on Snapdragon (ARM64). Run every `.bat` from the repo root
 > by double-click or in `cmd.exe`. The scripts auto-download uv / Python 3.13 ARM64 /
-> PortableGit / Node.js into `%LOCALAPPDATA%\QAIModelBuilder\` — **no admin rights,
+> PortableGit / Node.js into `%LOCALAPPDATA%\QAIAppBuilder\` — **no admin rights,
 > no manual Python install needed.**
 
 ---
@@ -42,7 +42,7 @@ Setup.bat
 ```
 
 Installs the fast base runtime: download uv / install Python 3.13 (ARM64 by default,
-or x64 with `--arch x64`) / create venv at `%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313`
+or x64 with `--arch x64`) / create venv at `%LOCALAPPDATA%\QAIAppBuilder\envs\.venv_arm64_313`
 (or `.venv_x64_313`) / install every dep from `pyproject.toml` / initialize `data/`
 (`qai.db`, factory seeds, secret namespaces). That is enough to run pre-built models.
 

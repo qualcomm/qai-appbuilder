@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "QAI ModelBuilder",
+  "productName": "QAI AppBuilder",
   "version": "3.2.0",
-  "identifier": "com.qaimodelbuilder.desktop",
+  "identifier": "com.qaiappbuilder.desktop",
   "build": { "frontendDist": "../splash" },
   "app": { "windows": [], "security": { "csp": null } },
   "bundle": { "active": false, "icon": ["icons/icon.ico", "icons/icon.png"] }

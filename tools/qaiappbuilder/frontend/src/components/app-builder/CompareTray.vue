@@ -7,7 +7,7 @@
 /**
  * CompareTray — compare multiple run outputs side by side.
  *
- * V1 行为事实来源：QAIModelBuilder_v1_pure/frontend/js/components/app-builder/CompareTray.js
+ * V1 行为事实来源：QAIAppBuilder_v1_pure/frontend/js/components/app-builder/CompareTray.js
  * 三视图 Cards / Table / Radar（V1:100,288-434），指标提取 / 归一化算法对齐 V1:103-277。
  *
  * 实现方式（V2 更优结构）：用 TS + computed 把"指标提取 / 表格行 / 雷达多边形 / 轴 / 标签"

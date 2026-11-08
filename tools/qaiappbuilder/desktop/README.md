@@ -1,11 +1,11 @@
-# QAI ModelBuilder 桌面版(Tauri 2 + WebView2)
+# QAI AppBuilder 桌面版(Tauri 2 + WebView2)
 
 一个很小的桌面壳,**只负责开一个应用窗口**,前端和后端都没有改:窗口加载的就是后端提供的同一份 `http://localhost:8989/`,和浏览器里看到的一样。安装包的开始菜单和桌面快捷方式指向它;浏览器版仍是安装目录里的 `Start.bat`。
 
 ## 它做什么
 
 1. 找到应用根目录(向上查找同时含 `src/`、`apps/`、`factory/config/ports.json` 的目录)。
-2. 用 `%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_<arch>_313\Scripts\python.exe`(`<arch>` 取自 `data\config\host_arch`,没有就按系统架构)运行 `python -m apps.cli.serve --port 8989`:隐藏控制台窗口,输出写到 `data\logs\desktop-backend.log`。
+2. 用 `%LOCALAPPDATA%\QAIAppBuilder\envs\.venv_<arch>_313\Scripts\python.exe`(`<arch>` 取自 `data\config\host_arch`,没有就按系统架构)运行 `python -m apps.cli.serve --port 8989`:隐藏控制台窗口,输出写到 `data\logs\desktop-backend.log`。
 3. 先显示启动页,轮询 `GET /api/system/health`,返回 200 后把窗口导航到 `http://localhost:8989/chat`。
 4. 关窗口时询问"退出 / 最小化到托盘 / 取消";退出时先让后端正常关闭。
 
@@ -31,7 +31,7 @@
 .\desktop\build.ps1 -SkipTests      # 跳过单元测试
 ```
 
-产物:`dist\desktop\<arch>\QAIModelBuilder.exe`(`dist\` 已被 `.gitignore`)。脚本会:
+产物:`dist\desktop\<arch>\QAIAppBuilder.exe`(`dist\` 已被 `.gitignore`)。脚本会:
 
 - 检查 `cargo`,缺少的 Rust 目标自动 `rustup target add`;
 - 在本机架构上运行 `cargo test`(单元测试只在本机架构运行,另一个架构只编译);

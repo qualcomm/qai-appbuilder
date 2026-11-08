@@ -24,7 +24,7 @@ You will execute an model-hub skill task: <specific task, e.g. "download the Inc
 [Step 1, mandatory] First use the read tool to fully read:
   ${APP_ROOT}\factory\chat_features\model-hub\SKILL.md
 Follow it strictly (including the Pre-Flight Self-Check GATE, fixed-path download, Issue 18 anti-recursion, qai_appbuilder inference rule).
-(${APP_ROOT} = QAIModelBuilder repo root; do not hardcode the absolute path of any particular machine.)
+(${APP_ROOT} = QAIAppBuilder repo root; do not hardcode the absolute path of any particular machine.)
 
 [Step 0.5, mandatory — NOTES.md two-step check]
 The directory name under factory/chat_features/model-hub/models/ may differ from the model name in this prompt

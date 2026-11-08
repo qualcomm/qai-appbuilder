@@ -1,9 +1,9 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
-  "name": "@qaimodelbuilder/frontend",
+  "name": "@qaiappbuilder/frontend",
   "private": true,
   "version": "3.2.0",
-  "description": "QAIModelBuilder frontend — Vite + Vue 3 SFC (Clean Cutover rewrite)",
+  "description": "QAIAppBuilder frontend — Vite + Vue 3 SFC (Clean Cutover rewrite)",
   "type": "module",
   "engines": {
     "node": ">=22",

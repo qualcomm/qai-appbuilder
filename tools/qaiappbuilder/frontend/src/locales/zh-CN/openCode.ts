@@ -29,7 +29,7 @@ const openCode = {
     advancedSettings: "高级配置",
     allowedDirsDesc: "每行一个目录。留空则允许任何目录（不推荐）。",
     allowedDirsLabel: "允许的工作目录",
-    autoStartDesc: "启用后，QAIModelBuilder 服务启动时会自动运行 Open Code 进程（需要 enabled=true 且已设置 cli_path）。",
+    autoStartDesc: "启用后，QAIAppBuilder 服务启动时会自动运行 Open Code 进程（需要 enabled=true 且已设置 cli_path）。",
     autoStartLabel: "服务启动时自动启动",
     autoStartOff: "手动启动",
     autoStartOn: "服务启动时自动运行 Open Code 进程",

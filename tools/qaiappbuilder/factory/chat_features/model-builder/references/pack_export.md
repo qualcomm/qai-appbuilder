@@ -71,7 +71,7 @@ Without it, the exported runner may have incorrect input dimensions or missing l
 
 ### Field descriptions
 
-- `vendor`: The original author or organization of the model (e.g., "Google" for Inception, "Ultralytics" for YOLO, "Meta" for Llama). If unknown, use empty string `""`. Do NOT fill "QAIModelBuilder" — that is the export tool, not the model author.
+- `vendor`: The original author or organization of the model (e.g., "Google" for Inception, "Ultralytics" for YOLO, "Meta" for Llama). If unknown, use empty string `""`. Do NOT fill "QAIAppBuilder" — that is the export tool, not the model author.
 - `input.shape`: Exact input tensor shape as the model expects (NCHW or NHWC)
 - `input.format`: "NCHW" or "NHWC"
 - `input.preprocessing.resize_method`: How to resize input:

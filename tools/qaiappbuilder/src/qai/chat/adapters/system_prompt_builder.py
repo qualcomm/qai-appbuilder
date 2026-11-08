@@ -367,7 +367,7 @@ _MODEL_BUILD_TOOL_MODE_ALIASES: tuple[str, ...] = (
 def _render_model_build_params(tool_params: dict[str, Any] | None) -> str:
     """Render model-build ``tool_params`` to natural-language Chinese.
 
-    V1 source of truth: ``QAIModelBuilder_v1_pure/backend/main.py``
+    V1 source of truth: ``QAIAppBuilder_v1_pure/backend/main.py``
     L1396-1437 (``_render_model_build_params``).  V1 appended this
     text to the **last user message**; v2 attaches it to the system
     prompt's feature-prompt section instead — the Clean-Architecture
@@ -765,7 +765,7 @@ _FEATURE_FRAMING: dict[str, dict[str, str]] = {
 # ``"model_build"`` so the SKILL.md injection chain fires and the frontend
 # receives a ``tool_mode_changed`` SSE frame to flip the toolbar.
 #
-# Source of truth: ``QAIModelBuilder_v1_pure/backend/chat_handler.py``
+# Source of truth: ``QAIAppBuilder_v1_pure/backend/chat_handler.py``
 # lines 64-119 (``_MODEL_BUILD_PATTERNS``).  Behaviour (case insensitivity,
 # ASCII-only boundary anchors, keyword set) is preserved verbatim; only
 # the return value is normalised to ``"model_build"`` (underscore) to
@@ -1999,7 +1999,7 @@ class RichSystemPromptBuilder(SystemPromptBuilderPort):
         duplicated the authoritative ``payload["tools"]`` array.)
 
         ``skip_identity=True`` (discussion-mode opt-in, §3.1): omits the
-        QAI ModelBuilder identity intro + working principles +
+        QAI AppBuilder identity intro + working principles +
         ``default_instructions`` + ``_MODEL_BUILD_FALLBACK`` routing block
         (those tell the model *it is QAI* — wrong for a user-defined
         discussion role). All knowledge sections (skill_rule /
@@ -2008,7 +2008,7 @@ class RichSystemPromptBuilder(SystemPromptBuilderPort):
         parts: list[str] = []
 
         # 1. identity_intro (skipped for discussion speakers — they are
-        # user-defined roles, NOT QAI ModelBuilder; framing + persona via
+        # user-defined roles, NOT QAI AppBuilder; framing + persona via
         # ``extra["persona"]`` carry the speaker's identity instead).
         if not skip_identity:
             parts.append(self._effective_identity(extra))
@@ -2021,7 +2021,7 @@ class RichSystemPromptBuilder(SystemPromptBuilderPort):
             parts.append(_AGENT_PRINCIPLES)
 
             # V1 parity (config/service_config.json system_prompts.identity_intro
-            # = "You are QAI ModelBuilder, a personal AI assistant running on
+            # = "You are QAI AppBuilder, a personal AI assistant running on
             # Windows 11.\n\n" — nothing more): V1's DEFAULT cloud prompt goes
             # straight from identity to the model-build fallback. The extra
             # "Help the user with their questions about AI model building…"

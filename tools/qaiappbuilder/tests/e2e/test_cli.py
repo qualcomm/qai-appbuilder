@@ -136,7 +136,7 @@ def test_top_level_help_lists_every_command_group(qai: Callable[..., Run]) -> No
     assert r.rc == 0
     assert all(("Warning" in l) or not l.strip() for l in r.err.splitlines()), f"unexpected stderr: {r.err[:300]}"
     assert r.out.startswith("usage: qai [-h] [--repo-root <path>] [--config <server.toml>] <command> ...")
-    assert "QAIModelBuilder unified CLI" in r.out
+    assert "QAIAppBuilder unified CLI" in r.out
     listed = re.findall(r"^    ([a-z][a-z0-9-]*)\s", r.out, flags=re.M)
     expected = {"config", "auth", "service", "install-qairt", "install-pack-deps", "uninstall", "compile-factory", "api", "pack",
                 "run", "conv", "code", "policy", "perm", "security", "audit", "channel", "skill", "dep", "exec",
@@ -359,8 +359,8 @@ def bat_env() -> dict[str, str]:
 
 @pytest.mark.skipif(os.name != "nt", reason="qai.bat is a Windows launcher")
 def test_qai_bat_help_goes_through_the_launcher(bat_env: dict[str, str]) -> None:
-    """Needs the real runtime venv under ``%LOCALAPPDATA%\\QAIModelBuilder\\envs``; the launcher says so (exit 1) when it is absent."""
-    venv_ok = any((Path(os.environ["LOCALAPPDATA"]) / "QAIModelBuilder" / "envs" / n / "Scripts" / "python.exe").is_file()
+    """Needs the real runtime venv under ``%LOCALAPPDATA%\\QAIAppBuilder\\envs``; the launcher says so (exit 1) when it is absent."""
+    venv_ok = any((Path(os.environ["LOCALAPPDATA"]) / "QAIAppBuilder" / "envs" / n / "Scripts" / "python.exe").is_file()
                   for n in (".venv_arm64_313", ".venv_x64_313"))
     try:
         p = subprocess.run(["cmd", "/c", str(REPO_ROOT / "qai.bat"), "--help"], cwd=str(REPO_ROOT), env=bat_env,
@@ -373,12 +373,12 @@ def test_qai_bat_help_goes_through_the_launcher(bat_env: dict[str, str]) -> None
     assert p.returncode == 0, p.stdout[-400:] + p.stderr[-400:]
     assert f"[INFO] CLI source root: {REPO_ROOT}" in p.stdout
     assert re.search(r"\[INFO\] CLI qai source: .*src\\qai\\__init__\.py", p.stdout), "the launcher loads THIS checkout's qai package"
-    assert "usage: qai [-h]" in p.stdout and "QAIModelBuilder unified CLI" in p.stdout
+    assert "usage: qai [-h]" in p.stdout and "QAIAppBuilder unified CLI" in p.stdout
 
 
 @pytest.mark.skipif(os.name != "nt", reason="qai.bat is a Windows launcher")
 def test_qai_bat_forwards_exit_codes(bat_env: dict[str, str]) -> None:
-    venv_ok = any((Path(os.environ["LOCALAPPDATA"]) / "QAIModelBuilder" / "envs" / n / "Scripts" / "python.exe").is_file()
+    venv_ok = any((Path(os.environ["LOCALAPPDATA"]) / "QAIAppBuilder" / "envs" / n / "Scripts" / "python.exe").is_file()
                   for n in (".venv_arm64_313", ".venv_x64_313"))
     if not venv_ok:
         pytest.skip("runtime venv is not installed on this machine")

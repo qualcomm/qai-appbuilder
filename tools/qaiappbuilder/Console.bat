@@ -3,7 +3,7 @@ REM ---------------------------------------------------------------------
 REM Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 REM SPDX-License-Identifier: BSD-3-Clause
 REM ---------------------------------------------------------------------
-REM QAIModelBuilder - Open an activated environment console
+REM QAIAppBuilder - Open an activated environment console
 REM
 REM Double-click (or run) this to drop into the project's isolated Python
 REM 3.13 environment as an interactive shell, so you can install extra
@@ -20,7 +20,7 @@ REM       characters from command output on some Windows versions (known OS bug)
 
 echo.
 echo  +--------------------------------------------------+
-echo  ^|   QAI ModelBuilder  -  Environment Console       ^|
+echo  ^|   QAI AppBuilder  -  Environment Console       ^|
 echo  +--------------------------------------------------+
 echo.
 echo  [INFO] Entering isolated Python 3.13 environment...
@@ -67,7 +67,7 @@ if not defined HOST_ARCH (
 )
 set "VENV_DIR_NAME=.venv_arm64_313"
 if /i "%HOST_ARCH%"=="x64" set "VENV_DIR_NAME=.venv_x64_313"
-set "VENV_DIR=%LOCALAPPDATA%\QAIModelBuilder\envs\%VENV_DIR_NAME%"
+set "VENV_DIR=%LOCALAPPDATA%\QAIAppBuilder\envs\%VENV_DIR_NAME%"
 set "ACTIVATE=%VENV_DIR%\Scripts\activate.bat"
 
 REM Route Python bytecode caches out of the source tree into data\caches\pycache
@@ -86,7 +86,7 @@ REM PortableGit PATH injection (parity with Start.bat / qai.bat) so commands
 REM that shell out to git -- e.g. `pip install git+https://...`, editable
 REM installs of git checkouts, or `qai` subcommands -- find git even on a
 REM machine without a system-wide git.
-set "PORTABLE_GIT_DIR=%LOCALAPPDATA%\QAIModelBuilder\git"
+set "PORTABLE_GIT_DIR=%LOCALAPPDATA%\QAIAppBuilder\git"
 if exist "%PORTABLE_GIT_DIR%\cmd\git.exe" (
     set "PATH=%PORTABLE_GIT_DIR%\cmd;%PORTABLE_GIT_DIR%\usr\bin;%PATH%"
 ) else if exist "%PORTABLE_GIT_DIR%\bin\git.exe" (
@@ -101,6 +101,6 @@ cmd /k call "%ACTIVATE%"
 exit /b 0
 
 :no_venv
-echo [ERROR] .venv not found at %LOCALAPPDATA%\QAIModelBuilder\envs. Please run Setup.bat first.
+echo [ERROR] .venv not found at %LOCALAPPDATA%\QAIAppBuilder\envs. Please run Setup.bat first.
 pause
 exit /b 1

@@ -52,7 +52,7 @@ __all__ = [
 #:
 #: Deliberately version-free: ``pyproject`` carries a placeholder version, and a
 #: wrong version in a UA is worse than none.
-PRODUCT_UA: Final[str] = "QAIModelBuilder"
+PRODUCT_UA: Final[str] = "QAIAppBuilder"
 
 #: Marker QGenie greps for to bill a request to its ``UI`` (IDE/CLI) bucket.
 #:

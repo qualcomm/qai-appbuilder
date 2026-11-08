@@ -60,7 +60,7 @@ if not defined HOST_ARCH (
 )
 set "VENV_DIR_NAME=.venv_arm64_313"
 if /i "%HOST_ARCH%"=="x64" set "VENV_DIR_NAME=.venv_x64_313"
-set "VENV=%LOCALAPPDATA%\QAIModelBuilder\envs\%VENV_DIR_NAME%"
+set "VENV=%LOCALAPPDATA%\QAIAppBuilder\envs\%VENV_DIR_NAME%"
 set "PYTHON=%VENV%\Scripts\python.exe"
 
 if not exist "%PYTHON%" (
@@ -72,7 +72,7 @@ if not exist "%PYTHON%" (
 
 REM PortableGit PATH injection (parity with Start.bat) so `qai` subcommands
 REM that invoke git find it even on a machine without a system git.
-set "PORTABLE_GIT_DIR=%LOCALAPPDATA%\QAIModelBuilder\git"
+set "PORTABLE_GIT_DIR=%LOCALAPPDATA%\QAIAppBuilder\git"
 if exist "%PORTABLE_GIT_DIR%\cmd\git.exe" (
     set "PATH=%PORTABLE_GIT_DIR%\cmd;%PORTABLE_GIT_DIR%\usr\bin;%PATH%"
 ) else if exist "%PORTABLE_GIT_DIR%\bin\git.exe" (

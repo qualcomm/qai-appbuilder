@@ -109,7 +109,7 @@ MESSAGES: dict[str, str] = {
         "qai config setup 需要交互式终端；脚本场景请用 "
         "qai config provider add --type ... --api-key-stdin\n"
     ),
-    "cli.config.setup.welcome": "欢迎使用 QAIModelBuilder 配置向导。我将逐步帮你完成配置。\n\n",
+    "cli.config.setup.welcome": "欢迎使用 QAIAppBuilder 配置向导。我将逐步帮你完成配置。\n\n",
     "cli.config.setup.step1_header": "[1/2] 云端模型 Provider\n",
     "cli.config.setup.prompt.add_provider": "  你要添加云端 AI 模型吗？(用于 Chat / Model Builder Agent)",
     "cli.config.setup.prompt.add_another": "  还要添加另一个 provider 吗？",
@@ -246,7 +246,7 @@ MESSAGES: dict[str, str] = {
         "    /compact clear     清空压缩检查点（digest + ledger + 计数）\n"
         "\n"
         "  /reboot  (/r)\n"
-        "    重启 QAIModelBuilder 服务，重启完成后微信通道将自动重连。\n"
+        "    重启 QAIAppBuilder 服务，重启完成后微信通道将自动重连。\n"
         "\n"
         "\U0001f510 文件访问授权指令（FileGuard）：\n"
         "\n"

@@ -393,7 +393,7 @@ Copy any of these into the chat box to see the tools in action:
 
 ## 🚀 Installation
 
-> **Platform:** Windows on Snapdragon (ARM64) — `Setup.bat` automatically downloads `uv` and Python 3.13 ARM64 (plus PortableGit and Node.js when you pass `--git` / `--frontend` / `--full`) into `%LOCALAPPDATA%\QAIModelBuilder\` — **no administrator rights and no manual Python install required**; on Linux, `setup.sh` detects and installs what's needed.
+> **Platform:** Windows on Snapdragon (ARM64) — `Setup.bat` automatically downloads `uv` and Python 3.13 ARM64 (plus PortableGit and Node.js when you pass `--git` / `--frontend` / `--full`) into `%LOCALAPPDATA%\QAIAppBuilder\` — **no administrator rights and no manual Python install required**; on Linux, `setup.sh` detects and installs what's needed.
 
 ### Windows
 
@@ -421,7 +421,7 @@ bash start.sh
 
 | Windows | Linux | Purpose |
 |---------|-------|---------|
-| `Setup.bat` | `setup.sh` | **The single install entry point.** Windows: downloads `uv`, installs Python 3.13 (ARM64 by default; `--arch x64` installs the x64 build), creates the venv at `%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313` (or `.venv_x64_313`), installs runtime deps, initializes `data/`, and installs WebView2. Opt-in components (off by default): QAIRT SDK / VS 2022 (`--builder`), TTS data (`--voice-models`), PortableGit (`--git`), Node+pnpm (`--frontend`); `--full` enables all of them (other flags: `--arch arm64|x64`, `--dev`, `--desktop`, `--no-pause`). Linux: creates `envs/venv` (Python 3.12), installs the QAIRT SDK and dependencies, initializes `data/`; frontend install/build is skipped by default — pass `--frontend` to bootstrap project-local Node/pnpm (`scripts/setup/node_bootstrap.sh`) and build it too. |
+| `Setup.bat` | `setup.sh` | **The single install entry point.** Windows: downloads `uv`, installs Python 3.13 (ARM64 by default; `--arch x64` installs the x64 build), creates the venv at `%LOCALAPPDATA%\QAIAppBuilder\envs\.venv_arm64_313` (or `.venv_x64_313`), installs runtime deps, initializes `data/`, and installs WebView2. Opt-in components (off by default): QAIRT SDK / VS 2022 (`--builder`), TTS data (`--voice-models`), PortableGit (`--git`), Node+pnpm (`--frontend`); `--full` enables all of them (other flags: `--arch arm64|x64`, `--dev`, `--desktop`, `--no-pause`). Linux: creates `envs/venv` (Python 3.12), installs the QAIRT SDK and dependencies, initializes `data/`; frontend install/build is skipped by default — pass `--frontend` to bootstrap project-local Node/pnpm (`scripts/setup/node_bootstrap.sh`) and build it too. |
 | `Start.bat` | `start.sh` | Starts the server (supervised). The port is **not hard-coded** — the supervisor probes a fallback list and writes the real URL to `data/runtime/server.endpoint.json`. Windows opens the browser automatically and supports `--reload` hot-reload; on Linux use `--port N` to override the port, `Ctrl+C` to stop. |
 | `Build.bat` | `build.sh` | Builds the Vue 3 SPA into `frontend/dist/` (pnpm). Both support `--full` (typecheck+lint+test), `--install`, `--clean`; `build.sh` bootstraps its own project-local Node.js/pnpm (`scripts/setup/node_bootstrap.sh`) and ignores `--desktop` (Tauri is Windows-only). |
 | `Console.bat` | *(no standalone script — use `source envs/venv/bin/activate`)* | Opens an interactive shell with the host-arch venv activated. |

@@ -5,7 +5,7 @@
   "roots": [
     {
       "_note": "Per-user application data root (venv Scripts, bundled tools). The '' subdir means the root itself; 'bin'/'Scripts' are conventional executable dirs; 'node' is the bundled portable Node.js toolchain dir (node.exe/npx.cmd/npm.cmd/pnpm.cmd) so a bare 'npx'/'node'/'pnpm' resolves to OUR portable copy before any host Node install; the globs cover installer-created venv script dirs (envs/.venv_arm64_313/Scripts ...).",
-      "path": "%LOCALAPPDATA%\\QAIModelBuilder",
+      "path": "%LOCALAPPDATA%\\QAIAppBuilder",
       "subdirs": ["", "bin", "Scripts", "node"],
       "globs": ["envs/*/Scripts", "envs/*/bin"]
     },

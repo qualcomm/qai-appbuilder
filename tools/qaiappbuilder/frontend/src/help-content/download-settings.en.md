@@ -4,7 +4,7 @@ The Download Centre pulls model archives from a remote catalogue to a local dire
 
 ## Fields you actually change
 
-- **Save Dir** — where extracted models land. **Prefer paths without spaces, non-ASCII, or special characters**. QNN runtime silently fails to load a few plugins from non-ASCII paths. The default `QAIModelBuilder/downloads/` is safe.
+- **Save Dir** — where extracted models land. **Prefer paths without spaces, non-ASCII, or special characters**. QNN runtime silently fails to load a few plugins from non-ASCII paths. The default `QAIAppBuilder/downloads/` is safe.
 - **Version list URL** — JSON manifest of releases (default: project GitHub release). Point this at your private mirror if you host one.
 - **Catalog URL** — JSON with the catalogue of downloadable models.
 - **fetch_timeout / download_timeout** — seconds for "fetch the manifest" and "download one file" respectively.

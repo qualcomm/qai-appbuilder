@@ -57,7 +57,7 @@ const index = {
     modelsDescShort: "View available models list",
     newDescFull: "<strong>Save</strong> current session history and start new; history remains in Chat interface.<br><em>Reply: New session started ✨</em>",
     newDescShort: "Save current session and start a new one",
-    rebootDescFull: "Restart the entire QAIModelBuilder service; WeChat and Feishu channels auto-reconnect after restart.<br><em>Reply: System restarting, please wait... 🔄</em>",
+    rebootDescFull: "Restart the entire QAIAppBuilder service; WeChat and Feishu channels auto-reconnect after restart.<br><em>Reply: System restarting, please wait... 🔄</em>",
     rebootFeishuDesc: "Restart service; Feishu channel auto-reconnects after restart",
     rebootWechatDesc: "Restart service; WeChat channel auto-reconnects after restart",
     renameDescFull: "Rename current session.",

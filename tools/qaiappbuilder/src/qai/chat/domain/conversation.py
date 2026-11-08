@@ -180,7 +180,7 @@ class Conversation:
         so a freshly-minted conversation can carry channel-source metadata
         (e.g. ``{"source": "wechat", "channel_user_id": "..."}``) at birth —
         V1 parity with ``history_store.upsert_conversation(meta=...)``
-        (``QAIModelBuilder_v0.5_pure/backend/channels/wechat/channel.py:1083``)
+        (``QAIAppBuilder_v0.5_pure/backend/channels/wechat/channel.py:1083``)
         so a service restart can later restore the same conversation for the
         same channel user (``get_latest_wechat_conversation``).  A non-dict /
         empty value normalises to ``None`` (matching the field default), so

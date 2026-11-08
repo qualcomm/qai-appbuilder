@@ -1634,7 +1634,7 @@ def build_router(*, container: "Container") -> APIRouter:
                         try:
                             post_data2 = _json2.dumps({
                                 "redirect_uris": [redirect_uri2],
-                                "client_name": "QAIModelBuilder",
+                                "client_name": "QAIAppBuilder",
                                 "grant_types": ["authorization_code"],
                                 "response_types": ["code"],
                                 "token_endpoint_auth_method": "none",
@@ -2048,7 +2048,7 @@ def build_router(*, container: "Container") -> APIRouter:
                             registration_endpoint,
                             json={
                                 "redirect_uris": [redirect_uri],
-                                "client_name": "QAIModelBuilder",
+                                "client_name": "QAIAppBuilder",
                                 "grant_types": ["authorization_code"],
                                 "response_types": ["code"],
                                 "token_endpoint_auth_method": "none",

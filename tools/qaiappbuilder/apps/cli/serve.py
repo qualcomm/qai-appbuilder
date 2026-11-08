@@ -806,7 +806,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="qai-serve",
         description=(
-            "QAIModelBuilder reboot supervisor — spawns `python -m apps.api`, "
+            "QAIAppBuilder reboot supervisor — spawns `python -m apps.api`, "
             "respawns it on exit-code 75, exits with the child's code "
             "otherwise."
         ),

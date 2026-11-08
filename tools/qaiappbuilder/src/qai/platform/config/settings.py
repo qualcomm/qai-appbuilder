@@ -603,7 +603,7 @@ class SecuritySettings(BaseModel):
     # hard-deny gate still re-checked so a protected-path deny can never be
     # bypassed). The apps layer seeds the four data/models roots
     # (``<workspace_root>/{data,models}`` +
-    # ``%LOCALAPPDATA%\\QAIModelBuilder\\{data,models}``) into this at
+    # ``%LOCALAPPDATA%\\QAIAppBuilder\\{data,models}``) into this at
     # startup; operators may ADD further global-allow prefixes here. The
     # per-session workspace directory subtree is NOT seeded here — it is
     # session-scoped (covered by the workspace session grant + a session-
@@ -621,8 +621,8 @@ class SecuritySettings(BaseModel):
             "protected-path deny is never bypassed. The apps layer seeds the "
             "four data/models roots (``<workspace_root>/data`` + "
             "``<workspace_root>/models`` + "
-            "``%LOCALAPPDATA%\\QAIModelBuilder\\data`` + "
-            "``%LOCALAPPDATA%\\QAIModelBuilder\\models``) here at startup; "
+            "``%LOCALAPPDATA%\\QAIAppBuilder\\data`` + "
+            "``%LOCALAPPDATA%\\QAIAppBuilder\\models``) here at startup; "
             "operators may add more. The per-session workspace directory is "
             "handled separately (session-scoped) and is NOT part of this "
             "global surface."

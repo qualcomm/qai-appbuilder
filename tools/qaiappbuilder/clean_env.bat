@@ -18,12 +18,12 @@ REM   --purge-data       also delete the WHOLE data\ directory (user data!)
 REM   --purge-python     also remove uv-managed cpython-3.13 for this arch
 REM                      (with --all-envs: 3.13 arm64+x64 and the 3.10 x64 converter)
 REM                      ^(shared by other QAI installs on this machine^)
-REM   --all-envs         remove every venv under %LOCALAPPDATA%\QAIModelBuilder\envs
+REM   --all-envs         remove every venv under %LOCALAPPDATA%\QAIAppBuilder\envs
 REM   --purge-qairt      also remove the QAIRT SDK installed by --builder: C:\Qualcomm\AIStack\QAIRT\<ver>
 REM                      (only the version pinned in scripts\qairt_release.json), the kept SDK zip
 REM                      data\sdk\qairt, the script backup data\sdk\qairt-scripts, data\config\qairt_env.json
 REM   --purge-frontend   also remove what Setup.bat --frontend installed: portable Node
-REM                      (%LOCALAPPDATA%\QAIModelBuilder\node), corepack cache, pnpm shim,
+REM                      (%LOCALAPPDATA%\QAIAppBuilder\node), corepack cache, pnpm shim,
 REM                      frontend\node_modules and data\pnpm-virtual-store.
 REM                      frontend\dist (the built UI) is KEPT; add --purge-dist for it.
 REM   --purge-dist       also remove frontend\dist (Start.bat then serves no UI)
@@ -84,10 +84,10 @@ if /i not "%HOST_ARCH%"=="arm64" if /i not "%HOST_ARCH%"=="x64" (
 set "VENV_DIR_NAME=.venv_arm64_313"
 set "PY_SPEC=cpython-3.13-windows-aarch64"
 if /i "%HOST_ARCH%"=="x64" ( set "VENV_DIR_NAME=.venv_x64_313" & set "PY_SPEC=cpython-3.13-windows-x86_64" )
-set "ENVS_DIR=%LOCALAPPDATA%\QAIModelBuilder\envs"
+set "ENVS_DIR=%LOCALAPPDATA%\QAIAppBuilder\envs"
 set "VENV_DIR=%ENVS_DIR%\%VENV_DIR_NAME%"
 set "VENV_310_DIR=%ENVS_DIR%\.venv_x64_310"
-set "QAI_LAD=%LOCALAPPDATA%\QAIModelBuilder"
+set "QAI_LAD=%LOCALAPPDATA%\QAIAppBuilder"
 set "QAIRT_DIR="
 if "%PURGE_QAIRT%"=="0" goto :qairt_resolved
 set "QAIRT_VERSION="
@@ -97,7 +97,7 @@ set "QAIRT_DIR=C:\Qualcomm\AIStack\QAIRT\%QAIRT_VERSION%"
 :qairt_resolved
 
 echo.
-echo  QAI ModelBuilder - clean_env   ^(arch=%HOST_ARCH%^)
+echo  QAI AppBuilder - clean_env   ^(arch=%HOST_ARCH%^)
 echo  ------------------------------------------------------------
 echo  will remove:
 if "%ALL_ENVS%"=="1" ( echo    - %ENVS_DIR%  ^(all venvs^) ) else ( echo    - %VENV_DIR%  and  %VENV_310_DIR% )
@@ -233,7 +233,7 @@ echo   Default: runtime venv ^(.venv_^<arch^>_313^) + x64 converter venv ^(.venv
 echo            data\downloads, data\bin\uv^|aria2c^|7zr, data\config\host_arch, vendor bundle.
 echo.
 echo   --arch arm64^|x64     which runtime venv ^(default: data\config\host_arch, else detect^)
-echo   --all-envs           every venv under %%LOCALAPPDATA%%\QAIModelBuilder\envs
+echo   --all-envs           every venv under %%LOCALAPPDATA%%\QAIAppBuilder\envs
 echo   --purge-python       uv-managed Python builds ^(shared with other installs^)
 echo   --purge-qairt        QAIRT SDK C:\Qualcomm\AIStack\QAIRT\^<pinned ver^> + data\sdk\qairt* + qairt_env.json
 echo   --purge-frontend     portable Node, corepack, pnpm shim, frontend\node_modules, data\pnpm-virtual-store

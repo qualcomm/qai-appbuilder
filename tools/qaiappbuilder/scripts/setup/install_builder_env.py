@@ -287,7 +287,7 @@ def detect_arch(root: Path) -> str:
 
 def default_envs_dir() -> Path:
     base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-    return Path(base) / "QAIModelBuilder" / "envs"
+    return Path(base) / "QAIAppBuilder" / "envs"
 
 
 def build_ctx(args: argparse.Namespace) -> Ctx:
@@ -1328,7 +1328,7 @@ def parse_args(argv: Optional[Sequence[str]]) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="install_builder_env", description=__doc__.split("\n")[0])
     p.add_argument("--root", help="app root (default: two levels above this script)")
     p.add_argument("--arch", choices=("x64", "arm64"), help="host arch (default: data/config/host_arch, then detect)")
-    p.add_argument("--envs-dir", help=r"venv directory (default: %%LOCALAPPDATA%%\QAIModelBuilder\envs)")
+    p.add_argument("--envs-dir", help=r"venv directory (default: %%LOCALAPPDATA%%\QAIAppBuilder\envs)")
     p.add_argument("--sdk-root", help="QAIRT install dir (default from scripts/qairt_release.json)")
     p.add_argument("--sdk-version", help="override the pinned QAIRT version")
     p.add_argument("--download-url", help="override the SDK download URL")

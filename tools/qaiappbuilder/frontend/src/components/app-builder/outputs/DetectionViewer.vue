@@ -10,7 +10,7 @@
  * Renders bounding boxes overlaid on the input image with hover
  * interactions (highlight bbox + table row) and a summary table below.
  *
- * V1 source: QAIModelBuilder_v1_pure/frontend/js/components/app-builder/outputs/DetectionViewer.js
+ * V1 source: QAIAppBuilder_v1_pure/frontend/js/components/app-builder/outputs/DetectionViewer.js
  */
 import { computed, ref, onMounted, onBeforeUnmount, nextTick } from "vue";
 import { useI18n } from "vue-i18n";

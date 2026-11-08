@@ -54,7 +54,7 @@ Key rules (summary): ① main agent reads SKILL.md first; ② sub-agent prompt's
 
 ## Environment
 
-> `${APP_ROOT}` = this repo (QAIModelBuilder) root. Never hardcode machine-specific absolute paths.
+> `${APP_ROOT}` = this repo (QAIAppBuilder) root. Never hardcode machine-specific absolute paths.
 
 Read from `${APP_ROOT}\data\config\qairt_env.json`:
 

@@ -4,7 +4,7 @@
 
 ## 常用欄位
 
-- **儲存目錄（Save Dir）**：模型解壓後的落地位置。**請盡量避免路徑中含有空格 / 中文 / 特殊字元**——QNN runtime 對部分插件在非 ASCII 路徑下會靜默失敗。預設值 `QAIModelBuilder/downloads/` 是安全的。
+- **儲存目錄（Save Dir）**：模型解壓後的落地位置。**請盡量避免路徑中含有空格 / 中文 / 特殊字元**——QNN runtime 對部分插件在非 ASCII 路徑下會靜默失敗。預設值 `QAIAppBuilder/downloads/` 是安全的。
 - **Version list URL**：版本清單 JSON 位址（預設為本專案 GitHub Release）。若使用私有鏡像可改為自架 HTTPS/HTTP 位址。
 - **Catalog URL**：可下載模型清單 JSON 位址。
 - **fetch_timeout / download_timeout**：分別控制「抓清單」與「下載單一檔案」的逾時秒數。

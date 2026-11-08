@@ -848,7 +848,7 @@ def _build_manifest(
         "include_outputs": definition.package_include_outputs,
         "total_size_bytes": total_size_bytes,
         "target_platform": (
-            f"{_platform_label()} with a QAI ModelBuilder "
+            f"{_platform_label()} with a QAI AppBuilder "
             "Python environment. Not a fully self-contained offline package."
         ),
         "warnings": list(warnings),
@@ -986,7 +986,7 @@ def _run_bat_content(host: str, preferred_port: int) -> str:
         ":arch_bad\n"
         "echo [run.bat] ERROR: the python on PATH is not ARM64 CPython.\n"
         "echo   QNN inference requires ARM64 CPython on Windows on Snapdragon.\n"
-        "echo   Activate an ARM64 Python such as the QAI ModelBuilder venv,\n"
+        "echo   Activate an ARM64 Python such as the QAI AppBuilder venv,\n"
         "echo   or put an ARM64 python.exe first on PATH, then re-run.\n"
         "pause\n"
         "exit /b 3\n"

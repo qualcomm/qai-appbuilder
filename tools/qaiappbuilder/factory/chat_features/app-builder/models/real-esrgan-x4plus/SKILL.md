@@ -159,23 +159,23 @@ Single tile (image fits within 640×480), ~800 ms on NPU.
 
 ---
 
-## 10. Model weight acquisition (user-converted via QAI ModelBuilder)
+## 10. Model weight acquisition (user-converted via QAI AppBuilder)
 
 > **⚠️ This model does NOT have pre-compiled weights bundled or auto-downloaded.**
 > Unlike melotts-zh / whisper-base / zipformer-zh (which ship pre-built QNN
 > context binaries via Setup.bat), the Real-ESRGAN x4plus `.bin` must be
-> converted by the user using QAI ModelBuilder's **model-builder** feature.
+> converted by the user using QAI AppBuilder's **model-builder** feature.
 
 ### 10.1 Why
 
 The QNN context binary (`real_esrgan_480x640_fp16.bin`) is compiled for a
-specific input shape (480×640) and target device. QAI ModelBuilder's
+specific input shape (480×640) and target device. QAI AppBuilder's
 model-builder handles the full conversion pipeline (ONNX download → QNN
 conversion → context binary generation) in-chat.
 
 ### 10.2 How to convert
 
-In QAI ModelBuilder's chat interface, use the **model-builder** mode:
+In QAI AppBuilder's chat interface, use the **model-builder** mode:
 
 ```
 Convert Real-ESRGAN x4plus to QNN context binary, input size 480×640, fp16
@@ -207,7 +207,7 @@ The videosr-webui runner searches in this order:
 ### 10.4 What to tell the user
 
 If a user asks to run VideoSR and the model is not installed:
-- Explain that this model must be converted first using QAI ModelBuilder's
+- Explain that this model must be converted first using QAI AppBuilder's
   model-builder feature
 - Suggest the prompt: "Convert Real-ESRGAN x4plus to QNN context binary,
   input size 480×640, fp16"
@@ -265,7 +265,7 @@ input shape / device / precision; final artifact is likewise a single `.bin`.)
    ```
    <repo>/models/real-esrgan-x4plus/real_esrgan_480x640_fp16.bin
    ```
-   (`<repo>` is the QAIModelBuilder repo root — the same directory that contains
+   (`<repo>` is the QAIAppBuilder repo root — the same directory that contains
    `factory/` and `samples/`.)
 3. Restart videosr-webui.
 

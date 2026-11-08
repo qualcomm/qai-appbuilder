@@ -181,7 +181,7 @@ def create_app(
         )
 
     app = FastAPI(
-        title="QAIModelBuilder",
+        title="QAIAppBuilder",
         version=_app_version(),
         docs_url="/docs" if _docs_enabled else None,
         openapi_url="/openapi.json" if _docs_enabled else None,
@@ -397,7 +397,7 @@ def main(argv: list[str] | None = None) -> int:
     """
     parser = argparse.ArgumentParser(
         prog="python -m apps.api",
-        description="QAIModelBuilder API server (direct uvicorn; debug-only)",
+        description="QAIAppBuilder API server (direct uvicorn; debug-only)",
     )
     parser.add_argument("--host", help="bind host (overrides settings)")
     parser.add_argument("--port", type=int, help="bind port (overrides settings)")

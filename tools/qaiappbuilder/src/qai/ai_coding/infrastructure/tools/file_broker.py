@@ -143,7 +143,7 @@ class PatternFileScreen:
             else (
                 # AGENTS.md 🟡🟡 (发现 V1 缺陷必须修复，绝不将错就错) +
                 # 🟢 (对齐前先评估合理性). The TRUTH about V1 (verified against
-                # ``QAIModelBuilder_v1_pure/backend/tools/file_broker.py:56-58``):
+                # ``QAIAppBuilder_v1_pure/backend/tools/file_broker.py:56-58``):
                 # V1's default always_exclude DID include ``*.log``, BUT V1 only
                 # applied always_exclude to REJECT an INPUT path (pre_call step 1,
                 # e.g. ``read(path="x.log")``) — its result step only did

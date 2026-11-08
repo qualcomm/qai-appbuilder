@@ -13,7 +13,7 @@
     "tags":  []
   },
   "version": "0.0.0",
-  "vendor": "QAIModelBuilder",
+  "vendor": "QAIAppBuilder",
   "description": "Model Pack 模板，仅用于演示协议接线。",
   "longDescription": "复制本目录到 features/app-builder/models/<id>/，把 modelId 改名后再补 weights / examples。",
   "tags": ["template"],

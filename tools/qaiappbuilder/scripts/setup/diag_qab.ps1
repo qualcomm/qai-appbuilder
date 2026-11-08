@@ -35,7 +35,7 @@ $Root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 
 if (-not $Python) {
     foreach ($n in '.venv_x64_313', '.venv_arm64_313') {
-        $c = Join-Path $env:LOCALAPPDATA "QAIModelBuilder\envs\$n\Scripts\python.exe"
+        $c = Join-Path $env:LOCALAPPDATA "QAIAppBuilder\envs\$n\Scripts\python.exe"
         if (Test-Path -LiteralPath $c) { $Python = $c; break }
     }
 }
@@ -52,7 +52,7 @@ function Safe([scriptblock]$b) { try { & $b } catch { Out-Rep ('  (failed: ' + $
 
 Out-Rep ('qai_appbuilder import diagnosis   ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'))
 if (-not $Python -or -not (Test-Path -LiteralPath $Python)) {
-    Out-Rep "No venv python found under $env:LOCALAPPDATA\QAIModelBuilder\envs. Re-run the installer or use the Start-menu Repair shortcut."
+    Out-Rep "No venv python found under $env:LOCALAPPDATA\QAIAppBuilder\envs. Re-run the installer or use the Start-menu Repair shortcut."
     exit 2
 }
 Out-Rep "python: $Python"
@@ -284,7 +284,7 @@ foreach ($log in 'Microsoft-Windows-CodeIntegrity/Operational', 'Microsoft-Windo
         # events 1122 (Exploit Guard audit-mode) fire for every python.exe start and would bury the
         # useful lines, so they are only counted.
         $audit = @($all | Where-Object { $_.Id -eq 1122 })
-        $ev = @($all | Where-Object { $_.Id -ne 1122 -and ($_.Level -le 3 -or $_.Message -match 'appbuilder|Genie|qai|QAIModelBuilder|\.venv_') } | Select-Object -First 15)
+        $ev = @($all | Where-Object { $_.Id -ne 1122 -and ($_.Level -le 3 -or $_.Message -match 'appbuilder|Genie|qai|QAIAppBuilder|\.venv_') } | Select-Object -First 15)
         if ($audit.Count -gt 0) { Out-Rep ('  ({0} Defender Exploit-Guard AUDIT events id=1122 omitted: audit mode only logs, it does not block)' -f $audit.Count) }
         if ($ev.Count -eq 0) { Out-Rep '  (no matching events)' }
         foreach ($e in $ev) {

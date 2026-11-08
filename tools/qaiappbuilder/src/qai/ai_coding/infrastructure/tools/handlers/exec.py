@@ -350,7 +350,7 @@ def _write_powershell_script_temp(wrapped_command: str) -> Path:
 
     Location
     --------
-    Written under ``%TEMP%\QAIModelBuilder\default\qai_ps_<rand>.ps1``
+    Written under ``%TEMP%\QAIAppBuilder\default\qai_ps_<rand>.ps1``
     (isolated from user data, cleanable as a group) when that directory is
     reachable; otherwise the system default ``%TEMP%`` root — same policy
     as :func:`_multiline_rewrite._materialisation_temp_dir`.
@@ -361,11 +361,11 @@ def _write_powershell_script_temp(wrapped_command: str) -> Path:
     partially-written file, so the caller sees the real disk/permission
     error rather than a downstream "script not found".
     """
-    # Match the .bat materialisation policy — QAIModelBuilder\default under
+    # Match the .bat materialisation policy — QAIAppBuilder\default under
     # %TEMP%. Falling back to None lets tempfile use the system default.
     tmp_dir_root = (
         Path(os.environ.get("TEMP", tempfile.gettempdir()))
-        / "QAIModelBuilder"
+        / "QAIAppBuilder"
         / "default"
     )
     try:
@@ -447,7 +447,7 @@ def _resolve_portable_git_shell(shell_name: str) -> str | None:
     State-Truth-First (AGENTS.md 铁律4): Windows has no ``sh`` on PATH, and a
     bare ``argv[0]="sh"`` cannot be spawned by ``create_subprocess_exec``. We
     resolve the ABSOLUTE path from the same structural anchor ``_build_exec_env``
-    uses (``%LOCALAPPDATA%\QAIModelBuilder\git``) — never a hard-coded per-user
+    uses (``%LOCALAPPDATA%\QAIAppBuilder\git``) — never a hard-coded per-user
     path.
 
     Architecture selection (2026-07-12): PortableGit ships the shell under both
@@ -469,7 +469,7 @@ def _resolve_portable_git_shell(shell_name: str) -> str | None:
     local_app_data = os.environ.get("LOCALAPPDATA", "")
     if not local_app_data:
         return None
-    git_root = Path(local_app_data) / "QAIModelBuilder" / "git"
+    git_root = Path(local_app_data) / "QAIAppBuilder" / "git"
     exe = f"{shell_name}.exe"
     # ``bin\`` first: on WoS it holds the ARM64-native front-end; ``usr\bin\``
     # is the fallback (and the x86-64 build on WoS).
@@ -663,7 +663,7 @@ def _select_shell(
             raise ToolError(
                 f"exec: shell='{shell}' 在本机不可用（未找到 PortableGit "
                 f"{shell}.exe）。请运行 Setup.bat --git 安装 PortableGit 到 "
-                "%LOCALAPPDATA%\\QAIModelBuilder\\git，或改用 shell='cmd' / "
+                "%LOCALAPPDATA%\\QAIAppBuilder\\git，或改用 shell='cmd' / "
                 "shell='powershell' 执行该命令。"
             )
         command = _sanitize_win_paths_for_bash(command)
@@ -715,7 +715,7 @@ def _build_exec_env(*, guard_token: str | None = None, allow_x86: bool = False) 
 
     local_app_data = os.environ.get("LOCALAPPDATA", "")
     if local_app_data:
-        git_root = Path(local_app_data) / "QAIModelBuilder" / "git"
+        git_root = Path(local_app_data) / "QAIAppBuilder" / "git"
         # System32 interposed BEFORE usr\bin so the 8 PortableGit coreutils that
         # collide by name with semantically-incompatible Windows built-ins
         # (find / sort / timeout / tar / whoami / hostname / expand / reset)

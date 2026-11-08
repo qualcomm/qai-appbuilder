@@ -4,7 +4,7 @@
   "version": 2,
   "entries": [
     {
-      "_note": "The per-user profile root (C:\\Users\\<user>, covering AppData Local/Roaming/LocalLow plus dot-config dirs like .gitconfig / .cache / .cargo / Downloads). Full read/write/execute so the app and its child processes never prompt (ASK) for anything under a user's home. NOTE: this is a DELIBERATELY WIDE grant - it opens the whole per-user home tree for r/w/execute, including credential stores (.ssh, .aws, .git-credentials) and any binary a user placed under their home (which will run WITHOUT the execute-authorization prompt). This entry subsumes the former %USERPROFILE%\\AppData entry (and the app's own %LOCALAPPDATA%\\QAIModelBuilder + %LOCALAPPDATA%\\uv\\cache trees under it), all now removed as redundant. %USERPROFILE% generalizes across users and drive letters.",
+      "_note": "The per-user profile root (C:\\Users\\<user>, covering AppData Local/Roaming/LocalLow plus dot-config dirs like .gitconfig / .cache / .cargo / Downloads). Full read/write/execute so the app and its child processes never prompt (ASK) for anything under a user's home. NOTE: this is a DELIBERATELY WIDE grant - it opens the whole per-user home tree for r/w/execute, including credential stores (.ssh, .aws, .git-credentials) and any binary a user placed under their home (which will run WITHOUT the execute-authorization prompt). This entry subsumes the former %USERPROFILE%\\AppData entry (and the app's own %LOCALAPPDATA%\\QAIAppBuilder + %LOCALAPPDATA%\\uv\\cache trees under it), all now removed as redundant. %USERPROFILE% generalizes across users and drive letters.",
       "path": "%USERPROFILE%",
       "read": "allow",
       "write": "allow",

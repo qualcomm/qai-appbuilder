@@ -52,7 +52,7 @@ __all__ = [
 # ---------------------------------------------------------------------------
 #
 # The tool list mirrors what Setup.bat guarantees is present under
-# ``%LOCALAPPDATA%\QAIModelBuilder\git`` (PortableGit bundle). Historically
+# ``%LOCALAPPDATA%\QAIAppBuilder\git`` (PortableGit bundle). Historically
 # on-device models missed the availability of ``git`` / ``bash`` / ``grep`` /
 # ``sed`` and reached for ``cmd`` built-ins that behave badly (encoding,
 # quoting), or hallucinated tools that are not present (``rsync`` / ``jq``).

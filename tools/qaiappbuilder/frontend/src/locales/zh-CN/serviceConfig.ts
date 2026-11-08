@@ -120,7 +120,7 @@ const serviceConfig = {
   minCompressThresholdHint: "最小压缩收益阈值，低于此值跳过压缩",
   modelNameLabel: "模型名称",
   modelsDirTitle: "模型目录",
-  modelsRootPathHint: "包含所有本地模型子目录的根目录。Service 启动器将扫描此目录下所有含 config.json 的子目录作为可选模型。留空时使用 QAIModelBuilder/models/（默认）。",
+  modelsRootPathHint: "包含所有本地模型子目录的根目录。Service 启动器将扫描此目录下所有含 config.json 的子目录作为可选模型。留空时使用 QAIAppBuilder/models/（默认）。",
   modelsRootPathLabel: "模型根目录",
   oldCompressLenHint: "旧消息压缩阈值（字符数）",
   optionalSuffix: "（可选）",

@@ -3,7 +3,7 @@ REM ---------------------------------------------------------------------
 REM Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 REM SPDX-License-Identifier: BSD-3-Clause
 REM ---------------------------------------------------------------------
-REM _setup_env.bat - lean, network-tolerant environment setup for QAI ModelBuilder.
+REM _setup_env.bat - lean, network-tolerant environment setup for QAI AppBuilder.
 REM
 REM Differences from Setup.bat (which is left untouched):
 REM   * network preflight + proxy / mirror profile (scripts\setup\net_config.ps1)
@@ -12,7 +12,7 @@ REM   * only the pieces needed to run the server are installed by default;
 REM     everything heavy is opt-in
 REM   * same layout as Setup.bat, so Start.bat / qai.bat / Console.bat / Uninstall.bat
 REM     work on the result unchanged:
-REM       venv        %LOCALAPPDATA%\QAIModelBuilder\envs\.venv_<arch>_313
+REM       venv        %LOCALAPPDATA%\QAIAppBuilder\envs\.venv_<arch>_313
 REM       data        <repo>\data   (uv, aria2c, 7zr, config\host_arch, qai.db ...)
 REM
 REM Usage: installer\_setup_env.bat [options]     (--help for the list)
@@ -105,7 +105,7 @@ if /i "%HOST_ARCH%"=="x64" (
     set "VENV_DIR_NAME=.venv_arm64_313"
     set "ASTGREP_ASSET=app-aarch64-pc-windows-msvc.zip"
 )
-set "ENVS_DIR=%LOCALAPPDATA%\QAIModelBuilder\envs"
+set "ENVS_DIR=%LOCALAPPDATA%\QAIAppBuilder\envs"
 set "VENV_DIR=%ENVS_DIR%\%VENV_DIR_NAME%"
 set "VPY=%VENV_DIR%\Scripts\python.exe"
 set "DL_DIR=data\downloads"
@@ -145,7 +145,7 @@ set "VDEPS_URL=https://www.aidevhome.com/data/adh2/attr/vendor-deps.7z"
 
 echo.
 echo  +--------------------------------------------------+
-echo  ^|   QAI ModelBuilder  -  setup_env                 ^|
+echo  ^|   QAI AppBuilder  -  setup_env                 ^|
 echo  +--------------------------------------------------+
 echo [INFO] arch=%HOST_ARCH%  venv=%VENV_DIR%
 echo [INFO] source=%ROOT_DIR%

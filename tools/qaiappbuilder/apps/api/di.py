@@ -288,7 +288,7 @@ class Container:
         data_paths.ensure_top_levels()
 
         # Prefer application-owned tools over whatever is first on the host
-        # PATH. Prepend our bundled binary dirs (``%LOCALAPPDATA%\QAIModelBuilder``
+        # PATH. Prepend our bundled binary dirs (``%LOCALAPPDATA%\QAIAppBuilder``
         # + ``<data_root>/bin``, as declared in
         # ``factory/config/exec_path_dirs.json``) to THIS process's PATH once, at
         # the single shared composition root (used by both the API server and the

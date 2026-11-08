@@ -81,14 +81,14 @@ def _materialisation_temp_dir() -> str | None:
     r"""Return an isolated, cleanable temp dir for materialised scripts.
 
     Materialised ``.bat`` bodies are landed under
-    ``%TEMP%\QAIModelBuilder\default`` (rather than the bare ``%TEMP%`` root)
+    ``%TEMP%\QAIAppBuilder\default`` (rather than the bare ``%TEMP%`` root)
     so they are isolated from user data and trivially cleanable as a group.
     Returns ``None`` if the directory cannot be created, in which case the
     caller falls back to the system default temp location.
     """
     root = (
         Path(os.environ.get("TEMP", tempfile.gettempdir()))
-        / "QAIModelBuilder"
+        / "QAIAppBuilder"
         / "default"
     )
     try:

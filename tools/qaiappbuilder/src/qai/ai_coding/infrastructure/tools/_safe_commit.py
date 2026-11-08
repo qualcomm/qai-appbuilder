@@ -367,7 +367,7 @@ def _is_dir_writable(directory: Path) -> bool:
 def _user_app_trash_dir() -> Path | None:
     """Last-resort per-user app trash dir (platform-neutral).
 
-    Windows: ``%LOCALAPPDATA%\\QAIModelBuilder\\edit_trash``.
+    Windows: ``%LOCALAPPDATA%\\QAIAppBuilder\\edit_trash``.
     POSIX: ``$XDG_DATA_HOME/qai/edit_trash`` else ``~/.qai/edit_trash``.
 
     Returns ``None`` only when even the home/appdata cannot be resolved.
@@ -376,8 +376,8 @@ def _user_app_trash_dir() -> Path | None:
         if os.name == "nt":
             base = os.environ.get("LOCALAPPDATA")
             if base:
-                return Path(base) / "QAIModelBuilder" / "edit_trash"
-            return Path.home() / "QAIModelBuilder" / "edit_trash"
+                return Path(base) / "QAIAppBuilder" / "edit_trash"
+            return Path.home() / "QAIAppBuilder" / "edit_trash"
         xdg = os.environ.get("XDG_DATA_HOME")
         if xdg:
             return Path(xdg) / "qai" / "edit_trash"
@@ -429,7 +429,7 @@ def resolve_trash_root(
        edited file to a ``.git`` root (else the file's parent) and use its
        ``/.edit_trash``.
     #. **Fallback B** — neither writable: a per-user app dir
-       (``%LOCALAPPDATA%\\QAIModelBuilder\\edit_trash`` / ``~/.qai/edit_trash``).
+       (``%LOCALAPPDATA%\\QAIAppBuilder\\edit_trash`` / ``~/.qai/edit_trash``).
        Files are laid out under a flattened absolute-path bucket so different
        workspaces never collide.
     #. **None** — only when NONE of the above is writable (a real loss of the

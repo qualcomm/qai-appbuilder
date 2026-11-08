@@ -105,7 +105,7 @@ MESSAGES: dict[str, str] = {
         "qai config setup requires an interactive terminal; for scripted use run "
         "qai config provider add --type ... --api-key-stdin\n"
     ),
-    "cli.config.setup.welcome": "Welcome to the QAIModelBuilder configuration wizard. I'll walk you through setup step by step.\n\n",
+    "cli.config.setup.welcome": "Welcome to the QAIAppBuilder configuration wizard. I'll walk you through setup step by step.\n\n",
     "cli.config.setup.step1_header": "[1/2] Cloud model provider\n",
     "cli.config.setup.prompt.add_provider": "  Would you like to add a cloud AI model? (used by Chat / Model Builder Agent)",
     "cli.config.setup.prompt.add_another": "  Add another provider?",
@@ -278,7 +278,7 @@ MESSAGES: dict[str, str] = {
         "    /compact clear     drop the compaction checkpoint (digest + ledger + counter)\n"
         "\n"
         "  /reboot  (/r)\n"
-        "    Restart the QAIModelBuilder service; the WeChat channel will reconnect automatically once restarted.\n"
+        "    Restart the QAIAppBuilder service; the WeChat channel will reconnect automatically once restarted.\n"
         "\n"
         "\U0001f510 File access grant commands (FileGuard):\n"
         "\n"

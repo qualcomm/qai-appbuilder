@@ -120,7 +120,7 @@ _DIST_MISSING_HTML = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>QAIModelBuilder - service unavailable</title>
+<title>QAIAppBuilder - service unavailable</title>
 <style>
   body { margin: 0; min-height: 100vh; display: flex; align-items: center;
          justify-content: center; background: #0f1420; color: #e0e6f0;

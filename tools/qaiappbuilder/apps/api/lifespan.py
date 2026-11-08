@@ -1854,7 +1854,7 @@ async def _edit_trash_cleanup_once(repo_root: Path) -> None:
 
     #. ``$QAI_EDIT_TRASH_ROOT`` (operator / test override), if set.
     #. ``<repo_root>/.edit_trash`` (the dev-checkout workspace trash).
-    #. The per-user fallback dir (``%LOCALAPPDATA%\\QAIModelBuilder\\edit_trash``
+    #. The per-user fallback dir (``%LOCALAPPDATA%\\QAIAppBuilder\\edit_trash``
        / ``~/.qai/edit_trash``) used when no workspace root was writable.
     #. Any active user-workspace trash roots recorded this process.
 

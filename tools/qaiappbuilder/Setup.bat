@@ -3,15 +3,15 @@ REM ---------------------------------------------------------------------
 REM Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 REM SPDX-License-Identifier: BSD-3-Clause
 REM ---------------------------------------------------------------------
-REM QAIModelBuilder - One-click Python environment setup (uv)
-REM Downloads uv, installs Python 3.13 ARM64 native, creates venv in %LOCALAPPDATA%\QAIModelBuilder\envs, installs dependencies.
+REM QAIAppBuilder - One-click Python environment setup (uv)
+REM Downloads uv, installs Python 3.13 ARM64 native, creates venv in %LOCALAPPDATA%\QAIAppBuilder\envs, installs dependencies.
 
 REM NOTE: Do NOT use "chcp 65001" here - it causes cmd.exe to silently drop leading
 REM       characters from command output on some Windows versions (known OS bug).
 
 echo.
 echo  +--------------------------------------------------+
-echo  ^|   QAI ModelBuilder  -  Setup Python Environment  ^|
+echo  ^|   QAI AppBuilder  -  Setup Python Environment  ^|
 echo  +--------------------------------------------------+
 echo.
 
@@ -203,7 +203,7 @@ REM python.org build of THIS version into a private per-user dir we own and
 REM seeds the venv from it. Keep in lockstep with the pinned 3.13 pbs version;
 REM SIGNED_PY_SHA256 above is the python.org installer SHA-256 for this arch.
 set "SIGNED_PY_VERSION=3.13.14"
-set "SIGNED_PY_DIR=%LOCALAPPDATA%\QAIModelBuilder\python\3.13"
+set "SIGNED_PY_DIR=%LOCALAPPDATA%\QAIAppBuilder\python\3.13"
 REM Same fallback for the Step 8.1 x64 Python 3.10 CONVERTER venv: its uv-
 REM managed pbs interpreter is blocked by the identical policy. 3.10 is the
 REM last 3.10 with an official python.org Windows installer (security-only
@@ -211,7 +211,7 @@ REM branch); python.org publishes only MD5 for it, so no SHA-256 is pinned --
 REM integrity comes from the PSF Authenticode signature (empty SHA -> helper
 REM verifies the signature only).
 set "SIGNED_PY310_VERSION=3.10.11"
-set "SIGNED_PY310_DIR=%LOCALAPPDATA%\QAIModelBuilder\python\3.10"
+set "SIGNED_PY310_DIR=%LOCALAPPDATA%\QAIAppBuilder\python\3.10"
 set "SIGNED_PY310_SHA256="
 REM PY_INTERP: absolute path to a signed interpreter to seed venvs from. Empty
 REM = use the uv-managed PY_SPEC (normal path). Set by :ensure_signed_python
@@ -234,7 +234,7 @@ set "UV_BIN_DIR=data\bin\uv"
 set "UV_EXE=data\bin\uv\uv.exe"
 set "UV_URL=https://github.com/astral-sh/uv/releases/latest/download/uv-%UV_ARCH%-pc-windows-msvc.zip"
 set "UV_ZIP=data\downloads\_uv_tmp.zip"
-set "VENV_DIR=%LOCALAPPDATA%\QAIModelBuilder\envs\%VENV_DIR_NAME%"
+set "VENV_DIR=%LOCALAPPDATA%\QAIAppBuilder\envs\%VENV_DIR_NAME%"
 set "VENDOR_DIR=vendor"
 set "WHL_DIR=vendor\whl"
 REM Only ARM64-native wheels that PyPI does NOT provide (or has revoked
@@ -266,7 +266,7 @@ set "WHL_GRIMP=vendor\whl\grimp-3.14-cp313-cp313-win_arm64.whl"
 if not exist "data\bin\uv" mkdir "data\bin\uv"
 if not exist "data\bin\aria2c" mkdir "data\bin\aria2c"
 if not exist "data\bin\7zr" mkdir "data\bin\7zr"
-if not exist "%LOCALAPPDATA%\QAIModelBuilder\envs" mkdir "%LOCALAPPDATA%\QAIModelBuilder\envs"
+if not exist "%LOCALAPPDATA%\QAIAppBuilder\envs" mkdir "%LOCALAPPDATA%\QAIAppBuilder\envs"
 if not exist "%DL_DIR%" mkdir "%DL_DIR%"
 
 REM --- Step 0: Download aria2c if not present (needed for fast multi-thread downloads) ---
@@ -719,7 +719,7 @@ REM
 REM ``uv pip install -r pyproject.toml`` reads pyproject.toml
 REM [project].dependencies and installs all third-party runtime dependencies
 REM into the SHARED venv. It deliberately does NOT install the local
-REM ``qaimodelbuilder``/``qai`` package itself (no ``-e .`` / ``.``), and so
+REM ``qaiappbuilder``/``qai`` package itself (no ``-e .`` / ``.``), and so
 REM registers no console-script entry points (qai / qai-serve /
 REM qai-uninstall) -- the shared venv is used by every installation on this
 REM machine, so binding it to one project's source tree would make every
@@ -1048,7 +1048,7 @@ if not "%WITH_GIT%"=="1" (
     goto :git_done
 )
 
-set "PORTABLE_GIT_DIR=%LOCALAPPDATA%\QAIModelBuilder\git"
+set "PORTABLE_GIT_DIR=%LOCALAPPDATA%\QAIAppBuilder\git"
 set "GIT_VERSION=2.54.0"
 set "GIT_URL=https://github.com/git-for-windows/git/releases/download/v%GIT_VERSION%.windows.1/PortableGit-%GIT_VERSION%-%GIT_ARCH%.7z.exe"
 
@@ -1199,9 +1199,9 @@ REM ===========================================================================
 REM  Step 5b: Node.js (ARM64 portable) + pnpm  -- frontend build toolchain
 REM ===========================================================================
 REM Build.bat compiles the Vue/Vite WebUI with pnpm, which needs Node.js. We
-REM install a PORTABLE ARM64 Node into %LOCALAPPDATA%\QAIModelBuilder\node
+REM install a PORTABLE ARM64 Node into %LOCALAPPDATA%\QAIAppBuilder\node
 REM (same pattern as PortableGit: no system install, no admin; removed by
-REM Uninstall.bat together with the rest of %LOCALAPPDATA%\QAIModelBuilder).
+REM Uninstall.bat together with the rest of %LOCALAPPDATA%\QAIAppBuilder).
 REM pnpm is enabled via Node's bundled corepack. Idempotent: skips when
 REM node.exe + a pnpm shim are already present.
 echo.
@@ -1213,7 +1213,7 @@ if not "%WITH_FRONTEND%"=="1" (
 )
 
 set "NODE_VERSION=22.20.0"
-set "NODE_DIR=%LOCALAPPDATA%\QAIModelBuilder\node"
+set "NODE_DIR=%LOCALAPPDATA%\QAIAppBuilder\node"
 set "NODE_EXE=%NODE_DIR%\node.exe"
 set "NODE_URL=https://nodejs.org/dist/v%NODE_VERSION%/node-v%NODE_VERSION%-win-%NODE_ARCH%.zip"
 set "NODE_ZIP=%DL_DIR%\node-v%NODE_VERSION%-win-%NODE_ARCH%.zip"
@@ -1494,7 +1494,7 @@ echo  ================================================================
 echo.
 echo      *****   SETUP COMPLETED SUCCESSFULLY!   *****
 echo.
-echo      QAI ModelBuilder is fully installed and ready to use.
+echo      QAI AppBuilder is fully installed and ready to use.
 echo.
 echo  ================================================================
 echo.
@@ -1939,7 +1939,7 @@ exit /b 1
 
 :print_help
 echo.
-echo  QAIModelBuilder - Setup.bat
+echo  QAIAppBuilder - Setup.bat
 echo  Sets up the Python environment ^(uv + Python 3.13 venv^) and installs the
 echo  runtime dependencies. The DEFAULT install is the fast base runtime ^(run
 echo  pre-built models^). Heavy optional components are opt-in via the flags below.
@@ -2581,7 +2581,7 @@ echo  +----------------------------------------------------------+
 echo  ^|   Step 8: QAIRT model-builder environment                ^|
 echo  +----------------------------------------------------------+
 
-set "VENV_310_DIR=%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_x64_310"
+set "VENV_310_DIR=%LOCALAPPDATA%\QAIAppBuilder\envs\.venv_x64_310"
 set "SETUP_HELPER=scripts\setup\setup_qairt_env.py"
 set "ARIA2C_EXE=data\bin\aria2c\aria2c.exe"
 

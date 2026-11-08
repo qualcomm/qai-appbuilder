@@ -189,7 +189,7 @@ def build_router(*, container: "Container") -> APIRouter:
     @router.get("/build-info", response_model=BuildInfoResponse)
     async def build_info() -> BuildInfoResponse:
         return BuildInfoResponse(
-            name="qaimodelbuilder",
+            name="qaiappbuilder",
             version=_app_version(container.repo_root),
             edition=container.settings.edition,
             python_path=str(container.repo_root),

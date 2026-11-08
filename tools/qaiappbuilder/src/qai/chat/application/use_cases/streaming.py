@@ -673,7 +673,7 @@ _SESSION_WORKSPACE_SUBDIR = "sessions"
 #: application/use_cases/streaming.py`` -> five parents up). Named in the
 #: on-device prompt so a local model stops looking for the app it is
 #: running inside -- the failure mode this fixes is a model that tries to
-#: ``git clone`` / ``pip install`` "QAIModelBuilder" to find a file that is
+#: ``git clone`` / ``pip install`` "QAIAppBuilder" to find a file that is
 #: already on this disk.
 _LOCAL_APP_ROOT: str = str(Path(__file__).resolve().parents[5])
 
@@ -766,7 +766,7 @@ def _build_local_env_facts() -> str:
         "exact path (or whatever interpreter path a tool/skill explicitly "
         "hands you) when invoking `python`/`pip` via `exec`; do not search "
         "PATH or the filesystem for another interpreter.\n"
-        f"- QAIModelBuilder application root: `{_LOCAL_APP_ROOT}` (distinct "
+        f"- QAIAppBuilder application root: `{_LOCAL_APP_ROOT}` (distinct "
         "from your working directory below \u2014 this is where the application "
         "itself, not your task output, lives).\n"
         "- `exec` picks its shell per command. It switches to PowerShell for "

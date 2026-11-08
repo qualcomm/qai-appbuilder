@@ -52,7 +52,7 @@ def build_exec_env(*, guard_token: str | None = None, allow_x86: bool = False) -
       stdout is a pipe (otherwise full buffering loses ``print()`` output if the
       child is killed on timeout);
     * PortableGit's bin directories under
-      ``%LOCALAPPDATA%\\QAIModelBuilder\\git`` prepended to ``PATH`` — only the
+      ``%LOCALAPPDATA%\\QAIAppBuilder\\git`` prepended to ``PATH`` — only the
       directories that exist, in the order ``cmd`` / ``bin`` / **System32** /
       ``usr\\bin`` / ``clangarm64\\bin``. ``cmd`` is first so ``git`` resolves
       to the wrapper rather than the raw ``bin\\git.exe``; ``System32`` is
@@ -128,7 +128,7 @@ def build_exec_env(*, guard_token: str | None = None, allow_x86: bool = False) -
     #     must be corrected in V2, never carried forward.
     local_app_data = os.environ.get("LOCALAPPDATA", "")
     if local_app_data:
-        git_root = Path(local_app_data) / "QAIModelBuilder" / "git"
+        git_root = Path(local_app_data) / "QAIAppBuilder" / "git"
         system32 = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32"
         git_bin_candidates = [
             git_root / "cmd",

@@ -138,7 +138,7 @@ class SqliteConversationRepository:
 
         V1 parity: ``history_store.get_latest_wechat_conversation`` /
         ``get_latest_feishu_conversation``
-        (``QAIModelBuilder_v0.5_pure/backend/channels/.../history_store.py:363-405``)
+        (``QAIAppBuilder_v0.5_pure/backend/channels/.../history_store.py:363-405``)
         ::
 
             WHERE is_deleted = 0

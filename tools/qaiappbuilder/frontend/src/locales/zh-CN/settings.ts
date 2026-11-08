@@ -26,7 +26,7 @@ const settings = {
   subtitle: {
     agent: "Agent 循环调优与各子智能体档位的模型覆盖",
     aiCoding: "forge_config.json — AI 编程助手设置",
-    app: "forge_config.json — QAIModelBuilder 应用设置",
+    app: "forge_config.json — QAIAppBuilder 应用设置",
     claudeCode: "forge_config.json (claude_code) — Claude Code AI 编程助手设置",
     cloudModels: "cloud_models.json — 聊天界面云端模型目录",
     codingModes: "\"编程\"模式下各工作角色的系统提示词（仅云端模型生效）",

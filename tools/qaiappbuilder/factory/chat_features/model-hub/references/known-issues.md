@@ -26,7 +26,7 @@ import zipfile; zipfile.ZipFile("model.zip").extractall("out/")
 exec("ls C:/WoS_AI/", shell='sh')
 exec("grep -r pattern dir/", shell='sh')
 ```
-PortableGit is at `%LOCALAPPDATA%\QAIModelBuilder\git\`, available under `shell='sh'`.
+PortableGit is at `%LOCALAPPDATA%\QAIAppBuilder\git\`, available under `shell='sh'`.
 
 > ⚠️ **Do not use `dir | find /c`** — PortableGit's Unix `find` intercepts it. Use PowerShell `(Get-ChildItem <path>\*.raw).Count` or Python `glob`.
 

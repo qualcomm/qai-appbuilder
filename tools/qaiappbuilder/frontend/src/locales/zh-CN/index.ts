@@ -57,7 +57,7 @@ const index = {
     modelsDescShort: "查看可用模型列表",
     newDescFull: "<strong>保存</strong>当前会话历史后开启新会话，历史记录保留在 Chat 界面可查看。<br><em>回复：已开启新会话 ✨</em>",
     newDescShort: "保存当前会话后开启新会话",
-    rebootDescFull: "重启整个 QAIModelBuilder 服务，重启完成后微信和飞书通道将自动重连。<br><em>回复：系统正在重启，请稍候... 🔄</em>",
+    rebootDescFull: "重启整个 QAIAppBuilder 服务，重启完成后微信和飞书通道将自动重连。<br><em>回复：系统正在重启，请稍候... 🔄</em>",
     rebootFeishuDesc: "重启服务，重启后飞书通道自动重连",
     rebootWechatDesc: "重启服务，重启后微信通道自动重连",
     renameDescFull: "重命名当前会话。",

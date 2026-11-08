@@ -232,7 +232,7 @@ def _harden_master_key_acl(path: Path) -> None:
 
     * POSIX: ``os.chmod(path, 0o600)`` — owner read/write only.
     * Windows: **no-op**. The master key lives under
-      ``%LOCALAPPDATA%\\QAIModelBuilder\\...\\secrets\\``; the
+      ``%LOCALAPPDATA%\\QAIAppBuilder\\...\\secrets\\``; the
       per-user ``%LOCALAPPDATA%`` ACL already restricts access to the
       current user (the directory is created by Windows in a tree only
       the current user and SYSTEM can read by default), so we rely on

@@ -8,7 +8,7 @@
  * ErrorDiagnosticsPanel — App Builder 错误诊断面板（V1 行为对齐，V2 优良结构）。
  *
  * V1 真值（行为事实来源）：
- *   QAIModelBuilder_v1_pure/frontend/js/components/app-builder/DynamicOutput.js
+ *   QAIAppBuilder_v1_pure/frontend/js/components/app-builder/DynamicOutput.js
  *   :759-872（错误模板 6 段独立可折叠 + 每段 ⧉ 复制 + 底部 Copy diagnostics）
  *
  * 6 段诊断（缺则不渲染）：

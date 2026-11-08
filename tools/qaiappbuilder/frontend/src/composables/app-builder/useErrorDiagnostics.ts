@@ -7,7 +7,7 @@
  * useErrorDiagnostics — App Builder 错误诊断面板的纯逻辑层。
  *
  * V1 真值（行为事实来源）：
- *   QAIModelBuilder_v1_pure/frontend/js/components/app-builder/DynamicOutput.js
+ *   QAIAppBuilder_v1_pure/frontend/js/components/app-builder/DynamicOutput.js
  *   :236-275 (errorView computed) + :759-872 (错误模板)
  *
  * V1 把 6 段诊断字段（message / hint / stderr / runner logs / traceback /

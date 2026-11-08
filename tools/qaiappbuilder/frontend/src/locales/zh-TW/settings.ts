@@ -26,7 +26,7 @@ const settings = {
   subtitle: {
     agent: "Agent 迴圈調校與各子智能體檔位的模型覆蓋",
     aiCoding: "forge_config.json — AI 程式設計助手設定",
-    app: "forge_config.json — QAIModelBuilder 應用程式設定",
+    app: "forge_config.json — QAIAppBuilder 應用程式設定",
     claudeCode: "forge_config.json (claude_code) — Claude Code AI 程式設計助手設定",
     cloudModels: "cloud_models.json — 聊天介面雲端模型目錄",
     codingModes: "「編程」模式下各工作角色的系統提示詞（僅雲端模型生效）",

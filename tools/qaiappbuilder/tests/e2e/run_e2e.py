@@ -10,7 +10,7 @@ Standard library only, so it can be started by any Python 3.9+.
 Which Python runs what (the point: test in the SAME environment users run in):
 
 * the backend, and every child process the tests start, run on the PRODUCT venv
-  (``%LOCALAPPDATA%\\QAIModelBuilder\\envs\\.venv_*``), which is never modified;
+  (``%LOCALAPPDATA%\\QAIAppBuilder\\envs\\.venv_*``), which is never modified;
 * the pytest process itself ALSO runs on the product venv's interpreter, so the library
   versions under test are the product's.  The product venv has no pytest, so pytest and
   pytest-asyncio live in a separate runner venv (``data/e2e-runner-venv``, created on first
@@ -304,7 +304,7 @@ def find_backend_python(explicit: str | None) -> str | None:
         return explicit
     if os.environ.get("QAI_E2E_PYTHON"):
         return os.environ["QAI_E2E_PYTHON"]
-    base = Path(os.environ.get("LOCALAPPDATA", "")) / "QAIModelBuilder" / "envs"
+    base = Path(os.environ.get("LOCALAPPDATA", "")) / "QAIAppBuilder" / "envs"
     arm = platform.machine().lower() in ("arm64", "aarch64")
     for name in ((".venv_arm64_313", ".venv_x64_313") if arm else (".venv_x64_313", ".venv_arm64_313")):
         p = base / name / "Scripts" / "python.exe"
@@ -338,7 +338,7 @@ def preflight(test_py: str | None, backend_py: str | None, selected: list[str]) 
                             f"(pip install {' '.join(miss)})")
     if not backend_py:
         errs.append("no backend Python found; set QAI_E2E_PYTHON or --backend-python "
-                    "(the product venv, e.g. %LOCALAPPDATA%\\QAIModelBuilder\\envs\\.venv_arm64_313)")
+                    "(the product venv, e.g. %LOCALAPPDATA%\\QAIAppBuilder\\envs\\.venv_arm64_313)")
     elif not Path(backend_py).exists():
         errs.append(f"backend Python does not exist: {backend_py}")
     for port, what in PORTS.items():

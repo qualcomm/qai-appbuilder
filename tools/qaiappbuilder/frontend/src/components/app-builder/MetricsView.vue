@@ -7,7 +7,7 @@
 /**
  * MetricsView — App Builder performance metrics panel.
  *
- * V1 行为事实来源：`QAIModelBuilder_v1_pure/frontend/js/components/app-builder/MetricsView.js`
+ * V1 行为事实来源：`QAIAppBuilder_v1_pure/frontend/js/components/app-builder/MetricsView.js`
  * （完整 500 行；headline + 彩色 stage 堆叠条 + Device/Quantization 双列 +
  * Details 折叠区（stage 明细 + Model Load 一次性阶段 + p50/p90/std/peak memory/
  * model size）+ Aggregated 服务端聚合区块（latency typical/slow10/slowest 三列 +

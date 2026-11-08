@@ -7,7 +7,7 @@
  * useChatCommands — main-chat slash command system (V1 parity).
  *
  * Ported 1:1 from V1's verified logic in
- * `QAIModelBuilder_v1_pure/frontend/js/composables/useChat.js:1566-1929`
+ * `QAIAppBuilder_v1_pure/frontend/js/composables/useChat.js:1566-1929`
  * (alias table `_TOP_LEVEL_ALIASES` @1569, dispatch @1590-1926). The
  * command UX (echo bubble + textual reply bubble, alias normalization,
  * argument parsing, list/use indexing, status/compact text) follows V1

@@ -214,7 +214,7 @@ def run_inference(
     runtime: str = "Htp",
     log_level: int = 1,
 ):
-    # Auto-discover QAIModelBuilder env config
+    # Auto-discover QAIAppBuilder env config
     _apply_env_config(_find_qairt_env_config())
 
     model_path = os.path.abspath(model_path)

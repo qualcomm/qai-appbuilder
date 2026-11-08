@@ -254,7 +254,7 @@ class ConversationRepositoryPort(Protocol):
         existing signature changes).  Restores V1
         ``history_store.get_latest_wechat_conversation`` /
         ``get_latest_feishu_conversation``
-        (``QAIModelBuilder_v0.5_pure/backend/channels/.../history_store.py:363-405``):
+        (``QAIAppBuilder_v0.5_pure/backend/channels/.../history_store.py:363-405``):
         matches conversations whose ``meta`` carries the given
         ``{"source": ..., "channel_user_id": ...}`` pair, ordered by
         ``updated_at`` DESC, returning the newest non-archived one (or
@@ -1638,7 +1638,7 @@ class SystemPromptRequest:
     is_local_model: bool = False
     extra: dict[str, Any] | None = None
     skip_identity: bool = False
-    """Discussion-mode opt-in (additive, §3.1): skip the QAI ModelBuilder
+    """Discussion-mode opt-in (additive, §3.1): skip the QAI AppBuilder
     identity intro + the ``_MODEL_BUILD_FALLBACK`` routing block in the
     default branch (those are about *who QAI is* + V1 routing fallbacks).
     Keep everything else (skill_rule / tools_intro / Python env / workspace

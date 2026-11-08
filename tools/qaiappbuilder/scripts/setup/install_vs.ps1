@@ -4,7 +4,7 @@
 # ---------------------------------------------------------------------
 # =============================================================================
 # install_vs.ps1
-# QAIModelBuilder - Visual Studio 2022 Silent Installer
+# QAIAppBuilder - Visual Studio 2022 Silent Installer
 # =============================================================================
 #
 # Installs or updates Visual Studio 2022 Community with the components required

@@ -236,7 +236,7 @@ def _completion_chunk(
 
 
 def _normalize_usage_for_openai(usage: dict[str, Any]) -> dict[str, Any]:
-    """Map QAIModelBuilder's internal usage dict to a standard OpenAI usage
+    """Map QAIAppBuilder's internal usage dict to a standard OpenAI usage
     block for third-party clients (openai SDK / Cline / LangChain).
 
     Internal ``_extract_usage`` (llm_stream.py) zeroes the standard

@@ -133,7 +133,7 @@ const downloads = {
   resume: "Resume",
   retryBtn: "Retry",
   saveDir: "Save Directory",
-  saveDirDesc: "Download file save directory. Leave empty to use QAIModelBuilder/downloads/ (default).",
+  saveDirDesc: "Download file save directory. Leave empty to use QAIAppBuilder/downloads/ (default).",
   saveDirInputUnsafe: "Path contains non-ASCII characters or spaces. The downloaded GenieAPIService and models will not be loadable by the QNN backend. Please switch to a pure-English path without spaces.",
   saveDirUnsafeMsg: "Files will be saved to this path; GenieAPIService may fail to load after install.<br>Please change to a pure-English path without spaces in <a href=\"#\" @click.prevent=\"downloadSettingsExpanded = true\" style=\"color:#1a5fa8;font-weight:600;text-decoration:none\">Download Settings → Save Directory</a> below (e.g. <code style=\"background:rgba(0,0,0,0.08);padding:1px 4px;border-radius:3px;font-size:var(--text-xs)\">C:\\QAI\\downloads\\</code>).",
   saveDirUnsafeTitle: "Download save directory contains non-ASCII characters or spaces:",

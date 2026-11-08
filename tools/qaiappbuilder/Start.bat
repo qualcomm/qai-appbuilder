@@ -5,7 +5,7 @@ REM Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 REM SPDX-License-Identifier: BSD-3-Clause
 REM ---------------------------------------------------------------------
 
-REM Start.bat - Windows launcher for QAIModelBuilder (v2.7 / S9).
+REM Start.bat - Windows launcher for QAIAppBuilder (v2.7 / S9).
 REM
 REM Features:
 REM   1. PortableGit PATH injection (if installed)
@@ -45,7 +45,7 @@ setlocal EnableDelayedExpansion
 
 echo.
 echo  +------------------------------------------+
-echo  ^|   QAI ModelBuilder  -  Starting...       ^|
+echo  ^|   QAI AppBuilder  -  Starting...       ^|
 echo  +------------------------------------------+
 echo.
 
@@ -126,7 +126,7 @@ if not defined HOST_ARCH (
 )
 set "VENV_DIR_NAME=.venv_arm64_313"
 if /i "%HOST_ARCH%"=="x64" set "VENV_DIR_NAME=.venv_x64_313"
-set "VENV=%LOCALAPPDATA%\QAIModelBuilder\envs\%VENV_DIR_NAME%"
+set "VENV=%LOCALAPPDATA%\QAIAppBuilder\envs\%VENV_DIR_NAME%"
 set "PYTHON=%VENV%\Scripts\python.exe"
 
 REM Route Python bytecode caches out of the source tree into data\caches\pycache
@@ -135,7 +135,7 @@ REM git-ignored). %~dp0 has a trailing backslash so no extra separator is needed
 set "PYTHONPYCACHEPREFIX=%~dp0data\caches\pycache"
 
 REM -- 1. PortableGit PATH injection ------------------------------------------
-set "PORTABLE_GIT_DIR=%LOCALAPPDATA%\QAIModelBuilder\git"
+set "PORTABLE_GIT_DIR=%LOCALAPPDATA%\QAIAppBuilder\git"
 if exist "%PORTABLE_GIT_DIR%\cmd\git.exe" (
     set "PATH=%PORTABLE_GIT_DIR%\cmd;%PORTABLE_GIT_DIR%\usr\bin;%PATH%"
     echo [INFO] PortableGit added to PATH from %PORTABLE_GIT_DIR%\cmd
@@ -234,7 +234,7 @@ start "" /b cmd /c ""%PYTHON%" -m apps.cli._endpoint_helper wait-and-open --time
 
 REM -- 5. Launch the server in THIS console (foreground) ---------------------
 REM CRITICAL FIX (orphan daemon on window close):
-REM   Previously this used ``start "QAI ModelBuilder" cmd /k <command>`` which
+REM   Previously this used ``start "QAI AppBuilder" cmd /k <command>`` which
 REM   spawned the supervisor in a SEPARATE, NEW console window and let this
 REM   .bat exit immediately. That detached the supervisor from the window the
 REM   user actually launched from: closing the original/launch window sent NO

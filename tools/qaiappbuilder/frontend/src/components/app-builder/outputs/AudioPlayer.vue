@@ -8,7 +8,7 @@
  * AudioPlayer — TTS output viewer with waveform visualization, playback
  * controls, alignment token highlighting, and seek-to-time.
  *
- * V1 parity: QAIModelBuilder_v1_pure/frontend/js/components/app-builder/outputs/AudioPlayer.js
+ * V1 parity: QAIAppBuilder_v1_pure/frontend/js/components/app-builder/outputs/AudioPlayer.js
  *
  * Features:
  *   - Play/Pause button + custom waveform (canvas "lightning bolt" style)

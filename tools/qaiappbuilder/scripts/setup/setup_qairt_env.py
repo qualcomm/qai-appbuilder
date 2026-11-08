@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 """
-setup_qairt_env.py - QAIModelBuilder QAIRT Environment Setup Helper
+setup_qairt_env.py - QAIAppBuilder QAIRT Environment Setup Helper
 
 Handles environment detection, configuration generation, and verification
 for the model-builder integration.
@@ -183,7 +183,7 @@ def _detect_vs_cmake_path(vs_install_path: str) -> str:
 
 
 def _root_dir(override=None):
-    """Return QAIModelBuilder root directory."""
+    """Return QAIAppBuilder root directory."""
     if override:
         return Path(override).resolve()
     # This script lives in tools/, so root is one level up
@@ -216,14 +216,14 @@ def _resolve_venv(root, venv_name):
             Path(userprofile)
             / "AppData"
             / "Local"
-            / "QAIModelBuilder"
+            / "QAIAppBuilder"
             / "envs"
             / venv_name
         )
     local_app_data = os.environ.get("LOCALAPPDATA", "")
     if local_app_data:
         candidates.append(
-            Path(local_app_data) / "QAIModelBuilder" / "envs" / venv_name
+            Path(local_app_data) / "QAIAppBuilder" / "envs" / venv_name
         )
     candidates.append(Path(root) / "envs" / venv_name)
 
@@ -1388,8 +1388,8 @@ def main():
     # Declare globals before any use
     global QAIRT_SDK_VERSION, QAIRT_SDK_DEFAULT, QAIRT_DOWNLOAD_URL
 
-    parser = argparse.ArgumentParser(description="QAIModelBuilder QAIRT Environment Setup Helper")
-    parser.add_argument("--root", help="QAIModelBuilder root directory (default: parent of this script)")
+    parser = argparse.ArgumentParser(description="QAIAppBuilder QAIRT Environment Setup Helper")
+    parser.add_argument("--root", help="QAIAppBuilder root directory (default: parent of this script)")
     parser.add_argument("--sdk-root", help=f"QAIRT SDK root (default: {QAIRT_SDK_DEFAULT})")
     parser.add_argument("--sdk-version", help=f"QAIRT SDK version (default: {QAIRT_SDK_VERSION}). "
                         "Also sets QAIRT_VERSION env var for this process.")

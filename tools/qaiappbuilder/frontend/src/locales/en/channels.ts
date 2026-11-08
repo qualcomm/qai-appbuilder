@@ -159,7 +159,7 @@ const channels = {
     compactFull:
       "<strong>Immediately compact</strong> the current session's context using the 4-phase compaction engine.<br><em>Reply: ✅ Compacted: before → after tokens (savings, %)</em>",
     rebootFull:
-      "Restart the entire QAIModelBuilder service; WeChat and Feishu channels auto-reconnect after restart.<br><em>Reply: System restarting, please wait... 🔄</em>",
+      "Restart the entire QAIAppBuilder service; WeChat and Feishu channels auto-reconnect after restart.<br><em>Reply: System restarting, please wait... 🔄</em>",
   },
   help: "Help",
   settings: {

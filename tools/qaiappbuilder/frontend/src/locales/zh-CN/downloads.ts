@@ -133,7 +133,7 @@ const downloads = {
   resume: "继续",
   retryBtn: "🔄 重试",
   saveDir: "保存目录",
-  saveDirDesc: "下载文件的保存目录。留空则使用 QAIModelBuilder/downloads/（默认）。",
+  saveDirDesc: "下载文件的保存目录。留空则使用 QAIAppBuilder/downloads/（默认）。",
   saveDirInputUnsafe: "路径含中文或空格，下载后安装的 GenieAPIService 及模型将无法被 QNN 后端加载。请改为纯英文、无空格路径。",
   saveDirUnsafeMsg: "下载文件将保存到此路径，安装后 GenieAPIService 可能无法加载。请在下方 ⚙️ 下载设置 → 保存目录 中修改为纯英文、无空格的路径（如 C:\\QAI\\downloads\\）。",
   saveDirUnsafeTitle: "下载保存目录含中文或空格：",

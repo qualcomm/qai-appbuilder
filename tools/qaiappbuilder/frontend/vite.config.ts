@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------------
 
 // =============================================================================
-// Vite configuration — QAIModelBuilder new frontend
+// Vite configuration — QAIAppBuilder new frontend
 // Created in S1 PR-011, definitively shaped in S5 PR-050.
 //
 // Notes:

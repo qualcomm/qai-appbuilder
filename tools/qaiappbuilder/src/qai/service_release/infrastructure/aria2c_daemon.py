@@ -162,7 +162,7 @@ def _auto_install_aria2c(bin_dir: Path, proxy: str | None = None) -> str | None:
             handlers = [urllib.request.HTTPSHandler(context=ctx)]
         opener = urllib.request.build_opener(*handlers)
         req = urllib.request.Request(
-            url, headers={"User-Agent": "QAIModelBuilder/1.0"}
+            url, headers={"User-Agent": "QAIAppBuilder/1.0"}
         )
         with opener.open(req, timeout=120) as resp:
             zip_path.write_bytes(resp.read())

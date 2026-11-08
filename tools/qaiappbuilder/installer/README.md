@@ -1,12 +1,12 @@
-# QAI ModelBuilder 安装包
+# QAI AppBuilder 安装包
 
-用 Inno Setup 为每个架构各打一个 `.exe`:预编译的前端 + 桌面版窗口(`QAIModelBuilder.exe`)+ 后端源码 + `uv` + `aria2c`。
+用 Inno Setup 为每个架构各打一个 `.exe`:预编译的前端 + 桌面版窗口(`QAIAppBuilder.exe`)+ 后端源码 + `uv` + `aria2c`。
 安装时再联网建 Python 环境。**不含 QAIRT SDK、不含测试/文档/模型。**
 
 | 产物 | 说明 |
 |---|---|
-| `QAIModelBuilder-<ver>-qairt<A.B.C>-x64-setup.exe` | x64 / Windows-on-ARM 上跑 x64 都可用 |
-| `QAIModelBuilder-<ver>-qairt<A.B.C>-arm64-setup.exe` | 仅 ARM64 |
+| `QAIAppBuilder-<ver>-qairt<A.B.C>-x64-setup.exe` | x64 / Windows-on-ARM 上跑 x64 都可用 |
+| `QAIAppBuilder-<ver>-qairt<A.B.C>-arm64-setup.exe` | 仅 ARM64 |
 
 `<A.B.C>` 是该包对应的 QAIRT SDK 版本的前三段(例如 `2.48.40.260702` -> `qairt2.48.40`),与 qai_appbuilder 的 release 号一致。
 
@@ -17,7 +17,7 @@
 | 组件 | 用途 | 什么时候可以不装 |
 |---|---|---|
 | Node.js + pnpm | `Build.bat` 构建前端 | 已有 `frontend\dist`,打包时加 `-SkipFrontend` |
-| Rust + VS 2022 C++ 工具 + Windows SDK | 编译桌面版窗口 | 已有 `dist\desktop\<arch>\QAIModelBuilder.exe`,打包时加 `-SkipDesktop` |
+| Rust + VS 2022 C++ 工具 + Windows SDK | 编译桌面版窗口 | 已有 `dist\desktop\<arch>\QAIAppBuilder.exe`,打包时加 `-SkipDesktop` |
 | Inno Setup 6 | 生成安装包 | **必装** |
 | 能访问 pypi.org 的网络 | 取目标架构的 `uv.exe` | **必需** |
 
@@ -31,7 +31,7 @@ winget install OpenJS.NodeJS          # 装 Node.js(自带 npm)
 npm install -g pnpm@11.9.0            # 装与仓库一致的 pnpm 版本
 ```
 
-`Build.bat` 找 Node/pnpm 的顺序:先看 `%LOCALAPPDATA%\QAIModelBuilder\node\`(`Setup.bat --frontend` 装的便携版),找不到就用 PATH 上的。**所以上面两条命令装的系统版本就够用**,不需要跑 `Setup.bat --frontend`。
+`Build.bat` 找 Node/pnpm 的顺序:先看 `%LOCALAPPDATA%\QAIAppBuilder\node\`(`Setup.bat --frontend` 装的便携版),找不到就用 PATH 上的。**所以上面两条命令装的系统版本就够用**,不需要跑 `Setup.bat --frontend`。
 
 > 用 `npm install -g pnpm`,不要用 `corepack enable`:较新的 Node 不再自带 corepack。
 
@@ -120,26 +120,26 @@ Test-Path "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"    # True
 安装包输出到 `dist\installer\`,文件名为:
 
 ```
-QAIModelBuilder-<版本>-qairt<A.B.C>-<架构>-setup.exe
-例: QAIModelBuilder-3.2.0-qairt2.48.40-arm64-setup.exe
-    QAIModelBuilder-3.2.0-qairt2.48.40-x64-setup.exe
+QAIAppBuilder-<版本>-qairt<A.B.C>-<架构>-setup.exe
+例: QAIAppBuilder-3.2.0-qairt2.48.40-arm64-setup.exe
+    QAIAppBuilder-3.2.0-qairt2.48.40-x64-setup.exe
 ```
 
 - `<版本>` 取自 `build_info.json` 的 `version`(可用 `-Version` 覆盖);`<A.B.C>` 取自 `scripts\qairt_release.json` 里 QAIRT 版本的前三段。
-- 桌面版 exe 在 `dist\desktop\<arch>\QAIModelBuilder.exe`,暂存目录在 `.build\installer\stage_<arch>\`(默认打完即删,`-KeepStage` 保留)。
+- 桌面版 exe 在 `dist\desktop\<arch>\QAIAppBuilder.exe`,暂存目录在 `.build\installer\stage_<arch>\`(默认打完即删,`-KeepStage` 保留)。
 - `dist\installer\` 里旧版本的安装包不会被清理,发布前注意挑对版本。
 - 包里不含 `aria2c.exe`(`data\bin` 里没有时),安装时 `_setup_env.bat` 会联网下载。
 
-`-SkipDesktop` 用在**没有 Rust / VS C++ 工具的机器**上:把别处编好的 `dist\desktop\<arch>\QAIModelBuilder.exe` 拷过来,再加这个参数。对应的 exe 不存在时,在开始整理文件之前就报错。也可以单独编译桌面版:`.\desktop\build.ps1 -Arch both`(细节见 [`desktop/README.md`](../desktop/README.md))。
+`-SkipDesktop` 用在**没有 Rust / VS C++ 工具的机器**上:把别处编好的 `dist\desktop\<arch>\QAIAppBuilder.exe` 拷过来,再加这个参数。对应的 exe 不存在时,在开始整理文件之前就报错。也可以单独编译桌面版:`.\desktop\build.ps1 -Arch both`(细节见 [`desktop/README.md`](../desktop/README.md))。
 
 前置条件见上面的“准备构建环境”。
 
-输出在 `dist\installer\`(已被 `.gitignore`):`QAIModelBuilder-<ver>-qairt<A.B.C>-x64-setup.exe`、`QAIModelBuilder-<ver>-qairt<A.B.C>-arm64-setup.exe`,例如 `QAIModelBuilder-3.1.1-qairt2.48.40-x64-setup.exe`。
+输出在 `dist\installer\`(已被 `.gitignore`):`QAIAppBuilder-<ver>-qairt<A.B.C>-x64-setup.exe`、`QAIAppBuilder-<ver>-qairt<A.B.C>-arm64-setup.exe`,例如 `QAIAppBuilder-3.1.1-qairt2.48.40-x64-setup.exe`。
 
 ## 包里有什么(白名单)
 
 `src` `apps` `factory` `scripts` `interfaces` `skills` `frontend\dist` `pyproject.toml` `build_info.json`
-`desktop\QAIModelBuilder.exe`(桌面版窗口,见下)、`_setup_env.bat` `Start.bat` `qai.bat` `Console.bat` `Uninstall.bat` `clean_env.bat` 及 README,
+`desktop\QAIAppBuilder.exe`(桌面版窗口,见下)、`_setup_env.bat` `Start.bat` `qai.bat` `Console.bat` `Uninstall.bat` `clean_env.bat` 及 README,
 外加 `data\bin\uv\uv.exe`(**按目标架构**从 PyPI 取)、`data\bin\aria2c\aria2c.exe`,以及 **FileGuard 的 `vendor\bin\<arch>\guard64.dll`**(ARM64 另有 `guard-injector.exe`)和标记文件 `vendor\bin\guard.source`。
 
 guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 约 0.7 MB、ARM64 约 0.7 MB;整个 zip 有 30 MB,因为里面还带两个架构的 ast-grep)。`guard.source` 写的是 `_setup_env.bat` 自己会下载的那个 URL,脚本看到标记与 URL 一致且 dll 在,就跳过下载,所以**安装时不再联网下载 guard.zip**。来源顺序:`-GuardZip` 参数、`Downloads\guard.zip`、发布页 URL;都拿不到时只打印一行提示,安装时仍由 `_setup_env.bat` 下载。发布标签变了,改 `scripts\qairt_release.json` 的 `qairt_version` 后重新打包即可(guard.zip 的标签单独固定,见下);旧包里的标记和新标签不一致时,安装会重新下载并替换。
@@ -161,21 +161,21 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 
 ## 安装时发生什么
 
-1. 向导里选的是**上层目录**(默认 `%LOCALAPPDATA%\QAIModelBuilder`,免管理员,可改),程序固定装到它下面的 `app\` 子目录。
+1. 向导里选的是**上层目录**(默认 `%LOCALAPPDATA%\QAIAppBuilder`,免管理员,可改),程序固定装到它下面的 `app\` 子目录。
    `app\` 里只放本程序的东西(安装的文件 + 运行时生成的 `data\`、`models\`、`vendor\` 等),卸载程序 `unins000.exe` 也在里面。
    - 所选目录下的 `app\` 已有不是本程序装的文件:拒绝安装,提示换目录。
-   - 所选目录是旧版本的安装目录(旧版直接装在 `...\QAIModelBuilder\app` 里,没有再嵌套一层):拒绝安装,提示先卸载旧版。新旧目录结构不兼容。
+   - 所选目录是旧版本的安装目录(旧版直接装在 `...\QAIAppBuilder\app` 里,没有再嵌套一层):拒绝安装,提示先卸载旧版。新旧目录结构不兼容。
    - `app\` 里只剩上次卸载保留的 `data\`:允许覆盖安装,数据原样保留。
 2. 向导里可选:镜像(自动 / 官方 / 国内)、HTTP 代理。
 3. 执行 `_setup_env.bat --arch <arch> --no-pause --with-browser --with-astgrep [--mirror ..] [--proxy ..]`(**不带 `--builder`**;两个 `--with-*` 写在 `.iss` 的 `#define SetupComponents` 里,安装和"修复"快捷方式共用):
-   建 Python 3.13 运行时 venv(`%LOCALAPPDATA%\QAIModelBuilder\envs\`)、装依赖、初始化 `data\`。
+   建 Python 3.13 运行时 venv(`%LOCALAPPDATA%\QAIAppBuilder\envs\`)、装依赖、初始化 `data\`。
    ARM64 另外会在线下载 `vendor-deps.7z`(约 210 MB,来自 aidevhome.com),取其中除 `qai_appbuilder` 以外的 ARM64 wheel。
    - `--with-browser`:`search` extra(`playwright==1.61.0`、`selectolax`、`lxml`、`cssselect`、`browserforge`,来自 PyPI)+ `python -m playwright install chromium`。
      Chromium 来自 `cdn.playwright.dev`(国内档由 `net_config.ps1` 设 `PLAYWRIGHT_DOWNLOAD_HOST` 指向 npmmirror),装到 `%LOCALAPPDATA%\ms-playwright\`。失败不中断安装,只是浏览器工具不可用。
    - `--with-astgrep`:从 PyPI 的 `ast-grep-cli` 0.45.1 wheel 取出 `ast-grep.exe`、`sg.exe`(各约 49 MB)到 `vendor\bin\<arch>\`;PyPI 不通时回退 GitHub release。ARM64 上 `vendor-deps.7z` 已带这两个文件,会直接 `[SKIP]`。
    **不装**模型转换环境(`.venv_x64_310`)和 QAIRT SDK。
 4. 环境配置失败时,文件仍已安装;开始菜单有"修复 / 完成环境配置",重跑 `_setup_env.bat`,可断点续。
-5. 成功后可勾选"立即启动",打开**桌面版**窗口(`desktop\QAIModelBuilder.exe`)。开始菜单和桌面快捷方式也指向它;浏览器版仍然是安装目录里的 `Start.bat`(不再有快捷方式)。
+5. 成功后可勾选"立即启动",打开**桌面版**窗口(`desktop\QAIAppBuilder.exe`)。开始菜单和桌面快捷方式也指向它;浏览器版仍然是安装目录里的 `Start.bat`(不再有快捷方式)。
 
 ## QAIRT(模型转换)
 
@@ -205,7 +205,7 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 - x64 的 `qai_appbuilder` wheel 只在 GitHub release 上,无法访问 GitHub 时会装不上(`_setup_env.bat` 会给 `[ATTENTION]`)。
 - `ChineseSimplified.isl` 是社区翻译(kira-96/Inno-Setup-Chinese-Simplified-Translation),Inno 官方不再自带。
 
-## 桌面版窗口(`desktop\QAIModelBuilder.exe`)
+## 桌面版窗口(`desktop\QAIAppBuilder.exe`)
 
 一个 Tauri 2 + WebView2 的小壳(各架构分别编译、分别打入对应安装包),开始菜单和桌面快捷方式都指向它;浏览器版仍是安装目录里的 `Start.bat`(不再有快捷方式)。**前端和后端都没改**:窗口加载的就是后端提供的同一份 `http://localhost:8989/`。
 

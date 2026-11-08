@@ -141,7 +141,7 @@ def full_dist() -> dict:
 def test_every_ui_path_answers_the_maintenance_page_when_dist_is_missing(no_dist: dict, path: str) -> None:
     status, ctype, cache, body = no_dist[path]
     assert status == 503 and ctype == "text/html; charset=utf-8" and cache == NO_CACHE
-    assert "<title>QAIModelBuilder - service unavailable</title>" in body and "Web UI is not available" in body
+    assert "<title>QAIAppBuilder - service unavailable</title>" in body and "Web UI is not available" in body
 
 
 def test_the_maintenance_page_says_what_is_missing_and_that_the_api_still_runs(no_dist: dict) -> None:

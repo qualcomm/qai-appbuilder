@@ -7,7 +7,7 @@
 /**
  * ClassificationTable — image classification result viewer (V1 parity).
  *
- * V1 source: QAIModelBuilder_v1_pure/frontend/js/components/app-builder/outputs/ClassificationTable.js
+ * V1 source: QAIAppBuilder_v1_pure/frontend/js/components/app-builder/outputs/ClassificationTable.js
  * Renders predictions as a ranked table with:
  *   - rank column `#` (V1 :54)
  *   - top-1 row highlight via `ab-cls-top` (V1 :53)

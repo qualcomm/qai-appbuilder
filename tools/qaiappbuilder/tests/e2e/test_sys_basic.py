@@ -87,7 +87,7 @@ def test_sys01_all_shipped_migrations_were_applied(backend: Backend):
 
 def test_sys02_build_info(http: httpx.Client, backend: Backend):
     body = http.get("/api/system/build-info").json()
-    assert body["name"] == "qaimodelbuilder"
+    assert body["name"] == "qaiappbuilder"
     assert body["version"]  # non-empty
     assert body["edition"] in ("internal", "external")
     # Data isolation: the backend must report the TEMP data dir we gave it, not

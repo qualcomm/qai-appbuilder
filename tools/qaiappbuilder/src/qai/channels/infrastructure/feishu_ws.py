@@ -1670,7 +1670,7 @@ def _should_ignore_group_message_without_bot_mention(
     1. P2P messages are always accepted (return False).
     2. Group messages that explicitly mention **this** bot are accepted.
        The ``mentionedBot`` value emitted in the compatibility log below means
-       "this QAI ModelBuilder bot was mentioned", not "some arbitrary bot was
+       "this QAI AppBuilder bot was mentioned", not "some arbitrary bot was
        mentioned".
     3. Group @_all / @所有人 are accepted (bot is included in the broadcast).
        NOTE: Feishu does NOT populate ``mentions`` for @_all -- it embeds

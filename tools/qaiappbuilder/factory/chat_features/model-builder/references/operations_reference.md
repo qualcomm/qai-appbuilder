@@ -72,7 +72,7 @@ Ask via `question` tool:
 | Calibration | `calib\` |
 | Logs | `.\` |
 
-**FORBIDDEN:** paths with `QAIModelBuilder`; user home/Downloads; CWD outside `${WORKSPACE}\`.
+**FORBIDDEN:** paths with `QAIAppBuilder`; user home/Downloads; CWD outside `${WORKSPACE}\`.
 
 > ⚠️ SELF-CHECK: destination must start with `${WORKSPACE}\<model_name>\`. If not->STOP and fix.
 

@@ -108,16 +108,16 @@ goto parse_args
 
 echo.
 echo  +------------------------------------------+
-echo  ^|   QAI ModelBuilder  -  Building WebUI    ^|
+echo  ^|   QAI AppBuilder  -  Building WebUI    ^|
 echo  +------------------------------------------+
 echo.
 
 REM -- Node.js / pnpm PATH injection -----------------------------------------
-REM Setup.bat installs a portable host-arch Node into %LOCALAPPDATA%\QAIModelBuilder
+REM Setup.bat installs a portable host-arch Node into %LOCALAPPDATA%\QAIAppBuilder
 REM \node and enables pnpm there via corepack. Build.bat runs standalone (not
 REM through Setup.bat), so prepend that dir to PATH here too. If absent, fall
 REM back to whatever node/pnpm is already on PATH.
-set "NODE_DIR=%LOCALAPPDATA%\QAIModelBuilder\node"
+set "NODE_DIR=%LOCALAPPDATA%\QAIAppBuilder\node"
 if exist "%NODE_DIR%\node.exe" set "PATH=%NODE_DIR%;%PATH%"
 
 REM Disable corepack's interactive download prompt. The very first time
@@ -235,7 +235,7 @@ REM ===========================================================================
 :desktop
 echo.
 echo  +------------------------------------------+
-echo  ^|   QAI ModelBuilder  -  Building Desktop  ^|
+echo  ^|   QAI AppBuilder  -  Building Desktop  ^|
 echo  +------------------------------------------+
 echo.
 
@@ -326,7 +326,7 @@ REM  --help / -h / /?  (does nothing else; pure documentation)
 REM ===========================================================================
 :print_help
 echo.
-echo  QAIModelBuilder - Build.bat
+echo  QAIAppBuilder - Build.bat
 echo  Compiles the V2 WebUI frontend ^(Vue/Vite -^> frontend\dist^) and, with
 echo  --desktop, the Tauri desktop shell ^(desktop\src-tauri -^> installer^).
 echo  The Python backend is interpreted and needs NO build step; restart

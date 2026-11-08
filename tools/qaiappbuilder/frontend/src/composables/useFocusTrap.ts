@@ -6,7 +6,7 @@
 /**
  * useFocusTrap — modal focus-trap composable.
  *
- * V1 truth source: `QAIModelBuilder_v1_pure/frontend/js/utils/focus-trap.js`
+ * V1 truth source: `QAIAppBuilder_v1_pure/frontend/js/utils/focus-trap.js`
  * (`trapFocus(containerEl, opts)`). V1 behaviour distilled:
  *   1. Tab / Shift+Tab cycle focus within the container's focusable
  *      descendants (no escape to background while open).

@@ -47,7 +47,7 @@ pip install qai-appbuilder Pillow numpy
 
 ## Notes
 
-- All scripts auto-discover `data/config/qairt_env.json` (QAIModelBuilder integration)
+- All scripts auto-discover `data/config/qairt_env.json` (QAIAppBuilder integration)
 - Input format is **NHWC** (Height, Width, Channels) — scripts handle NCHW→NHWC conversion
 - Context binary (`.bin`) is **required** on `windows-arm64` for real HTP inference. On x64 hosts see `${APP_ROOT}/factory/chat_features/_shared/x64-host-notes.md` for `.bin` loading rules. `.dlc` works directly everywhere via `QNNContext`.
 - Use `infer_generic.py` for models without a specialized script

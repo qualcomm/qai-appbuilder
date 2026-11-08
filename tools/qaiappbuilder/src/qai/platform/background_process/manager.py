@@ -264,7 +264,7 @@ def _resolve_portable_git_shell(shell_name: str) -> str | None:
     ``qai.ai_coding``).
 
     State-Truth-First: Windows has no ``sh`` on PATH; the anchor is
-    ``%LOCALAPPDATA%\QAIModelBuilder\git``, matching Setup.bat / the
+    ``%LOCALAPPDATA%\QAIAppBuilder\git``, matching Setup.bat / the
     exec-tool env builder. Returns None when PortableGit is absent or
     ``LOCALAPPDATA`` is empty; callers fall back to the shell auto-picker.
 
@@ -283,7 +283,7 @@ def _resolve_portable_git_shell(shell_name: str) -> str | None:
     local_app_data = os.environ.get("LOCALAPPDATA", "")
     if not local_app_data:
         return None
-    git_root = Path(local_app_data) / "QAIModelBuilder" / "git"
+    git_root = Path(local_app_data) / "QAIAppBuilder" / "git"
     exe = f"{shell_name}.exe"
     candidates = [git_root / "bin" / exe, git_root / "usr" / "bin" / exe]
     for candidate in candidates:

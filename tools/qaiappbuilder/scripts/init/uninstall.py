@@ -13,17 +13,17 @@ What the script removes (DEFAULT)
 Rolls back what ``Setup.bat`` installed **outside** the project tree,
 plus OS-level side effects:
 
-1. **Running QAIModelBuilder processes** — graceful POST
+1. **Running QAIAppBuilder processes** — graceful POST
    ``/api/system/reboot`` (best-effort) → kill any ``python.exe`` whose
-   image path lives under ``%LOCALAPPDATA%\\QAIModelBuilder``.
-2. **Virtual envs + bundled tools** — ``%LOCALAPPDATA%\\QAIModelBuilder\\``
+   image path lives under ``%LOCALAPPDATA%\\QAIAppBuilder``.
+2. **Virtual envs + bundled tools** — ``%LOCALAPPDATA%\\QAIAppBuilder\\``
    recursively (covers ``.venv_arm64_313``, ``.venv_x64_313``,
    ``.venv_x64_310``, the WDAC-fallback signed Python under ``python\\3.13``
    and ``python\\3.10``, optional ``git/`` PortableGit, ``node/`` portable
    Node.js + pnpm). A signed Python REUSED from an existing system install
    outside this tree (e.g. a python.org build already registered elsewhere)
    is intentionally left untouched — it is not ours to remove.
-3. **Temp files** — ``%TEMP%\\QAIModelBuilder\\``.
+3. **Temp files** — ``%TEMP%\\QAIAppBuilder\\``.
 4. **Setup install-time temp archives** — whitelisted filenames under
    ``data/downloads/`` (PortableGit-*.7z.exe, node-v*.zip, _uv_tmp.zip,
    _qairt_tmp.zip, vendor-deps.7z, plus .aria2 control files; and aria2c
@@ -61,7 +61,7 @@ What ``--all`` ADDITIONALLY removes
   caches Step 6 pre-compiled. Re-running Setup.bat re-downloads
   ``vendor-deps.7z`` to repopulate these.
 * **``%TEMP%\\jieba.cache``** — jieba's flat cache file Step 6 warmup
-  produces (lives directly under %TEMP%, NOT under the QAIModelBuilder
+  produces (lives directly under %TEMP%, NOT under the QAIAppBuilder
   sub-tree, so it survives the default temp purge).
 
 What ``--all`` does NOT remove (and why)
@@ -95,7 +95,7 @@ What is NEVER removed
 Cross-platform
 --------------
 On non-Windows hosts the script removes the equivalent paths
-(``~/.local/share/QAIModelBuilder``, ``~/.cache/QAIModelBuilder``) and
+(``~/.local/share/QAIAppBuilder``, ``~/.cache/QAIAppBuilder``) and
 skips the Windows-specific stages (process kill via taskkill,
 QAIRT SDK).
 
@@ -131,8 +131,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # Canonical install locations (mirror of install_qairt.py).
-LOCALAPPDATA_QAI = Path("QAIModelBuilder")  # joined to %LOCALAPPDATA%
-TEMP_QAI = Path("QAIModelBuilder")          # joined to %TEMP%
+LOCALAPPDATA_QAI = Path("QAIAppBuilder")  # joined to %LOCALAPPDATA%
+TEMP_QAI = Path("QAIAppBuilder")          # joined to %TEMP%
 
 
 # Default QAIRT version — single source of truth: scripts/qairt_release.json
@@ -247,7 +247,7 @@ def _resolve_targets(repo_root: Path) -> UninstallTargets:
 
 
 def stop_running_processes(targets: UninstallTargets, *, dry_run: bool = False) -> None:
-    """Try to gracefully stop, then force-kill, QAIModelBuilder processes."""
+    """Try to gracefully stop, then force-kill, QAIAppBuilder processes."""
 
     # 1) Best-effort graceful shutdown via the API.
     #
@@ -444,7 +444,7 @@ def _robocopy_purge(path: Path) -> bool:
         return False
     # Use a unique temp dir (never inside the tree being purged) as the
     # empty mirror source. tempfile.mkdtemp avoids collisions and lands
-    # outside %LOCALAPPDATA%\QAIModelBuilder.
+    # outside %LOCALAPPDATA%\QAIAppBuilder.
     empty = Path(tempfile.mkdtemp(prefix="_qai_empty_uninstall_"))
     try:
         _run_quiet(
@@ -827,7 +827,7 @@ def clean_jieba_cache(*, dry_run: bool = False) -> None:
     """Remove ``%TEMP%\\jieba.cache`` written by Setup Step 6 jieba warmup.
 
     jieba writes a single flat cache file at ``%TEMP%\\jieba.cache``
-    (NOT under ``%TEMP%\\QAIModelBuilder\\``, so it is NOT cleaned by the
+    (NOT under ``%TEMP%\\QAIAppBuilder\\``, so it is NOT cleaned by the
     default temp purge). Removed under --all; jieba will rebuild it on
     next use.
     """
@@ -1307,7 +1307,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="uninstall",
         description=(
-            "Remove all QAIModelBuilder-generated content outside the "
+            "Remove all QAIAppBuilder-generated content outside the "
             "project directory. Replaces Uninstall.bat (P0-L3)."
         ),
     )
@@ -1376,7 +1376,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--skip-localappdata", action="store_true",
         help=(
-            "do NOT remove %%LOCALAPPDATA%%\\QAIModelBuilder (the venvs tree). "
+            "do NOT remove %%LOCALAPPDATA%%\\QAIAppBuilder (the venvs tree). "
             "Used by Uninstall.bat when this script runs *from* the venv "
             "python.exe inside that tree: deleting the tree would fail with "
             "WinError 5 (the running interpreter image is locked). The .bat "
@@ -1452,17 +1452,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         # python.exe running THIS script may live inside it (a running EXE
         # image is locked on Windows -> shutil.rmtree would hit WinError 5).
         _info(
-            f"QAIModelBuilder envs (LOCALAPPDATA): deferred to Uninstall.bat "
+            f"QAIAppBuilder envs (LOCALAPPDATA): deferred to Uninstall.bat "
             f"(post-exit): {targets.localappdata_qai}"
         )
     else:
         remove_directory(
             targets.localappdata_qai,
-            label="QAIModelBuilder envs (LOCALAPPDATA)",
+            label="QAIAppBuilder envs (LOCALAPPDATA)",
             dry_run=args.dry_run,
         )
     remove_directory(
-        targets.temp_qai, label="QAIModelBuilder temp", dry_run=args.dry_run
+        targets.temp_qai, label="QAIAppBuilder temp", dry_run=args.dry_run
     )
     # Default-clean: data/bin tooling + uv-managed Python interpreters.
     clean_data_bin(repo, dry_run=args.dry_run)

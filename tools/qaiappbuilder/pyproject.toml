@@ -1,5 +1,5 @@
 # =============================================================================
-# QAIModelBuilder — root pyproject.toml
+# QAIAppBuilder — root pyproject.toml
 # Created in S1 PR-011 (Clean Cutover refactor; refactor-plan v2.5 §15.1)
 # Python: 3.12+ / Node: 22+ (see frontend/package.json)
 # Package layout: src layout. Sources at src/qai/, apps/, interfaces/.
@@ -13,16 +13,16 @@ build-backend = "hatchling.build"
 # Project metadata
 # -----------------------------------------------------------------------------
 [project]
-name = "qaimodelbuilder"
+name = "qaiappbuilder"
 # PEP 440 normalised form so ``pip install -e .`` does not rewrite the
 # string under our feet — keeps ``info.version`` in the OpenAPI snapshot
 # stable across plain checkouts and editable installs (PR-074 §11 #5).
 version = "0.0.0.dev0"
-description = "QAIModelBuilder — local-first AI workspace (Clean Architecture rewrite)"
+description = "QAIAppBuilder — local-first AI workspace (Clean Architecture rewrite)"
 readme = "README.md"
 requires-python = ">=3.12,<4.0"
 license = { text = "Proprietary" }
-authors = [{ name = "QAIModelBuilder team" }]
+authors = [{ name = "QAIAppBuilder team" }]
 keywords = ["ai", "qai", "fastapi", "vue", "vite", "qualcomm", "qairt"]
 classifiers = [
   "Development Status :: 3 - Alpha",

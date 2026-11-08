@@ -49,7 +49,7 @@ def main() -> int:
     subdir = "arm64x-windows-msvc" if host_arch == "arm64" else "x86_64-windows-msvc"
     arch_val = "aarch64" if host_arch == "arm64" else "x86_64"
     local_app_data = os.environ.get("LOCALAPPDATA", "")
-    expected_venv = os.path.join(local_app_data, "QAIModelBuilder", "envs", venv_name)
+    expected_venv = os.path.join(local_app_data, "QAIAppBuilder", "envs", venv_name)
 
     changed = False
 

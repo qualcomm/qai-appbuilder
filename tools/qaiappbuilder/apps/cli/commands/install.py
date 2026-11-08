@@ -122,9 +122,9 @@ def register(subparsers: argparse._SubParsersAction) -> None:
 
     uninstall = subparsers.add_parser(
         "uninstall",
-        help="uninstall QAIModelBuilder (delegates to scripts.init.uninstall)",
+        help="uninstall QAIAppBuilder (delegates to scripts.init.uninstall)",
         description=(
-            "Remove the install tree under %LOCALAPPDATA%\\QAIModelBuilder. "
+            "Remove the install tree under %LOCALAPPDATA%\\QAIAppBuilder. "
             "All flags forwarded verbatim — see ``qai uninstall --help`` "
             "for the full surface (``-y`` / ``--dry-run`` / ``--clean-uv`` "
             "etc.)."

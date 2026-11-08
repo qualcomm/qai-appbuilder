@@ -142,7 +142,7 @@ function clamp(n: number, min: number, max: number): number {
             class="dc-settings__input"
             :class="{ 'is-unsafe': isSaveDirUnsafe }"
             :value="settings.save_dir"
-            placeholder="(default: QAIModelBuilder/downloads/)"
+            placeholder="(default: QAIAppBuilder/downloads/)"
             spellcheck="false"
             @input="(e) => patch({ save_dir: (e.target as HTMLInputElement).value })"
           />

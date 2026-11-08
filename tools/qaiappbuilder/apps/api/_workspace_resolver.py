@@ -141,13 +141,13 @@ def resolve_global_allow_paths(container: "Container") -> tuple[str, ...]:
     independent) prefixes only:
 
     1. the runtime data root + its sibling models root — ``data_paths.root``
-       (== ``<repo_root>/data`` in dev, ``%LOCALAPPDATA%\\QAIModelBuilder\\data``
+       (== ``<repo_root>/data`` in dev, ``%LOCALAPPDATA%\\QAIAppBuilder\\data``
        on an installed user machine) + ``data_paths.root.parent / "models"``.
        This is the data directory THIS process actually reads/writes
        (``container.data_paths.root`` — the single truth source), so runtime
        config / blobs / models under it are never prompted, for ANY session.
-    2. the per-user data/models roots — ``%LOCALAPPDATA%/QAIModelBuilder/data``
-       + ``%LOCALAPPDATA%/QAIModelBuilder/models`` — using
+    2. the per-user data/models roots — ``%LOCALAPPDATA%/QAIAppBuilder/data``
+       + ``%LOCALAPPDATA%/QAIAppBuilder/models`` — using
        :func:`qai.platform.config.paths.resolve_localappdata_qai_root` (the
        pair is skipped when ``LOCALAPPDATA`` is unset — non-Windows / stripped
        environments);
@@ -209,7 +209,7 @@ def resolve_global_allow_paths(container: "Container") -> tuple[str, ...]:
         _add(str(dr))
         _add(str(dr.parent / "models"))
 
-    # 2) %LOCALAPPDATA%/QAIModelBuilder/{data,models} (skipped if env unset)
+    # 2) %LOCALAPPDATA%/QAIAppBuilder/{data,models} (skipped if env unset)
     try:
         appdata_root = resolve_localappdata_qai_root()
     except Exception:  # noqa: BLE001

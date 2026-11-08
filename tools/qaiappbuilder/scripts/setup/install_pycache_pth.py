@@ -49,7 +49,7 @@ from pathlib import Path
 
 _PTH_NAME = "_qai_pycache_prefix.pth"
 
-# Structural markers that identify the QAIModelBuilder repo root (AGENTS.md §5
+# Structural markers that identify the QAIAppBuilder repo root (AGENTS.md §5
 # 铁律4 — locate by structure, never a fixed "up N levels" assumption).
 _REPO_MARKERS = ("Setup.bat", "src/qai", "apps")
 

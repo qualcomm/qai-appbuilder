@@ -4,7 +4,7 @@
 
 ## 常用字段
 
-- **保存目录（Save Dir）**：模型解压后放到哪里。**尽量避免路径里出现空格 / 中文 / 特殊字符**——QNN runtime 加载有些插件时会因非 ASCII 路径静默失败。默认值 `QAIModelBuilder/downloads/` 是安全的。
+- **保存目录（Save Dir）**：模型解压后放到哪里。**尽量避免路径里出现空格 / 中文 / 特殊字符**——QNN runtime 加载有些插件时会因非 ASCII 路径静默失败。默认值 `QAIAppBuilder/downloads/` 是安全的。
 - **Version list URL**：版本清单的 JSON 地址（默认指向本项目 GitHub Release）。私有镜像时可以改成自建的 HTTPS/HTTP 地址。
 - **Catalog URL**：目录（可下载模型列表）JSON 地址。
 - **fetch_timeout / download_timeout**：分别控制"抓清单"和"下载单个文件"的超时秒数。

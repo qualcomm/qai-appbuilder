@@ -469,7 +469,7 @@ def step1_convert(python: str, sdk: str, onnx: str, output_dir: str,
     print(f"[CMD] {shlex.join(cmd)}")
     # Bug 8 fix: set cwd=output_dir so qnn-onnx-converter and any tool it
     # spawns use output_dir as their working directory.  Without this the
-    # subprocess inherits the server process CWD (QAIModelBuilder/backend/),
+    # subprocess inherits the server process CWD (QAIAppBuilder/backend/),
     # which causes qnn-context-binary-generator to create a stray ./output/
     # directory there instead of (or in addition to) the intended output_dir.
     r = subprocess.run(cmd, cwd=output_dir)
@@ -554,7 +554,7 @@ def step3_context_binary(python: str, script_dir: str, sdk: str,
     # qnn-context-binary-generator it spawns) use output_dir as their CWD.
     # The generator defaults --output_dir to ./output and creates that
     # directory at startup regardless of the --output_dir flag; without an
-    # explicit cwd it falls back to the server CWD (QAIModelBuilder/backend/)
+    # explicit cwd it falls back to the server CWD (QAIAppBuilder/backend/)
     # and creates a stray backend/output/ directory.
     # qai_dev_gen_contextbin.py exits with non-zero if either preflight gate
     # fails (VS ARM64 env or HTP files missing).  For the generator itself,

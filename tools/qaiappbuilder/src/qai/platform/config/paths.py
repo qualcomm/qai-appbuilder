@@ -38,7 +38,7 @@ from typing import Final
 # a single module constant so every consumer (installer, git bootstrap,
 # secret store, FileGuard whitelist) resolves the SAME directory name — the
 # runtime data root the ARM64 venv + ``Setup.bat`` create.
-LOCALAPPDATA_QAI_DIRNAME: Final[str] = "QAIModelBuilder"
+LOCALAPPDATA_QAI_DIRNAME: Final[str] = "QAIAppBuilder"
 
 # Recognised top-level subdirectories. Anything else is rejected to keep
 # the layout disciplined.
@@ -279,7 +279,7 @@ class DataPaths:
 
 
 def resolve_localappdata_qai_root() -> Path | None:
-    """Resolve ``%LOCALAPPDATA%\\QAIModelBuilder`` (the per-user data root).
+    """Resolve ``%LOCALAPPDATA%\\QAIAppBuilder`` (the per-user data root).
 
     This is the single shared resolver for the per-user application data
     namespace (previously resolved ad-hoc via

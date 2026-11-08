@@ -69,7 +69,7 @@ Or use the standalone script in this directory:
   "${APP_ROOT}\factory\chat_features\model-hub\models\beit\infer_beit.py"
 ```
 
-> `<python_arm64_venv>` is a placeholder: on ARM64 hosts (`windows-arm64` / `linux-aarch64`) read it from `python_arm64_venv` in `${APP_ROOT}\data\config\qairt_env.json`; on x64 hosts (`windows-x64` / `linux-x64`) read it from `python_runtime_venv` in the same file. Do not hardcode it. `${APP_ROOT}` = QAIModelBuilder repo root. Per-platform inference routing → `${APP_ROOT}/factory/chat_features/_shared/qnn-inference-routing.md`.
+> `<python_arm64_venv>` is a placeholder: on ARM64 hosts (`windows-arm64` / `linux-aarch64`) read it from `python_arm64_venv` in `${APP_ROOT}\data\config\qairt_env.json`; on x64 hosts (`windows-x64` / `linux-x64`) read it from `python_runtime_venv` in the same file. Do not hardcode it. `${APP_ROOT}` = QAIAppBuilder repo root. Per-platform inference routing → `${APP_ROOT}/factory/chat_features/_shared/qnn-inference-routing.md`.
 
 ---
 

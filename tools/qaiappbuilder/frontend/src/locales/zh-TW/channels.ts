@@ -157,7 +157,7 @@ const channels = {
     compactFull:
       "<strong>立即壓縮</strong>目前會話的上下文（四階段壓縮引擎）。<br><em>回覆：✅ 壓縮完成：before → after tokens（節省 xxx，xx%）</em>",
     rebootFull:
-      "重新啟動整個 QAIModelBuilder 服務，重新啟動完成後微信和飛書通道將自動重連。<br><em>回覆：系統正在重新啟動，請稍候... 🔄</em>",
+      "重新啟動整個 QAIAppBuilder 服務，重新啟動完成後微信和飛書通道將自動重連。<br><em>回覆：系統正在重新啟動，請稍候... 🔄</em>",
   },
   help: "說明",
   settings: {

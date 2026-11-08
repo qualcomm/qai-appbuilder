@@ -26,7 +26,7 @@ const settings = {
   subtitle: {
     agent: "Agent loop tuning and per-profile sub-agent model overrides",
     aiCoding: "forge_config.json — AI coding assistant settings",
-    app: "forge_config.json — QAIModelBuilder application settings",
+    app: "forge_config.json — QAIAppBuilder application settings",
     claudeCode: "forge_config.json (claude_code) — Claude Code AI coding assistant settings",
     cloudModels: "cloud_models.json — Chat interface cloud model catalog",
     codingModes: "System prompts for the Coding mode personas (cloud models only)",

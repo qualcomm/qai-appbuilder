@@ -455,7 +455,7 @@ if exist "%REPO_ROOT%\factory\chat_features\app-builder\models\" set "APP_BUILDE
 if exist "%REPO_ROOT%\data\app_builder\user_model_weights\" set "APP_BUILDER_USER_MODEL_ROOT=%REPO_ROOT%\data\app_builder\user_model_weights"
 if exist "%REPO_ROOT%\data\app_builder\user_models\" set "APP_BUILDER_USER_PACK_ROOT=%REPO_ROOT%\data\app_builder\user_models"
 
-REM Prefer QAI ModelBuilder host-arch venv; fall back to PATH python.
+REM Prefer QAI AppBuilder host-arch venv; fall back to PATH python.
 REM Priority: 1) data\config\host_arch file  2) PROCESSOR_ARCHITECTURE detection
 REM ensure_deps.py self-heals missing packages.
 set "VENV_NAME=.venv_arm64_313"
@@ -466,7 +466,7 @@ if exist "%REPO_ROOT%\data\config\host_arch" (
     if /i "%PROCESSOR_ARCHITECTURE%"=="AMD64" set "VENV_NAME=.venv_x64_313"
     if /i "%PROCESSOR_ARCHITEW6432%"=="AMD64" set "VENV_NAME=.venv_x64_313"
 )
-set "PY=%LOCALAPPDATA%\QAIModelBuilder\envs\%VENV_NAME%\Scripts\python.exe"
+set "PY=%LOCALAPPDATA%\QAIAppBuilder\envs\%VENV_NAME%\Scripts\python.exe"
 if not exist "%PY%" set "PY=python"
 
 REM Startup dep check — abort on failure rather than starting broken server.
@@ -515,7 +515,7 @@ if (Test-Path -LiteralPath $HostArchFile -PathType Leaf) {
 } else {
     $VenvName = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { '.venv_arm64_313' } else { '.venv_x64_313' }
 }
-$Py = "$env:LOCALAPPDATA\QAIModelBuilder\envs\$VenvName\Scripts\python.exe"
+$Py = "$env:LOCALAPPDATA\QAIAppBuilder\envs\$VenvName\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $Py)) { $Py = "python" }
 # Startup dependency check (reads requirements.txt, installs missing, runs pack
 # predeploy hooks). Abort on failure with the message it printed.
@@ -547,7 +547,7 @@ python3 -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
 
 ### `README.md`
 
-Write a README in the app dir covering: how to run (host UI or manual `run.bat`), required model IDs + weight paths, input/output format, known limitations, and a **packaging note**: the zip is NOT fully offline — target needs a QAI ModelBuilder Python env (Python + `qai_appbuilder` + QNN runtime; zip does not bundle them).
+Write a README in the app dir covering: how to run (host UI or manual `run.bat`), required model IDs + weight paths, input/output format, known limitations, and a **packaging note**: the zip is NOT fully offline — target needs a QAI AppBuilder Python env (Python + `qai_appbuilder` + QNN runtime; zip does not bundle them).
 
 ---
 

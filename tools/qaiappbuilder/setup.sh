@@ -22,7 +22,7 @@ for arg in "$@"; do
       cat <<'EOF'
 Usage: bash setup.sh [--frontend]
 
-Set up QAI ModelBuilder on Linux. Frontend installation and build are skipped
+Set up QAI AppBuilder on Linux. Frontend installation and build are skipped
 by default; pass --frontend to bootstrap project-local Node/pnpm and build it.
 
 Options:
@@ -480,7 +480,7 @@ PYTHONPATH="$REPO_ROOT/src:$REPO_ROOT" \
 # ---------------------------------------------------------------------------
 echo ""
 echo "============================================================"
-echo "  QAIModelBuilder setup complete"
+echo "  QAIAppBuilder setup complete"
 echo "  Architecture : $ARCH"
 echo "  Python       : $($PYTHON --version)"
 echo "  Venv         : $VENV (Python 3.12, main backend)"

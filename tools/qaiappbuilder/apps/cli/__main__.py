@@ -103,7 +103,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="qai",
         description=(
-            "QAIModelBuilder unified CLI — one entry point for every "
+            "QAIAppBuilder unified CLI — one entry point for every "
             "operator-facing command (config, model packs, channels, "
             "security, run history, etc.). See ``qai <group> --help`` "
             "for per-group documentation."

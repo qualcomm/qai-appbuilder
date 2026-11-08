@@ -95,7 +95,7 @@ class UpstreamModelFetcher:
         """Make the HTTP GET to the upstream /models endpoint."""
         url = f"{self._base_url}/models"
         headers: dict[str, str] = {
-            "User-Agent": "QAIModelBuilder/2.0",
+            "User-Agent": "QAIAppBuilder/2.0",
         }
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
