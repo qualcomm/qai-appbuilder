@@ -141,8 +141,37 @@ $AbBase = "https://github.com/qualcomm/qai-appbuilder/releases/download/v$AbTag"
 foreach ($w in "qai_appbuilder-$AbTag.1-cp313-cp313-win_amd64.whl", "qai_appbuilder-$AbTag-cp313-cp313-win_arm64.whl") {
     if ($Arch -eq 'x64' -and $w -like '*arm64*') { continue }
     if ($Arch -eq 'arm64' -and $w -like '*amd64*') { continue }
-    try { $null = Invoke-WebRequest -Uri "$AbBase/$w" -Method Head -UseBasicParsing -TimeoutSec 60 -MaximumRedirection 5 }
-    catch { Fail "qai_appbuilder wheel not found online: $AbBase/$w  ($($_.Exception.Message.Split("`n")[0]))  - wrong -QairtVersion, or no access to github.com." }
+    # Ask the GitHub API for the release's asset list first (one small JSON request). The download URL itself is a
+    # 302 to a CDN that some networks answer with 504 when the redirect is followed, so it is only the fallback.
+    if ($null -eq $script:AbAssets) {
+        $script:AbAssets = @()
+        try {
+            $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/qualcomm/qai-appbuilder/releases/tags/v$AbTag" -TimeoutSec 60
+            $script:AbAssets = @($rel.assets | ForEach-Object { [string]$_.name })
+        } catch {
+            $code = 0; try { $code = [int]$_.Exception.Response.StatusCode } catch { }
+            if ($code -eq 404) { Fail "qai_appbuilder release v$AbTag not found on GitHub - wrong -QairtVersion?" }
+            Write-Host "[WARN] GitHub API not reachable ($($_.Exception.Message.Split("`n")[0])); checking the download URLs instead."
+        }
+    }
+    if ($script:AbAssets.Count -gt 0) {
+        if ($script:AbAssets -notcontains $w) { Fail "qai_appbuilder wheel $w is not in release v$AbTag - wrong -QairtVersion?" }
+        Info "wheel ok: $w"
+        continue
+    }
+    # Fallback: HEAD the download URL. 5xx / timeouts are retried; a 404 fails at once.
+    $ok = $false; $err = ''
+    for ($try = 1; $try -le 6 -and -not $ok; $try++) {
+        try { $null = Invoke-WebRequest -Uri "$AbBase/$w" -Method Head -UseBasicParsing -TimeoutSec 60 -MaximumRedirection 5; $ok = $true }
+        catch {
+            $err = $_.Exception.Message.Split("`n")[0]
+            $code = 0; try { $code = [int]$_.Exception.Response.StatusCode } catch { }
+            if ($code -ge 400 -and $code -lt 500) { break }
+            Write-Host "[WARN] wheel check $try/6 failed ($err); retrying ..."
+            Start-Sleep -Seconds (5 * $try)
+        }
+    }
+    if (-not $ok) { Fail "qai_appbuilder wheel not found online: $AbBase/$w  ($err)  - wrong -QairtVersion, or no access to github.com." }
     Info "wheel ok: $w"
 }
 
