@@ -635,23 +635,43 @@ goto :uv_retry_run
 echo [WARN] %_UR_LABEL%: not switching source ^(forced with --mirror, or QAI_NO_SOURCE_SWITCH=1^).
 exit /b %_UR_RC%
 
-REM :ensure_aria2c - optional multi-connection downloader (~2.5MB); non-fatal. Reuses PATH copy.
+REM :ensure_aria2c - optional multi-connection downloader (~2MB); non-fatal. Reuses a PATH copy of the right arch.
+REM The binary must match HOST_ARCH: aria2 upstream only publishes x64, so arm64 uses the minnyres build (the same
+REM URL as src\qai\service_release\infrastructure\aria2c_daemon.py). An existing copy of the wrong arch (e.g. an x64
+REM aria2c left by an older setup on an arm64 machine) is deleted and replaced, never reused.
 :ensure_aria2c
-if exist "data\bin\aria2c\aria2c.exe" ( echo [SKIP] aria2c already present. & exit /b 0 )
+set "_ARIA_EXE=data\bin\aria2c\aria2c.exe"
+if /i "%HOST_ARCH%"=="arm64" (
+    set "_ARIA_URL=https://github.com/minnyres/aria2-windows-arm64/releases/download/v1.37.0/aria2_1.37.0_arm64.zip"
+) else (
+    set "_ARIA_URL=https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip"
+)
+if exist "%_ARIA_EXE%" (
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\check_pe_arch.ps1" -Path "%_ARIA_EXE%" -Arch %HOST_ARCH%
+    if not errorlevel 1 ( echo [SKIP] aria2c already present. & exit /b 0 )
+    echo [INFO] replacing aria2c with the %HOST_ARCH% build.
+    del /f /q "%_ARIA_EXE%" 2>nul
+)
 if not exist "data\bin\aria2c" mkdir "data\bin\aria2c"
 set "_ARIA_PATH="
 for /f "delims=" %%A in ('where aria2c.exe 2^>nul') do if not defined _ARIA_PATH set "_ARIA_PATH=%%A"
 if defined _ARIA_PATH (
-    copy /y "%_ARIA_PATH%" "data\bin\aria2c\aria2c.exe" >nul
-    if exist "data\bin\aria2c\aria2c.exe" ( echo [SKIP] using aria2c from PATH. & exit /b 0 )
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\check_pe_arch.ps1" -Path "%_ARIA_PATH%" -Arch %HOST_ARCH% -Quiet
+    if not errorlevel 1 (
+        copy /y "%_ARIA_PATH%" "%_ARIA_EXE%" >nul
+        if exist "%_ARIA_EXE%" ( echo [SKIP] using aria2c from PATH. & exit /b 0 )
+    )
 )
-echo [INFO] downloading aria2c ^(multi-connection downloader, ~2.5MB^)...
+echo [INFO] downloading aria2c %HOST_ARCH% ^(multi-connection downloader, ~2MB^)...
 set "DL_ZIPTEST=1"
-call :dl "https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip" "%DL_DIR%\_aria2c_tmp.zip" 1000000 180
+call :dl "%_ARIA_URL%" "%DL_DIR%\_aria2c_tmp.zip" 1000000 180
 if errorlevel 1 ( echo [WARN] aria2c unavailable; using single-thread download. & exit /b 0 )
-powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path '%DL_DIR%\_aria2c_tmp.zip' -DestinationPath '%DL_DIR%\_aria2c_tmp' -Force; Get-ChildItem '%DL_DIR%\_aria2c_tmp' -Recurse -Filter aria2c.exe | Copy-Item -Destination 'data\bin\aria2c\aria2c.exe' -Force; Remove-Item '%DL_DIR%\_aria2c_tmp' -Recurse -Force"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Expand-Archive -Path '%DL_DIR%\_aria2c_tmp.zip' -DestinationPath '%DL_DIR%\_aria2c_tmp' -Force; Get-ChildItem '%DL_DIR%\_aria2c_tmp' -Recurse -Filter aria2c.exe | Select-Object -First 1 | Copy-Item -Destination 'data\bin\aria2c\aria2c.exe' -Force; Remove-Item '%DL_DIR%\_aria2c_tmp' -Recurse -Force"
 del /f /q "%DL_DIR%\_aria2c_tmp.zip" 2>nul
-if exist "data\bin\aria2c\aria2c.exe" ( echo [OK] aria2c ready. ) else ( echo [WARN] aria2c unpack failed; using single-thread download. )
+if not exist "%_ARIA_EXE%" ( echo [WARN] aria2c unpack failed; using single-thread download. & exit /b 0 )
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\check_pe_arch.ps1" -Path "%_ARIA_EXE%" -Arch %HOST_ARCH%
+if errorlevel 1 ( del /f /q "%_ARIA_EXE%" 2>nul & echo [WARN] downloaded aria2c has the wrong arch; using single-thread download. & exit /b 0 )
+echo [OK] aria2c ready.
 exit /b 0
 
 REM :fetch_vendor - ARM64 only. Downloads vendor-deps.7z (~210MB, ~420MB unpacked) and keeps only what
