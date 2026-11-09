@@ -326,7 +326,7 @@ $OutDir = Join-Path $Root 'dist\installer'
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $arches = if ($Arch -eq 'both') { @('x64', 'arm64') } else { @($Arch) }
 $iss = Join-Path $PSScriptRoot 'qaiappbuilder.iss'
-# The desktop window's WebView2 profile lives in %LOCALAPPDATA%\<identifier>; the uninstaller removes it with the data.
+# The desktop window's WebView2 profile lives in %LOCALAPPDATA%\<identifier>; the uninstaller always removes it.
 $DesktopId = [string](Get-Content (Join-Path $Root 'desktop\src-tauri\tauri.conf.json') -Raw | ConvertFrom-Json).identifier
 if ($DesktopId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]+$') { Fail "bad identifier '$DesktopId' in desktop\src-tauri\tauri.conf.json" }
 Info "desktop identifier: $DesktopId"

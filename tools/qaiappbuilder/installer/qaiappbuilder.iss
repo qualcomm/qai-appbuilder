@@ -684,7 +684,7 @@ var
   List: TNewCheckListBox;
   OkBtn, KeepBtn: TNewButton;
   IxData, IxSdk, IxBrowser, IxUv, W, H, Pct: Integer;
-  DataDir, WebViewDir, BrowserDir, UvRoaming, UvLocal: String;
+  DataDir, BrowserDir, UvRoaming, UvLocal: String;
 begin
   RemoveAllData := False;
   DelSdk := False;
@@ -695,11 +695,10 @@ begin
   UvRoaming := ExpandConstant('{userappdata}\uv');
   UvLocal := ExpandConstant('{localappdata}\uv');
   DataDir := ExpandConstant('{app}\app\data');
-  WebViewDir := WebViewDataDir;
   // _setup_env.bat --with-browser: `playwright install chromium` puts the browser in this per-user cache
   BrowserDir := ExpandConstant('{localappdata}\ms-playwright');
   SdkPath := SdkToOffer;
-  if not (DirExists(DataDir) or DirExists(WebViewDir) or DirExists(BrowserDir) or DirExists(UvRoaming)
+  if not (DirExists(DataDir) or DirExists(BrowserDir) or DirExists(UvRoaming)
           or DirExists(UvLocal) or (SdkPath <> '')) then Exit;
 
   // CreateCustomForm scales its size arguments to the screen DPI itself, so give it 96-dpi numbers: take the
@@ -746,13 +745,12 @@ begin
     IxUv := -1;
     // The intro text is the first row, then each item with its folder on an indented line below it.
     List.AddGroup(CustomMessage('UninstIntro'), '', 0, nil);
-    // "Your data" also covers the desktop window's WebView2 profile (open-tab layout, cookies/login, cache):
-    // keeping one without the other restores tabs for conversations the fresh database does not have.
-    if DirExists(DataDir) or DirExists(WebViewDir) then
+    // The desktop window's WebView2 profile is not offered here: it is window state only and is always removed
+    // (see CurUninstallStepChanged).
+    if DirExists(DataDir) then
     begin
       IxData := List.AddCheckBox(CustomMessage('UninstData'), '', 0, True, True, False, False, nil);
-      if DirExists(DataDir) then List.AddGroup(DataDir, '', 1, nil);
-      if DirExists(WebViewDir) then List.AddGroup(WebViewDir, '', 1, nil);
+      List.AddGroup(DataDir, '', 1, nil);
     end;
     if DirExists(BrowserDir) then
     begin
@@ -798,13 +796,15 @@ begin
     // The backend server / a conversion / a download may still be running from here: stop them first, or their
     // open files survive the delete. This includes the venvs: the server runs from {app}\app\envs\.venv_*.
     StopProcessesUnder(App);
+    // The desktop window's WebView2 profile (open-tab layout, cookies, cache) is window state, not user data: always
+    // remove it, also on a silent uninstall. The window was stopped just above (it runs from {app}\app\desktop), so the
+    // folder is no longer locked. Keeping it would restore tabs for conversations a fresh database does not have.
+    DelTree(WebViewDataDir, True, True, True);
     if UninstallSilent then Exit;  // silent: keep data and the SDK (envs\ still goes in usPostUninstall)
     AskUninstallChoices;
     if RemoveAllData then
     begin
       DelTree(ExpandConstant('{app}\app\data'), True, True, True);
-      // the desktop window was stopped above (it runs from {app}\app\desktop), so its WebView2 profile is free
-      DelTree(WebViewDataDir, True, True, True);
     end;
     if DelBrowser then DelTree(ExpandConstant('{localappdata}\ms-playwright'), True, True, True);
     if DelUv then
