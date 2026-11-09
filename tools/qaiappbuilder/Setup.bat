@@ -282,10 +282,22 @@ REM Even so, we route it through the SAME wrapper so:
 REM   1) the PS fallback gets retry + size-check protection,
 REM   2) aria2c failing here is non-fatal (script logs [WARN] and continues
 REM      to the PowerShell-only path for everything downstream).
-if exist "data\bin\aria2c\aria2c.exe" goto :aria2c_ready
+REM The binary must match HOST_ARCH: aria2 upstream only publishes x64, so arm64 uses the minnyres build (the same
+REM URL as src\qai\service_release\infrastructure\aria2c_daemon.py). An existing copy of the wrong arch (e.g. an x64
+REM aria2c left by an older setup on an arm64 machine) is deleted and re-downloaded, never reused.
+if /i "%HOST_ARCH%"=="arm64" (
+    set "ARIA2C_URL=https://github.com/minnyres/aria2-windows-arm64/releases/download/v1.37.0/aria2_1.37.0_arm64.zip"
+) else (
+    set "ARIA2C_URL=https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip"
+)
+if not exist "data\bin\aria2c\aria2c.exe" goto :aria2c_download
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\check_pe_arch.ps1" -Path "data\bin\aria2c\aria2c.exe" -Arch %HOST_ARCH%
+if not errorlevel 1 goto :aria2c_ready
+echo [INFO] Replacing aria2c with the %HOST_ARCH% build...
+del /f /q "data\bin\aria2c\aria2c.exe" 2>nul
 
-echo [INFO] Downloading aria2c ^(multi-thread downloader^)...
-set "ARIA2C_URL=https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip"
+:aria2c_download
+echo [INFO] Downloading aria2c %HOST_ARCH% ^(multi-thread downloader^)...
 set "ARIA2C_ZIP=%DL_DIR%\_aria2c_tmp.zip"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\download_with_aria2c.ps1" ^
     -Url "%ARIA2C_URL%" ^
@@ -304,9 +316,13 @@ if errorlevel 1 (
 echo [INFO] Extracting aria2c.exe...
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command ^
     "Expand-Archive -Path '%ARIA2C_ZIP%' -DestinationPath '%DL_DIR%\_aria2c_tmp' -Force; " ^
-    "Get-ChildItem '%DL_DIR%\_aria2c_tmp' -Recurse -Filter 'aria2c.exe' | Copy-Item -Destination 'data\bin\aria2c\aria2c.exe' -Force; " ^
+    "Get-ChildItem '%DL_DIR%\_aria2c_tmp' -Recurse -Filter 'aria2c.exe' | Select-Object -First 1 | Copy-Item -Destination 'data\bin\aria2c\aria2c.exe' -Force; " ^
     "Remove-Item '%DL_DIR%\_aria2c_tmp' -Recurse -Force"
 del /f /q "%ARIA2C_ZIP%" 2>nul
+if not exist "data\bin\aria2c\aria2c.exe" goto :aria2c_check_done
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\check_pe_arch.ps1" -Path "data\bin\aria2c\aria2c.exe" -Arch %HOST_ARCH%
+if errorlevel 1 del /f /q "data\bin\aria2c\aria2c.exe" 2>nul
+:aria2c_check_done
 
 if exist "data\bin\aria2c\aria2c.exe" (
     echo [OK]   aria2c installed: data\bin\aria2c\aria2c.exe
