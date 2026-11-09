@@ -221,15 +221,13 @@ REM  Step 3: Python 3.13 + venv
 REM ===========================================================================
 echo.
 echo -- Step 3/7: Python 3.13 + venv ---------------------------------------------
-"%UV_EXE%" python find %PY_SPEC% >nul 2>&1
-if errorlevel 1 (
-    echo [INFO] installing %PY_SPEC% ...
-    set UR_CMD="%UV_EXE%" python install --no-bin --no-registry %PY_SPEC%
-    call :uv_retry python-install
-    if errorlevel 1 goto :fail_python
-) else (
-    echo [SKIP] %PY_SPEC% already installed.
-)
+REM Always `uv python install` (idempotent, fast when complete). A `uv python find` pre-check is satisfied by the
+REM versioned folder cpython-3.13.<patch>-... alone and would never recreate a missing cpython-3.13-...-none link -
+REM the path every venv's pyvenv.cfg points at - leaving those venvs unable to start.
+echo [INFO] installing / checking %PY_SPEC% ...
+set UR_CMD="%UV_EXE%" python install --no-bin --no-registry %PY_SPEC%
+call :uv_retry python-install
+if errorlevel 1 goto :fail_python
 call :tick "3a Python 3.13 interpreter"
 set "_VENV_OK=0"
 if exist "%VPY%" if exist "%VENV_DIR%\Scripts\activate.bat" (
@@ -817,12 +815,10 @@ if errorlevel 1 goto :b_venv310_make
 echo [SKIP] .venv_x64_310 already complete: %VENV_310_DIR%
 exit /b 0
 :b_venv310_make
-"%UV_EXE%" python find %PY310_SPEC% >nul 2>&1
-if not errorlevel 1 goto :b_venv310_py
-echo [INFO] installing %PY310_SPEC% ...
+REM always install (idempotent) - see Step 3: a find pre-check would not repair a missing minor-version link
+echo [INFO] installing / checking %PY310_SPEC% ...
 "%UV_EXE%" python install --no-bin --no-registry %PY310_SPEC%
 if errorlevel 1 ( echo [ERROR] uv could not install %PY310_SPEC%. Try --mirror cn or --proxy. & exit /b 1 )
-:b_venv310_py
 echo [INFO] creating .venv_x64_310 ...
 REM --no-project: the repo's pyproject.toml requires Python 3.13; this venv is deliberately 3.10.
 "%UV_EXE%" venv "%VENV_310_DIR%" --python %PY310_SPEC% --seed --allow-existing --no-project

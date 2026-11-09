@@ -31,7 +31,7 @@ plus OS-level side effects:
    weights and other user files in ``data/downloads/`` are preserved.
 5. **Setup-installed local tooling** — ``<repo>/data/bin/`` (uv.exe,
    aria2c.exe, 7zr.exe). Setup re-downloads them on next run.
-6. **uv-managed Python interpreters** — only the cpython variants
+6. *(only with* ``--clean-uv`` */* ``--all`` *)* **uv-managed Python interpreters** — only the cpython variants
    Setup.bat installs (cpython-3.13 ARM64 + cpython-3.10 x64) under
    ``%APPDATA%\\uv\\python\\``.
 
@@ -46,9 +46,11 @@ and can be cleaned manually via ``icacls`` if desired.
 
 What ``--all`` ADDITIONALLY removes
 -----------------------------------
-* **uv package cache** (``%LOCALAPPDATA%\\uv\\cache``) — SHARED with
-  other uv projects on this machine. Implied by --all (also enabled
-  individually via ``--clean-uv``).
+* **uv-managed Python interpreters** (``%APPDATA%\\uv\\python``, item 6 above)
+  and the **uv package cache** (``%LOCALAPPDATA%\\uv\\cache``) — SHARED with
+  other uv projects and with the installed QAI AppBuilder (its venv points
+  at these interpreters). Implied by --all (also enabled individually via
+  ``--clean-uv``).
 * **QAIRT SDK** — only the version Setup.bat installs (default
   ``C:\\Qualcomm\\AIStack\\QAIRT\\<version>\\`` where ``<version>`` comes from
   scripts/qairt_release.json; respects the
@@ -580,7 +582,7 @@ def clean_install_temp_downloads(repo_root: Path, *, dry_run: bool = False) -> N
 # the project tree (only roll back what Setup.bat installed outside it).
 
 
-# ----- Stage 4: uv-managed Python interpreters (DEFAULT CLEAN) ---------------
+# ----- Stage 4: uv-managed Python interpreters (--clean-uv / --all only) -----
 
 
 def clean_uv_pythons(targets: UninstallTargets, *, dry_run: bool = False) -> None:
@@ -589,10 +591,15 @@ def clean_uv_pythons(targets: UninstallTargets, *, dry_run: bool = False) -> Non
     Setup.bat runs ``uv python install cpython-3.13-windows-aarch64`` and
     ``uv python install cpython-3.10-windows-x86_64``. Those interpreters
     land under ``%APPDATA%\\uv\\python\\`` (Windows) / ``~/.local/share/uv/
-    python/`` (POSIX). They are NOT shared by other uv projects in any
-    meaningful way (each project re-resolves), so removing them is safe and
-    aligned with the user's expectation that an uninstall reverts what
-    Setup installed. Only our specific cpython variants are purged.
+    python/`` (POSIX) and ARE SHARED: every venv on the machine built from them
+    (another checkout, the installed app's ``{app}\\app\\envs``) points its
+    ``pyvenv.cfg`` ``home`` at the minor-version link
+    ``cpython-3.13-windows-<arch>-none``. Removing them breaks those venvs, so this
+    runs only with ``--clean-uv`` / ``--all``.
+
+    Each spec is removed as a whole: the minor-version link AND the versioned
+    folders (``cpython-3.13.18-windows-aarch64-none``) - deleting only the link
+    leaves an install that ``uv python find`` accepts but no venv can start from.
     """
 
     interp_root = targets.uv_pythons
@@ -603,26 +610,28 @@ def clean_uv_pythons(targets: UninstallTargets, *, dry_run: bool = False) -> Non
         _purge_uv_python_shims(dry_run=dry_run)
         return
 
-    for child in (
-        "cpython-3.13-windows-aarch64-none",
-        "cpython-3.13-windows-x86_64-none",
-        "cpython-3.10-windows-x86_64-none",
+    for minor, platform_tag in (
+        ("3.13", "windows-aarch64-none"),
+        ("3.13", "windows-x86_64-none"),
+        ("3.10", "windows-x86_64-none"),
     ):
-        path = interp_root / child
-        if path.exists():
-            remove_directory(path, label=f"uv python ({child})", dry_run=dry_run)
-        # Versioned variants (e.g. cpython-3.13.12-...) live alongside
-        # the bare name; remove them too.
-        if interp_root.is_dir():
-            for sibling in interp_root.iterdir():
-                if (
-                    sibling.is_dir()
-                    and sibling.name.startswith(child.replace("-windows", ""))
-                ):
-                    remove_directory(
-                        sibling, label=f"uv python ({sibling.name})", dry_run=dry_run
-                    )
+        for entry in sorted(interp_root.iterdir()) if interp_root.is_dir() else ():
+            if _is_uv_python_dir(entry.name, minor, platform_tag):
+                remove_directory(entry, label=f"uv python ({entry.name})", dry_run=dry_run)
     _purge_uv_python_shims(dry_run=dry_run)
+
+
+def _is_uv_python_dir(name: str, minor: str, platform_tag: str) -> bool:
+    """``cpython-<minor>-<platform>`` (the link) or ``cpython-<minor>.<patch>-<platform>`` (the install).
+
+    ``cpython-3.13.18-windows-aarch64-none`` matches 3.13 / windows-aarch64-none; ``cpython-3.130-...`` or a
+    different platform does not.
+    """
+    prefix, suffix = f"cpython-{minor}", f"-{platform_tag}"
+    if not (name.startswith(prefix) and name.endswith(suffix)):
+        return False
+    middle = name[len(prefix) : len(name) - len(suffix)]
+    return middle == "" or (middle.startswith(".") and middle[1:].isdigit())
 
 
 def _purge_uv_python_shims(*, dry_run: bool = False) -> None:
@@ -1336,8 +1345,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--clean-uv", action="store_true",
         help=(
-            "also remove the uv package cache (%%LOCALAPPDATA%%\\uv\\cache). "
-            "SHARED with other uv projects. Implied by --all."
+            "also remove the uv-managed Python interpreters (%%APPDATA%%\\uv\\python: cpython-3.13 / 3.10) "
+            "and the uv package cache (%%LOCALAPPDATA%%\\uv\\cache). SHARED: every venv built from them "
+            "(other checkouts, the installed QAI AppBuilder) stops working. Implied by --all."
         ),
     )
     parser.add_argument(
@@ -1403,7 +1413,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     _info(f"  3. {targets.temp_qai}/           (temp files)")
     _info(f"  4. Setup install temp archives in {repo / 'data' / 'downloads'} (whitelist; runtime downloads kept)")
     _info(f"  5. {repo / 'data' / 'bin'} (uv / aria2c / 7zr — Setup-installed local tooling)")
-    _info(f"  6. uv-managed Python interpreters under {targets.uv_pythons} (cpython-3.13 ARM64 + cpython-3.10 x64)")
+    _info(
+        f"  6. (--clean-uv / --all only) uv-managed Python interpreters under {targets.uv_pythons} "
+        "(cpython-3.13 + cpython-3.10; shared with the installed app)"
+    )
     _info("")
     _info(
         "  NOT removed (default): the project directory itself, including data/ "
@@ -1414,6 +1427,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _info("")
         _info("  --all / --clean-uv extras:")
         if args.all_extras or args.clean_uv:
+            _info(f"    - {targets.uv_pythons} cpython-3.13 / 3.10 (SHARED: breaks other venvs built from them)")
             _info(f"    - {targets.uv_cache} (uv package cache; SHARED with other uv projects)")
         if args.all_extras:
             _info("    - QAIRT SDK at C:\\Qualcomm\\AIStack\\QAIRT\\<version>\\ (Setup-installed version only)")
@@ -1469,12 +1483,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     remove_directory(
         targets.temp_qai, label="QAIModelBuilder temp", dry_run=args.dry_run
     )
-    # Default-clean: data/bin tooling + uv-managed Python interpreters.
+    # Default-clean: data/bin tooling. The uv-managed Pythons are shared with every other venv on the
+    # machine (e.g. the installed app's), so they go only with --clean-uv / --all (below).
     clean_data_bin(repo, dry_run=args.dry_run)
-    clean_uv_pythons(targets, dry_run=args.dry_run)
 
     # Opt-in extras.
     if args.all_extras or args.clean_uv:
+        clean_uv_pythons(targets, dry_run=args.dry_run)
         clean_uv_cache(targets, dry_run=args.dry_run)
     if args.all_extras:
         clean_qairt_sdk(dry_run=args.dry_run)
@@ -1497,7 +1512,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     _ok("uninstall: complete.")
     _info(
         "Removed what Setup.bat installed OUTSIDE the project (venvs, "
-        "PortableGit, Node.js, temp files, data/bin tooling, uv pythons). "
+        "PortableGit, Node.js, temp files, data/bin tooling"
+        + (", uv pythons + cache" if (args.all_extras or args.clean_uv) else "")
+        + "). "
         "The project directory -- including data/ (qai.db, logs, runtime "
         "model weights, config) -- is left fully intact."
     )
@@ -1513,7 +1530,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         _info(f"{bold}  Optional: deeper cleanup{reset}")
         _info(f"{bold}{'=' * 70}{reset}")
         _info(
-            "  --all           Also remove uv cache, QAIRT SDK, Playwright Chromium,")
+            "  --clean-uv      Also remove uv-managed Pythons + uv cache (SHARED: breaks the")
+        _info(
+            "                  installed app's venv and any other venv built from them).")
+        _info(
+            "  --all           Also remove uv Pythons + cache, QAIRT SDK, Playwright Chromium,")
         _info(
             "                  vendor/ runtime caches, and %TEMP%\\jieba.cache.")
         _info(

@@ -15,7 +15,9 @@ REM     2. Delete venvs (<repo>\envs\) + signed Python (WDAC fallback) + Portabl
 REM     3. Delete temp files (%TEMP%\QAIModelBuilder\)
 REM     4. Clean install temp archives in data\downloads\ (whitelist)
 REM     5. Remove data\bin (uv / aria2c / 7zr Setup-installed tooling)
-REM     6. Remove uv-managed Python interpreters (%APPDATA%\uv\python\)
+REM     6. (--clean-uv / --all only) Remove uv-managed Python interpreters (%APPDATA%\uv\python\)
+REM        They are SHARED: the installed QAI AppBuilder's venv (and any other venv built
+REM        from them) points at them, so a default uninstall leaves them alone.
 REM
 REM   Note: previous versions also cleaned AppContainer sandbox ACEs and
 REM   orphaned AppContainer registry profiles. The Windows AppContainer /
@@ -29,7 +31,7 @@ REM     Uninstall.bat                Interactive default uninstall
 REM     Uninstall.bat --help / -h    Show full help (lists every option)
 REM     Uninstall.bat --yes / -y     Non-interactive default uninstall
 REM     Uninstall.bat --quiet        Same as --yes
-REM     Uninstall.bat --clean-uv     Default + uv package cache (SHARED)
+REM     Uninstall.bat --clean-uv     Default + uv-managed Pythons + uv package cache (SHARED)
 REM     Uninstall.bat --all          FULL uninstall: default + uv cache +
 REM                                  QAIRT SDK + Playwright Chromium +
 REM                                  vendor caches + %TEMP%\jieba.cache.
@@ -179,7 +181,7 @@ if not defined PYTHON (
 REM -- Parse arguments and delegate to Python ----------------------------------
 REM Six orthogonal flags:
 REM   --yes / -y / --quiet : skip interactive confirmation prompt
-REM   --clean-uv           : also remove uv package cache (SHARED resource)
+REM   --clean-uv           : also remove uv-managed Pythons + uv package cache (SHARED)
 REM   --all                : FULL uninstall (uv cache + QAIRT + Playwright +
 REM                          vendor caches + jieba.cache); also implies --yes
 REM                          (used non-interactively in the all-in handler).
@@ -302,6 +304,12 @@ REM  the venv (and the system has no other Python).
 REM ===========================================================================
 :manual_cleanup
 
+REM This path is reached before the flag parsing above runs, so read the two flags it honours here.
+for %%a in (%*) do (
+    if /i "%%~a"=="--clean-uv" set "PY_HAS_CLEAN_UV=1"
+    if /i "%%~a"=="--all"      set "PY_HAS_ALL=1"
+)
+
 echo -- Manual fallback: stopping processes ------------------------------------
 REM The API server's bound port is dynamic (see apps/cli/serve.py
 REM FALLBACK_PORTS) — Hyper-V / WSL2 can reserve the documented default
@@ -408,11 +416,17 @@ if exist "%~dp0data\config\host_arch" (
 )
 
 echo -- Manual fallback: removing uv-managed Python interpreters ---------------
+REM Shared with every venv built from them (e.g. the installed app's): only with --clean-uv / --all.
 REM uv places Python interpreters under %APPDATA%\uv\python\ as directory
 REM SYMLINKS or JUNCTIONS pointing into uv's cache. PowerShell's
 REM Remove-Item -Force unlinks the link without recursing into the target,
 REM preserving uv cache integrity.
-if exist "%APPDATA%\uv\python" (
+set "_RM_UV_PY="
+if defined PY_HAS_CLEAN_UV set "_RM_UV_PY=1"
+if defined PY_HAS_ALL set "_RM_UV_PY=1"
+if not defined _RM_UV_PY (
+    echo    [SKIP] kept ^(shared; pass --clean-uv or --all to remove^).
+) else if exist "%APPDATA%\uv\python" (
     powershell -NoProfile -Command "$root = '%APPDATA%\uv\python'; $patterns = @('cpython-3.13-windows-aarch64*','cpython-3.13.*-windows-aarch64*','cpython-3.13-windows-x86_64*','cpython-3.13.*-windows-x86_64*','cpython-3.10-windows-x86_64*','cpython-3.10.*-windows-x86_64*'); $count = 0; foreach ($p in $patterns) { Get-ChildItem -LiteralPath $root -Directory -Filter $p -ErrorAction SilentlyContinue | ForEach-Object { try { Remove-Item -LiteralPath $_.FullName -Force -Recurse -ErrorAction Stop; $count++ } catch { Write-Host ('   [WARN] could not remove ' + $_.FullName + ': ' + $_.Exception.Message) } } }; Write-Host ('   [OK]   Removed ' + $count + ' interpreter directory/directories.')"
 ) else (
     echo    [SKIP] %APPDATA%\uv\python not present.
@@ -784,7 +798,7 @@ echo.
 echo      --yes, -y         Non-interactive: skip the default y/N prompt.
 echo      --quiet           Alias for --yes.
 echo.
-echo      --clean-uv        Default + uv package cache
+echo      --clean-uv        Default + uv-managed Pythons + uv package cache
 echo                        ^(%%LOCALAPPDATA%%\uv\cache^).
 echo                        WARNING: SHARED with other uv projects.
 echo                        Implied by --all.

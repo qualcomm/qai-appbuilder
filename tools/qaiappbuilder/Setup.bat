@@ -398,16 +398,15 @@ if not defined UV_HTTP_TIMEOUT set "UV_HTTP_TIMEOUT=300"
 if not defined UV_HTTP_RETRIES set "UV_HTTP_RETRIES=5"
 
 REM --- Step 2: Install Python 3.13 (ARM64 native) ---
-REM Idempotent: skip the (re)install when uv can already resolve a managed
-REM cpython-3.13 ARM64 interpreter. ``uv python find`` returns exit 0 + the
-REM interpreter path when present; only then do we avoid the slower
-REM ``uv python install`` round-trip (which is itself idempotent but prints
-REM "already installed" and re-resolves every run).
+REM ALWAYS run ``uv python install`` (no ``uv python find`` pre-check). It is idempotent and fast when
+REM everything is in place, AND it repairs a half-removed install: uv keeps the real interpreter in
+REM cpython-3.13.<patch>-...-none plus a minor-version link cpython-3.13-...-none, and every venv's
+REM pyvenv.cfg ``home`` points at that LINK. ``uv python find`` is satisfied by the versioned folder
+REM alone, so a deleted link (e.g. by an older uninstall) was never recreated and every venv built on
+REM it - including another installation's - failed with "uv trampoline failed to spawn Python".
 REM NOTE: use a goto-based branch (not if/else blocks) so the literal "(ARM64)"
 REM in the echo text below is never parsed as a cmd block delimiter.
-uv python find %PY_SPEC% >nul 2>&1
-if not errorlevel 1 goto :py313_ready
-echo [INFO] Installing Python 3.13 ^(%HOST_ARCH%^)...
+echo [INFO] Installing / checking Python 3.13 ^(%HOST_ARCH%^)...
 REM --no-bin: skip writing python3.13.exe shim into ~/.local/bin (we use the
 REM venv's python.exe directly; the shim PATH-warning + leftover-shim
 REM "Failed to install executable" line otherwise alarm users for no reason).
@@ -415,10 +414,6 @@ REM --no-registry: skip Windows registry registration (one fewer thing to
 REM clean up at uninstall time; the venv reference works without it).
 uv python install --no-bin --no-registry %PY_SPEC%
 if errorlevel 1 goto :python_error
-goto :py313_done
-:py313_ready
-echo [SKIP] Python 3.13 already installed ^(%HOST_ARCH%, uv-managed^).
-:py313_done
 
 REM --- Step 2b: Ensure the Visual C++ runtime the managed CPython needs -------
 REM uv's managed CPython (python-build-standalone) dynamically links the MSVC
