@@ -26,6 +26,11 @@
 #ifndef OutDir
   #define OutDir "..\dist\installer"
 #endif
+; The desktop shell's Tauri "identifier" (desktop\src-tauri\tauri.conf.json). WebView2 keeps the window's profile
+; (localStorage with the open-tab layout, cookies, cache) in %LOCALAPPDATA%\<identifier>. build_installer.ps1 passes it.
+#ifndef DesktopIdentifier
+  #error Pass /DDesktopIdentifier=<identifier from desktop\src-tauri\tauri.conf.json>
+#endif
 
 #define AppName "QAI AppBuilder"
 ; Optional components the installer ALWAYS asks _setup_env.bat for (setup and the Start-menu repair shortcut use the
@@ -597,6 +602,12 @@ begin
     if Path[I] = '\' then Result := Result + 1;
 end;
 
+// The desktop window's WebView2 profile folder (see DesktopIdentifier at the top).
+function WebViewDataDir: String;
+begin
+  Result := ExpandConstant('{localappdata}\{#DesktopIdentifier}');
+end;
+
 // '' when there is no SDK to offer: qairt_env.json missing / no qairt_sdk_root / not a safe path / folder gone.
 function SdkToOffer: String;
 var
@@ -673,7 +684,7 @@ var
   List: TNewCheckListBox;
   OkBtn, KeepBtn: TNewButton;
   IxData, IxSdk, IxBrowser, IxUv, W, H, Pct: Integer;
-  DataDir, BrowserDir, UvRoaming, UvLocal: String;
+  DataDir, WebViewDir, BrowserDir, UvRoaming, UvLocal: String;
 begin
   RemoveAllData := False;
   DelSdk := False;
@@ -684,10 +695,11 @@ begin
   UvRoaming := ExpandConstant('{userappdata}\uv');
   UvLocal := ExpandConstant('{localappdata}\uv');
   DataDir := ExpandConstant('{app}\app\data');
+  WebViewDir := WebViewDataDir;
   // _setup_env.bat --with-browser: `playwright install chromium` puts the browser in this per-user cache
   BrowserDir := ExpandConstant('{localappdata}\ms-playwright');
   SdkPath := SdkToOffer;
-  if not (DirExists(DataDir) or DirExists(BrowserDir) or DirExists(UvRoaming)
+  if not (DirExists(DataDir) or DirExists(WebViewDir) or DirExists(BrowserDir) or DirExists(UvRoaming)
           or DirExists(UvLocal) or (SdkPath <> '')) then Exit;
 
   // CreateCustomForm scales its size arguments to the screen DPI itself, so give it 96-dpi numbers: take the
@@ -734,10 +746,13 @@ begin
     IxUv := -1;
     // The intro text is the first row, then each item with its folder on an indented line below it.
     List.AddGroup(CustomMessage('UninstIntro'), '', 0, nil);
-    if DirExists(DataDir) then
+    // "Your data" also covers the desktop window's WebView2 profile (open-tab layout, cookies/login, cache):
+    // keeping one without the other restores tabs for conversations the fresh database does not have.
+    if DirExists(DataDir) or DirExists(WebViewDir) then
     begin
       IxData := List.AddCheckBox(CustomMessage('UninstData'), '', 0, True, True, False, False, nil);
-      List.AddGroup(DataDir, '', 1, nil);
+      if DirExists(DataDir) then List.AddGroup(DataDir, '', 1, nil);
+      if DirExists(WebViewDir) then List.AddGroup(WebViewDir, '', 1, nil);
     end;
     if DirExists(BrowserDir) then
     begin
@@ -785,7 +800,12 @@ begin
     StopProcessesUnder(App);
     if UninstallSilent then Exit;  // silent: keep data and the SDK (envs\ still goes in usPostUninstall)
     AskUninstallChoices;
-    if RemoveAllData then DelTree(ExpandConstant('{app}\app\data'), True, True, True);
+    if RemoveAllData then
+    begin
+      DelTree(ExpandConstant('{app}\app\data'), True, True, True);
+      // the desktop window was stopped above (it runs from {app}\app\desktop), so its WebView2 profile is free
+      DelTree(WebViewDataDir, True, True, True);
+    end;
     if DelBrowser then DelTree(ExpandConstant('{localappdata}\ms-playwright'), True, True, True);
     if DelUv then
     begin

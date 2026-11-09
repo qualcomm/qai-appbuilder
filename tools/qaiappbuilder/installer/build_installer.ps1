@@ -326,11 +326,15 @@ $OutDir = Join-Path $Root 'dist\installer'
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $arches = if ($Arch -eq 'both') { @('x64', 'arm64') } else { @($Arch) }
 $iss = Join-Path $PSScriptRoot 'qaiappbuilder.iss'
+# The desktop window's WebView2 profile lives in %LOCALAPPDATA%\<identifier>; the uninstaller removes it with the data.
+$DesktopId = [string](Get-Content (Join-Path $Root 'desktop\src-tauri\tauri.conf.json') -Raw | ConvertFrom-Json).identifier
+if ($DesktopId -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]+$') { Fail "bad identifier '$DesktopId' in desktop\src-tauri\tauri.conf.json" }
+Info "desktop identifier: $DesktopId"
 
 foreach ($a in $arches) {
     $stage = Stage-Arch $a | Select-Object -Last 1
     Info "compiling installer ($a) ..."
-    & $IsccPath /Q "/DAppVersion=$Version" "/DArch=$a" "/DQairtTag=$AbTag" "/DStageDir=$stage" "/DOutDir=$OutDir" $iss
+    & $IsccPath /Q "/DAppVersion=$Version" "/DArch=$a" "/DQairtTag=$AbTag" "/DStageDir=$stage" "/DOutDir=$OutDir" "/DDesktopIdentifier=$DesktopId" $iss
     if ($LASTEXITCODE -ne 0) { Fail "ISCC failed for $a (exit $LASTEXITCODE)" }
     if (-not $KeepStage) { Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue }
 }
