@@ -776,11 +776,11 @@ def clean_qairt_sdk(*, dry_run: bool = False) -> None:
 
 
 def clean_playwright_chromium(*, dry_run: bool = False) -> None:
-    """Remove the Playwright Chromium browser cache (--dev install only).
+    """Remove Playwright's shared per-user browser cache (--all only).
 
-    Path: ``%LOCALAPPDATA%\\ms-playwright\\``. Setup.bat --dev runs
-    ``playwright install chromium`` which lands here. SHARED with other
-    Playwright projects on the same machine.
+    Path: ``%LOCALAPPDATA%\\ms-playwright\\``. Setup now installs Chromium into
+    ``<repo>\\envs\\ms-playwright`` (removed with the venvs); older setups put it
+    here. SHARED with other Playwright projects on the same machine.
     """
 
     lad = _localappdata()
