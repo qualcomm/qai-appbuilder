@@ -187,7 +187,7 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 
 控制面板 / 开始菜单卸载会先结束从 `app\`(含 `app\envs\`)启动的进程(后台服务、转换、下载),然后弹出一个选项窗口(大小、位置与"卸载状态"窗口一致,单独一个窗口,不在状态窗口里:Inno 在卸载期间会禁用状态窗口,放进去的按钮点不了),列出可选删除的内容,**默认全部勾选**(取消勾选即保留;点"全部保留"或关闭窗口则都不删):
 
-- **你的数据**(`app\data`:聊天记录、设置、密钥):目录存在才列出。
+- **你的数据**(`app\data`:聊天记录、设置、密钥;以及桌面窗口的 WebView2 数据 `%LOCALAPPDATA%\<tauri identifier>`:打开的 TAB 布局、Cookie/登录状态、缓存):任一目录存在就列出。两者一起删或一起保留,避免新数据库配上旧 TAB 布局。identifier 由 `build_installer.ps1` 从 `desktop\src-tauri\tauri.conf.json` 读取后传给 ISCC。
 - **浏览器工具用的 Chromium**(`%LOCALAPPDATA%\ms-playwright`):目录存在才列出。这是 Playwright 的按用户共享缓存,其他用 Playwright 的程序也可能在用,所以和其它项一样可以取消勾选。
 - **QAIRT SDK `<版本>`**:`data\config\qairt_env.json` 的 `qairt_sdk_root` 指向的目录存在就列出(不再检查标记文件;默认位置 `C:\Qualcomm\AIStack\QAIRT\<版本>`,在 `app\` 之外)。路径必须是绝对本地路径且至少 3 层深,避免误删盘根或 `C:\Qualcomm`。勾选项旁边显示完整路径。
 - 程序文件和 Python 环境(`app\envs\`)一定会删。
