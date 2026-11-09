@@ -31,17 +31,20 @@ The directory *roots* + probe *patterns* are declared in
 ``file_guard_paths.json``; edit that file to change the set). Each root's
 ``path`` may carry ``%ENV%`` variables (expanded at load; a root whose variable
 is unset is skipped) and the special ``${DATA_ROOT}`` token (substituted with
-the resolved runtime data root). Only directories that actually EXIST on disk
+the resolved runtime data root) or ``${APP_ROOT}`` token (substituted with the
+repo/install root). Only directories that actually EXIST on disk
 are returned, in the declared order (earlier roots win). When the config file is
 absent / malformed, a built-in default set (the two canonical roots below) is
 used so the fix keeps working even without the file.
 
 Application-owned roots (State-Truth-First, AGENTS.md §5)
 ---------------------------------------------------------
-1. ``%LOCALAPPDATA%\\QAIModelBuilder`` — the per-user application data root the
-   ARM64 venv + ``Setup.bat`` create (its ``node`` subdir holds the bundled
-   portable Node.js toolchain: ``npx`` / ``npm`` / ``pnpm`` / ``node``).
-2. ``<data_root>/bin`` — the current project's download/binary directory.
+1. ``<app_root>/envs/*/Scripts`` — the venvs ``Setup.bat`` / ``_setup_env.bat``
+   create inside the repo/install root.
+2. ``%LOCALAPPDATA%\\QAIModelBuilder`` — the per-user tools root ``Setup.bat``
+   creates (its ``node`` subdir holds the bundled portable Node.js toolchain:
+   ``npx`` / ``npm`` / ``pnpm`` / ``node``).
+3. ``<data_root>/bin`` — the current project's download/binary directory.
 
 Cross-platform (AGENTS.md §8)
 -----------------------------
@@ -72,13 +75,20 @@ _CONFIG_RELPATH: tuple[str, ...] = ("factory", "config", "exec_path_dirs.json")
 #: The ``${DATA_ROOT}`` token, substituted with the resolved runtime data root.
 _DATA_ROOT_TOKEN: str = "${DATA_ROOT}"
 
+#: The ``${APP_ROOT}`` token, substituted with the repo/install root.
+_APP_ROOT_TOKEN: str = "${APP_ROOT}"
+
 #: Built-in default roots used when the config file is absent / malformed. Mirrors
 #: the shipped ``exec_path_dirs.json`` so the fix keeps working without the file.
 _DEFAULT_ROOTS: tuple[dict[str, Any], ...] = (
     {
+        "path": _APP_ROOT_TOKEN + r"\envs",
+        "subdirs": [],
+        "globs": ["*/Scripts", "*/bin"],
+    },
+    {
         "path": r"%LOCALAPPDATA%\QAIModelBuilder",
         "subdirs": ["", "bin", "Scripts", "node"],
-        "globs": ["envs/*/Scripts", "envs/*/bin"],
     },
     {
         "path": _DATA_ROOT_TOKEN + r"\bin",
@@ -88,13 +98,13 @@ _DEFAULT_ROOTS: tuple[dict[str, Any], ...] = (
 )
 
 
-def _expand_root_path(raw: str, data_root: Path | None) -> str:
-    """Expand ``${DATA_ROOT}`` + ``%ENV%`` in a root ``path``.
+def _expand_root_path(raw: str, data_root: Path | None, app_root: Path | None = None) -> str:
+    """Expand ``${DATA_ROOT}`` / ``${APP_ROOT}`` + ``%ENV%`` in a root ``path``.
 
     Returns "" (skip this root) when a required source is unavailable: an unset
     ``%ENV%`` variable (``os.path.expandvars`` leaves the ``%VAR%`` literal — we
-    treat a residual ``%`` as "unset") or a ``${DATA_ROOT}`` token with no
-    ``data_root`` provided. Mirrors ``_workspace_resolver._expand_env_path``.
+    treat a residual ``%`` as "unset") or a ``${DATA_ROOT}`` / ``${APP_ROOT}``
+    token whose root was not provided. Mirrors ``_workspace_resolver._expand_env_path``.
     """
     if not raw:
         return ""
@@ -102,18 +112,24 @@ def _expand_root_path(raw: str, data_root: Path | None) -> str:
         if data_root is None:
             return ""
         raw = raw.replace(_DATA_ROOT_TOKEN, str(data_root))
+    if _APP_ROOT_TOKEN in raw:
+        if app_root is None:
+            return ""
+        raw = raw.replace(_APP_ROOT_TOKEN, str(app_root))
     expanded = os.path.expandvars(raw)
     if "%" in expanded:
         return ""  # an unexpanded %VAR% remained → variable unset → skip
     return expanded
 
 
-def _candidates_for_root(root: dict[str, Any], data_root: Path | None) -> list[Path]:
+def _candidates_for_root(
+    root: dict[str, Any], data_root: Path | None, app_root: Path | None = None
+) -> list[Path]:
     """Expand one config root entry into concrete candidate directories."""
     raw_path = root.get("path")
     if not isinstance(raw_path, str) or not raw_path.strip():
         return []
-    base_str = _expand_root_path(raw_path.strip(), data_root)
+    base_str = _expand_root_path(raw_path.strip(), data_root, app_root)
     if not base_str:
         return []
     try:
@@ -197,8 +213,8 @@ def bundled_bin_dirs(
 
     Roots + probe patterns come from ``factory/config/exec_path_dirs.json``
     (located under ``repo_root``); a missing / malformed file falls back to the
-    built-in defaults. ``%LOCALAPPDATA%\\QAIModelBuilder`` and ``<data_root>/bin``
-    are resolved at runtime — never hard-coded. Only directories that exist are
+    built-in defaults. ``<repo_root>/envs``, ``%LOCALAPPDATA%\\QAIModelBuilder`` and
+    ``<data_root>/bin`` are resolved at runtime — never hard-coded. Only directories that exist are
     returned (existence is the real state; a non-existent candidate is skipped).
 
     Both ``data_root`` and ``repo_root`` are optional so callers without a
@@ -206,7 +222,7 @@ def bundled_bin_dirs(
     """
     candidates: list[Path] = []
     for root in _load_config_roots(repo_root):
-        candidates.extend(_candidates_for_root(root, data_root))
+        candidates.extend(_candidates_for_root(root, data_root, repo_root))
     return tuple(_dedup_existing_dirs(candidates))
 
 

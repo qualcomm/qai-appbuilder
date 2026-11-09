@@ -359,8 +359,8 @@ def bat_env() -> dict[str, str]:
 
 @pytest.mark.skipif(os.name != "nt", reason="qai.bat is a Windows launcher")
 def test_qai_bat_help_goes_through_the_launcher(bat_env: dict[str, str]) -> None:
-    """Needs the real runtime venv under ``%LOCALAPPDATA%\\QAIModelBuilder\\envs``; the launcher says so (exit 1) when it is absent."""
-    venv_ok = any((Path(os.environ["LOCALAPPDATA"]) / "QAIModelBuilder" / "envs" / n / "Scripts" / "python.exe").is_file()
+    """Needs the real runtime venv under ``<repo>\\envs``; the launcher says so (exit 1) when it is absent."""
+    venv_ok = any((REPO_ROOT / "envs" / n / "Scripts" / "python.exe").is_file()
                   for n in (".venv_arm64_313", ".venv_x64_313"))
     try:
         p = subprocess.run(["cmd", "/c", str(REPO_ROOT / "qai.bat"), "--help"], cwd=str(REPO_ROOT), env=bat_env,
@@ -378,7 +378,7 @@ def test_qai_bat_help_goes_through_the_launcher(bat_env: dict[str, str]) -> None
 
 @pytest.mark.skipif(os.name != "nt", reason="qai.bat is a Windows launcher")
 def test_qai_bat_forwards_exit_codes(bat_env: dict[str, str]) -> None:
-    venv_ok = any((Path(os.environ["LOCALAPPDATA"]) / "QAIModelBuilder" / "envs" / n / "Scripts" / "python.exe").is_file()
+    venv_ok = any((REPO_ROOT / "envs" / n / "Scripts" / "python.exe").is_file()
                   for n in (".venv_arm64_313", ".venv_x64_313"))
     if not venv_ok:
         pytest.skip("runtime venv is not installed on this machine")
