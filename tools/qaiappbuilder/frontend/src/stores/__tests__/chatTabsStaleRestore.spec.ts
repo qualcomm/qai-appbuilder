@@ -88,5 +88,30 @@ describe("restored tabs whose conversation is gone", () => {
     await store.loadHistoryMessages(id);
     expect(store.tabs.map((t) => t.id)).toEqual([id]);
     expect(store.tabs[0]!.conversationId).toBeNull();
+    expect(store.tabs[0]!.title).toBe("");
+  });
+
+  it("does not restore entries without a conversation (e.g. a title left over from a dropped id)", () => {
+    const store = useChatTabsStore();
+    const n = store.restoreLayout({
+      version: 1,
+      tabs: [
+        { conversationId: null, title: "ghost" },
+        { conversationId: "c1", title: "real" },
+        { conversationId: null, title: "" },
+      ],
+      activeIndex: 1,
+    });
+    expect(n).toBe(1);
+    expect(store.tabs.map((t) => [t.conversationId, t.title])).toEqual([["c1", "real"]]);
+    expect(store.activeTabId).toBe(store.tabs[0]!.id);
+  });
+
+  it("restores nothing when only blank entries were saved, so the caller opens one fresh tab", () => {
+    const store = useChatTabsStore();
+    expect(
+      store.restoreLayout({ version: 1, tabs: [{ conversationId: null, title: "ghost" }], activeIndex: 0 }),
+    ).toBe(0);
+    expect(store.tabs).toHaveLength(0);
   });
 });
