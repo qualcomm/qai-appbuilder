@@ -44,12 +44,12 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher=Qualcomm Technologies, Inc.
 VersionInfoVersion={#AppVersion}
-; Layout: the wizard picks the PARENT folder ({app}, default %LOCALAPPDATA%\QAIModelBuilder); every program file goes
+; Layout: the wizard picks the PARENT folder ({app}, default %LOCALAPPDATA%\QAIAppBuilder); every program file goes
 ; one level down into {app}\app. So {app}\app only ever holds what this product put there (installed files plus what
 ; it writes at run time: data\, models\, vendor\ ...), and the uninstaller can simply delete {app}\app as a whole
 ; (keeping data\ when the user asks to). The uninstaller itself lives in {app}\app too (UninstallFilesDir).
 ; NOTE: not upgrade-compatible with builds that installed straight into ...\QAIModelBuilder\app - uninstall those first.
-DefaultDirName={localappdata}\QAIModelBuilder
+DefaultDirName={localappdata}\QAIAppBuilder
 UninstallFilesDir={app}\app
 ; The wizard shows the folder it will create; we create the app\ child ourselves, so do not warn about an existing parent.
 DirExistsWarning=no
@@ -814,7 +814,7 @@ begin
         DeleteDirContentsExcept(App, 'data');
     end;
     // The parent the user picked: removed only when nothing is left in it (RemoveDir fails on a non-empty dir),
-    // e.g. %LOCALAPPDATA%\QAIModelBuilder once app\ is gone.
+    // e.g. %LOCALAPPDATA%\QAIAppBuilder once app\ is gone.
     RemoveDir(ExpandConstant('{app}'));
   end;
 end;
