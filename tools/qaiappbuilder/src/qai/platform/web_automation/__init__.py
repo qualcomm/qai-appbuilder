@@ -11,6 +11,8 @@ codebase — the web-search browser engine and the interactive browser tool:
 * :data:`CHROMIUM_LAUNCH_ARGS` / :data:`DEFAULT_IDLE_CLOSE_SECONDS` — launch config.
 * :func:`apply_stealth` / :func:`stealth_init_script` — anti-fingerprint patch.
 * :func:`build_context_options` — TLS/viewport-aware ``new_context`` kwargs.
+* :func:`configure_browsers_path` / :func:`browsers_base_dir` — where Chromium lives
+  (``<app_root>/envs/ms-playwright`` when setup installed it there).
 
 Consumers layer their own stateful managers on top; nothing here holds browser
 state, so importing this package never starts a browser.
@@ -18,12 +20,22 @@ state, so importing this package never starts a browser.
 
 from __future__ import annotations
 
+from .browsers_path import (
+    BROWSERS_PATH_ENV,
+    app_browsers_dir,
+    browsers_base_dir,
+    configure_browsers_path,
+)
 from .context_options import build_context_options
 from .guard import async_playwright, is_playwright_available
 from .launch import CHROMIUM_LAUNCH_ARGS, DEFAULT_IDLE_CLOSE_SECONDS
 from .stealth import apply_stealth, stealth_init_script
 
 __all__ = [
+    "BROWSERS_PATH_ENV",
+    "app_browsers_dir",
+    "browsers_base_dir",
+    "configure_browsers_path",
     "CHROMIUM_LAUNCH_ARGS",
     "DEFAULT_IDLE_CLOSE_SECONDS",
     "apply_stealth",
