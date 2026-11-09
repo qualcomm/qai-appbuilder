@@ -67,7 +67,7 @@ if not defined HOST_ARCH (
 )
 set "VENV_DIR_NAME=.venv_arm64_313"
 if /i "%HOST_ARCH%"=="x64" set "VENV_DIR_NAME=.venv_x64_313"
-set "VENV_DIR=%LOCALAPPDATA%\QAIModelBuilder\envs\%VENV_DIR_NAME%"
+set "VENV_DIR=%~dp0envs\%VENV_DIR_NAME%"
 set "ACTIVATE=%VENV_DIR%\Scripts\activate.bat"
 
 REM Route Python bytecode caches out of the source tree into data\caches\pycache
@@ -101,6 +101,6 @@ cmd /k call "%ACTIVATE%"
 exit /b 0
 
 :no_venv
-echo [ERROR] .venv not found at %LOCALAPPDATA%\QAIModelBuilder\envs. Please run Setup.bat first.
+echo [ERROR] .venv not found at %VENV_DIR%. Please run Setup.bat first.
 pause
 exit /b 1

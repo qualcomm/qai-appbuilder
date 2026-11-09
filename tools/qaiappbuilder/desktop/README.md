@@ -5,7 +5,7 @@
 ## 它做什么
 
 1. 找到应用根目录(向上查找同时含 `src/`、`apps/`、`factory/config/ports.json` 的目录)。
-2. 用 `%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_<arch>_313\Scripts\python.exe`(`<arch>` 取自 `data\config\host_arch`,没有就按系统架构)运行 `python -m apps.cli.serve --port 8989`:隐藏控制台窗口,输出写到 `data\logs\desktop-backend.log`。
+2. 用 `<应用根目录>\envs\.venv_<arch>_313\Scripts\python.exe`(`<arch>` 取自 `data\config\host_arch`,没有就按系统架构)运行 `python -m apps.cli.serve --port 8989`:隐藏控制台窗口,输出写到 `data\logs\desktop-backend.log`。
 3. 先显示启动页,轮询 `GET /api/system/health`,返回 200 后把窗口导航到 `http://localhost:8989/chat`。
 4. 关窗口时询问"退出 / 最小化到托盘 / 取消";退出时先让后端正常关闭。
 

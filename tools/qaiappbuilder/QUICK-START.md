@@ -42,7 +42,7 @@ Setup.bat
 ```
 
 Installs the fast base runtime: download uv / install Python 3.13 (ARM64 by default,
-or x64 with `--arch x64`) / create venv at `%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313`
+or x64 with `--arch x64`) / create venv at `envs\.venv_arm64_313` (in the project folder, git-ignored)
 (or `.venv_x64_313`) / install every dep from `pyproject.toml` / initialize `data/`
 (`qai.db`, factory seeds, secret namespaces). That is enough to run pre-built models.
 

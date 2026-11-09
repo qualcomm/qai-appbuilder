@@ -15,12 +15,12 @@ plus OS-level side effects:
 
 1. **Running QAIModelBuilder processes** — graceful POST
    ``/api/system/reboot`` (best-effort) → kill any ``python.exe`` whose
-   image path lives under ``%LOCALAPPDATA%\\QAIModelBuilder``.
-2. **Virtual envs + bundled tools** — ``%LOCALAPPDATA%\\QAIModelBuilder\\``
-   recursively (covers ``.venv_arm64_313``, ``.venv_x64_313``,
-   ``.venv_x64_310``, the WDAC-fallback signed Python under ``python\\3.13``
-   and ``python\\3.10``, optional ``git/`` PortableGit, ``node/`` portable
-   Node.js + pnpm). A signed Python REUSED from an existing system install
+   image path lives under ``<repo>/envs`` or ``%LOCALAPPDATA%\\QAIModelBuilder``.
+2. **Virtual envs** — ``<repo>/envs/`` recursively (``.venv_arm64_313``,
+   ``.venv_x64_313``, ``.venv_x64_310``).
+   **Bundled tools** — ``%LOCALAPPDATA%\\QAIModelBuilder\\`` recursively (the
+   WDAC-fallback signed Python under ``python\\3.13`` and ``python\\3.10``,
+   optional ``git/`` PortableGit, ``node/`` portable Node.js + pnpm). A signed Python REUSED from an existing system install
    outside this tree (e.g. a python.org build already registered elsewhere)
    is intentionally left untouched — it is not ours to remove.
 3. **Temp files** — ``%TEMP%\\QAIModelBuilder\\``.
@@ -155,6 +155,7 @@ LOCALAPPDATA_UV_CACHE = ("uv", "cache")
 
 @dataclass(frozen=True)
 class UninstallTargets:
+    repo_envs: Path
     localappdata_qai: Path
     temp_qai: Path
     uv_pythons: Path
@@ -236,6 +237,7 @@ def _resolve_targets(repo_root: Path) -> UninstallTargets:
     temp = _temp_dir()
 
     return UninstallTargets(
+        repo_envs=repo_root / "envs",
         localappdata_qai=lad / LOCALAPPDATA_QAI,
         temp_qai=temp / TEMP_QAI,
         uv_pythons=appdata / Path(*APPDATA_UV_PYTHONS),
@@ -281,13 +283,15 @@ def stop_running_processes(targets: UninstallTargets, *, dry_run: bool = False) 
     if sys.platform != "win32":
         # POSIX: best-effort pkill on python under our prefix.
         if not dry_run:
+            _run_quiet(["pkill", "-f", str(targets.repo_envs)])
             _run_quiet(["pkill", "-f", str(targets.localappdata_qai)])
         return
 
     if dry_run:
-        _info(f"[dry-run] would kill python.exe under {targets.localappdata_qai}")
+        _info(f"[dry-run] would kill python.exe under {targets.repo_envs} and {targets.localappdata_qai}")
         return
 
+    _kill_processes_under(targets.repo_envs)
     _kill_processes_under(targets.localappdata_qai)
 
 
@@ -1376,11 +1380,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--skip-localappdata", action="store_true",
         help=(
-            "do NOT remove %%LOCALAPPDATA%%\\QAIModelBuilder (the venvs tree). "
+            "do NOT remove <repo>\\envs (the venvs) or %%LOCALAPPDATA%%\\QAIModelBuilder. "
             "Used by Uninstall.bat when this script runs *from* the venv "
-            "python.exe inside that tree: deleting the tree would fail with "
+            "python.exe: deleting that tree would fail with "
             "WinError 5 (the running interpreter image is locked). The .bat "
-            "wrapper removes the tree itself after this process exits."
+            "wrapper removes both trees itself after this process exits."
         ),
     )
     return parser
@@ -1394,8 +1398,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     targets = _resolve_targets(repo)
 
     _info("This will remove (everything Setup.bat installed OUTSIDE the project):")
-    _info(f"  1. Running processes under {targets.localappdata_qai}")
-    _info(f"  2. {targets.localappdata_qai}/   (~3.8 GB, all venvs + PortableGit + Node.js)")
+    _info(f"  1. Running processes under {targets.repo_envs} and {targets.localappdata_qai}")
+    _info(f"  2. {targets.repo_envs}/   (all venvs) and {targets.localappdata_qai}/   (PortableGit + Node.js + signed Python)")
     _info(f"  3. {targets.temp_qai}/           (temp files)")
     _info(f"  4. Setup install temp archives in {repo / 'data' / 'downloads'} (whitelist; runtime downloads kept)")
     _info(f"  5. {repo / 'data' / 'bin'} (uv / aria2c / 7zr — Setup-installed local tooling)")
@@ -1452,13 +1456,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         # python.exe running THIS script may live inside it (a running EXE
         # image is locked on Windows -> shutil.rmtree would hit WinError 5).
         _info(
-            f"QAIModelBuilder envs (LOCALAPPDATA): deferred to Uninstall.bat "
-            f"(post-exit): {targets.localappdata_qai}"
+            f"venvs + LOCALAPPDATA tools: deferred to Uninstall.bat "
+            f"(post-exit): {targets.repo_envs}, {targets.localappdata_qai}"
         )
     else:
+        remove_directory(targets.repo_envs, label="venvs (<repo>/envs)", dry_run=args.dry_run)
         remove_directory(
             targets.localappdata_qai,
-            label="QAIModelBuilder envs (LOCALAPPDATA)",
+            label="QAIModelBuilder tools (LOCALAPPDATA)",
             dry_run=args.dry_run,
         )
     remove_directory(

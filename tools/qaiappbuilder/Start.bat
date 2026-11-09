@@ -126,7 +126,7 @@ if not defined HOST_ARCH (
 )
 set "VENV_DIR_NAME=.venv_arm64_313"
 if /i "%HOST_ARCH%"=="x64" set "VENV_DIR_NAME=.venv_x64_313"
-set "VENV=%LOCALAPPDATA%\QAIModelBuilder\envs\%VENV_DIR_NAME%"
+set "VENV=%~dp0envs\%VENV_DIR_NAME%"
 set "PYTHON=%VENV%\Scripts\python.exe"
 
 REM Route Python bytecode caches out of the source tree into data\caches\pycache

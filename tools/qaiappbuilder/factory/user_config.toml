@@ -6,8 +6,6 @@
 [qairt_env]
 qairt_sdk_root = "C:\\Qualcomm\\AIStack\\QAIRT\\2.47.1.260610"
 qairt_download_url = "https://softwarecenter.qualcomm.com/api/download/software/sdks/Qualcomm_AI_Runtime_Community/All/2.47.1.260610/v2.47.1.260610.zip"
-python_x64_venv = "%LOCALAPPDATA%\\QAIModelBuilder\\envs\\.venv_x64_310"
-python_arm64_venv = "%LOCALAPPDATA%\\QAIModelBuilder\\envs\\.venv_arm64_313"
 vs_vcvarsall = "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvarsall.bat"
 vc_targets_path = "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\MSBuild\\Microsoft\\VC\\v170\\"
 vs_cmake_path = "C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\Common7\\IDE\\CommonExtensions\\Microsoft\\CMake\\CMake\\bin"

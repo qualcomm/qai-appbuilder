@@ -210,27 +210,13 @@ def _resolve_venv(root, venv_name):
     except Exception:
         pass
 
-    userprofile = os.environ.get("USERPROFILE", "")
-    if userprofile:
-        candidates.append(
-            Path(userprofile)
-            / "AppData"
-            / "Local"
-            / "QAIModelBuilder"
-            / "envs"
-            / venv_name
-        )
-    local_app_data = os.environ.get("LOCALAPPDATA", "")
-    if local_app_data:
-        candidates.append(
-            Path(local_app_data) / "QAIModelBuilder" / "envs" / venv_name
-        )
+    # The venvs live in <root>/envs on every platform (Setup.bat / _setup_env.bat create them there).
     candidates.append(Path(root) / "envs" / venv_name)
 
     for candidate in candidates:
         if _python_exe(candidate).exists():
             return candidate
-    return candidates[0]
+    return candidates[-1]
 
 
 def _venv_310_path(root):

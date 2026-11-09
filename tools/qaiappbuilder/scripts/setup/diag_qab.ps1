@@ -35,7 +35,7 @@ $Root = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..'))
 
 if (-not $Python) {
     foreach ($n in '.venv_x64_313', '.venv_arm64_313') {
-        $c = Join-Path $env:LOCALAPPDATA "QAIModelBuilder\envs\$n\Scripts\python.exe"
+        $c = Join-Path $Root "envs\$n\Scripts\python.exe"
         if (Test-Path -LiteralPath $c) { $Python = $c; break }
     }
 }
@@ -52,7 +52,7 @@ function Safe([scriptblock]$b) { try { & $b } catch { Out-Rep ('  (failed: ' + $
 
 Out-Rep ('qai_appbuilder import diagnosis   ' + (Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'))
 if (-not $Python -or -not (Test-Path -LiteralPath $Python)) {
-    Out-Rep "No venv python found under $env:LOCALAPPDATA\QAIModelBuilder\envs. Re-run the installer or use the Start-menu Repair shortcut."
+    Out-Rep "No venv python found under $Root\envs. Re-run the installer or use the Start-menu Repair shortcut."
     exit 2
 }
 Out-Rep "python: $Python"

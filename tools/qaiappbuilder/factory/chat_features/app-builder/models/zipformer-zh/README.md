@@ -92,7 +92,7 @@ $env:PYTHONPATH = "$PWD\features\app-builder\shared"
  "params":{"language":"zh","vad":true,"hotwords":""},
  "options":{},
  "packDir":"features/app-builder/models/zipformer-zh",
-  "repoRoot":"."}' | & "$env:LOCALAPPDATA\QAIModelBuilder\envs\.venv_arm64_313\Scripts\python.exe" features\app-builder\models\zipformer-zh\runner.py
+  "repoRoot":"."}' | & ".\envs\.venv_arm64_313\Scripts\python.exe" features\app-builder\models\zipformer-zh\runner.py
 ```
 
 Expected (real Mandarin clip + real weights): one `status` event,

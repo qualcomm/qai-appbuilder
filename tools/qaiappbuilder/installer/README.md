@@ -168,7 +168,7 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
    - `app\` 里只剩上次卸载保留的 `data\`:允许覆盖安装,数据原样保留。
 2. 向导里可选:镜像(自动 / 官方 / 国内)、HTTP 代理。
 3. 执行 `_setup_env.bat --arch <arch> --no-pause --with-browser --with-astgrep [--mirror ..] [--proxy ..]`(**不带 `--builder`**;两个 `--with-*` 写在 `.iss` 的 `#define SetupComponents` 里,安装和"修复"快捷方式共用):
-   建 Python 3.13 运行时 venv(`%LOCALAPPDATA%\QAIModelBuilder\envs\`)、装依赖、初始化 `data\`。
+   建 Python 3.13 运行时 venv(`<安装目录>\app\envs\`,和 `data\` 同级)、装依赖、初始化 `data\`。
    ARM64 另外会在线下载 `vendor-deps.7z`(约 210 MB,来自 aidevhome.com),取其中除 `qai_appbuilder` 以外的 ARM64 wheel。
    - `--with-browser`:`search` extra(`playwright==1.61.0`、`selectolax`、`lxml`、`cssselect`、`browserforge`,来自 PyPI)+ `python -m playwright install chromium`。
      Chromium 来自 `cdn.playwright.dev`(国内档由 `net_config.ps1` 设 `PLAYWRIGHT_DOWNLOAD_HOST` 指向 npmmirror),装到 `%LOCALAPPDATA%\ms-playwright\`。失败不中断安装,只是浏览器工具不可用。
@@ -185,15 +185,14 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 
 ## 卸载
 
-控制面板 / 开始菜单卸载会先结束从 `app\` 和 `envs\` 启动的进程(后台服务、转换、下载),然后弹出一个选项窗口(大小、位置与"卸载状态"窗口一致,单独一个窗口,不在状态窗口里:Inno 在卸载期间会禁用状态窗口,放进去的按钮点不了),列出可选删除的内容,**默认全部勾选**(取消勾选即保留;点"全部保留"或关闭窗口则都不删):
+控制面板 / 开始菜单卸载会先结束从 `app\`(含 `app\envs\`)启动的进程(后台服务、转换、下载),然后弹出一个选项窗口(大小、位置与"卸载状态"窗口一致,单独一个窗口,不在状态窗口里:Inno 在卸载期间会禁用状态窗口,放进去的按钮点不了),列出可选删除的内容,**默认全部勾选**(取消勾选即保留;点"全部保留"或关闭窗口则都不删):
 
-- **Python 环境**(`envs\`):目录存在才列出。
 - **你的数据**(`app\data`:聊天记录、设置、密钥):目录存在才列出。
 - **浏览器工具用的 Chromium**(`%LOCALAPPDATA%\ms-playwright`):目录存在才列出。这是 Playwright 的按用户共享缓存,其他用 Playwright 的程序也可能在用,所以和其它项一样可以取消勾选。
 - **QAIRT SDK `<版本>`**:`data\config\qairt_env.json` 的 `qairt_sdk_root` 指向的目录存在就列出(不再检查标记文件;默认位置 `C:\Qualcomm\AIStack\QAIRT\<版本>`,在 `app\` 之外)。路径必须是绝对本地路径且至少 3 层深,避免误删盘根或 `C:\Qualcomm`。勾选项旁边显示完整路径。
-- 程序文件一定会删。
+- 程序文件和 Python 环境(`app\envs\`)一定会删。
 - 没勾"你的数据"时:删除 `app\` 里除 `data\` 以外的全部内容(包括运行时下载的 `models\` 等)。勾了:删除整个 `app\`;所选的上层目录空了也一起删除。`data\downloads\_qairt_tmp.zip` 这类下载临时文件无论如何都会删。
-- 静默卸载(`/SILENT`、`/VERYSILENT`)不弹窗,什么可选内容都不删(与"全部保留"相同)。
+- 静默卸载(`/SILENT`、`/VERYSILENT`)不弹窗,什么可选内容都不删(与"全部保留"相同);`app\envs\` 照样删除。
 - uv / pip 的全局缓存(`%LOCALAPPDATA%\uv\cache` 等)是机器上共享的,不删。
 
 ## 已知限制

@@ -40,7 +40,7 @@ Setup.bat
 ```
 
 会做完：下载 uv / 安装 Python 3.13（默认 ARM64，`--arch x64` 时装 x64 版）/ 建 venv 到
-`%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_arm64_313`（或 `.venv_x64_313`）/
+项目目录下的 `envs\.venv_arm64_313`（或 `.venv_x64_313`，已被 git 忽略）/
 安装 `pyproject.toml` 全部依赖 / 初始化 `data/`（`qai.db`、出厂种子、secret 命名空间）。
 默认只装「快速基础运行时」，足以运行预编译模型。
 

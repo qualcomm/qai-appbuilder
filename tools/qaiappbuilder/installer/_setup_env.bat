@@ -12,7 +12,7 @@ REM   * only the pieces needed to run the server are installed by default;
 REM     everything heavy is opt-in
 REM   * same layout as Setup.bat, so Start.bat / qai.bat / Console.bat / Uninstall.bat
 REM     work on the result unchanged:
-REM       venv        %LOCALAPPDATA%\QAIModelBuilder\envs\.venv_<arch>_313
+REM       venv        <repo>\envs\.venv_<arch>_313   (removed with the program on uninstall)
 REM       data        <repo>\data   (uv, aria2c, 7zr, config\host_arch, qai.db ...)
 REM
 REM Usage: installer\_setup_env.bat [options]     (--help for the list)
@@ -105,7 +105,7 @@ if /i "%HOST_ARCH%"=="x64" (
     set "VENV_DIR_NAME=.venv_arm64_313"
     set "ASTGREP_ASSET=app-aarch64-pc-windows-msvc.zip"
 )
-set "ENVS_DIR=%LOCALAPPDATA%\QAIModelBuilder\envs"
+set "ENVS_DIR=%ROOT_DIR%envs"
 set "VENV_DIR=%ENVS_DIR%\%VENV_DIR_NAME%"
 set "VPY=%VENV_DIR%\Scripts\python.exe"
 set "DL_DIR=data\downloads"

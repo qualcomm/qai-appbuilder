@@ -285,9 +285,9 @@ def detect_arch(root: Path) -> str:
     return "x64" if m in ("amd64", "x86_64") else "arm64"
 
 
-def default_envs_dir() -> Path:
-    base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-    return Path(base) / "QAIModelBuilder" / "envs"
+def default_envs_dir(root: Path) -> Path:
+    """``<root>/envs`` - where Setup.bat / _setup_env.bat put every venv."""
+    return root / "envs"
 
 
 def build_ctx(args: argparse.Namespace) -> Ctx:
@@ -307,7 +307,7 @@ def build_ctx(args: argparse.Namespace) -> Ctx:
     return Ctx(
         root=root,
         arch=args.arch or detect_arch(root),
-        envs_dir=Path(args.envs_dir) if args.envs_dir else default_envs_dir(),
+        envs_dir=Path(args.envs_dir) if args.envs_dir else default_envs_dir(root),
         sdk_root=sdk_root,
         version=version,
         download_url=url,
@@ -1328,7 +1328,7 @@ def parse_args(argv: Optional[Sequence[str]]) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="install_builder_env", description=__doc__.split("\n")[0])
     p.add_argument("--root", help="app root (default: two levels above this script)")
     p.add_argument("--arch", choices=("x64", "arm64"), help="host arch (default: data/config/host_arch, then detect)")
-    p.add_argument("--envs-dir", help=r"venv directory (default: %%LOCALAPPDATA%%\QAIModelBuilder\envs)")
+    p.add_argument("--envs-dir", help=r"venv directory (default: <root>\envs)")
     p.add_argument("--sdk-root", help="QAIRT install dir (default from scripts/qairt_release.json)")
     p.add_argument("--sdk-version", help="override the pinned QAIRT version")
     p.add_argument("--download-url", help="override the SDK download URL")

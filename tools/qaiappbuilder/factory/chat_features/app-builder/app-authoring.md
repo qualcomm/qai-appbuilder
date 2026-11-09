@@ -466,7 +466,7 @@ if exist "%REPO_ROOT%\data\config\host_arch" (
     if /i "%PROCESSOR_ARCHITECTURE%"=="AMD64" set "VENV_NAME=.venv_x64_313"
     if /i "%PROCESSOR_ARCHITEW6432%"=="AMD64" set "VENV_NAME=.venv_x64_313"
 )
-set "PY=%LOCALAPPDATA%\QAIModelBuilder\envs\%VENV_NAME%\Scripts\python.exe"
+set "PY=%REPO_ROOT%\envs\%VENV_NAME%\Scripts\python.exe"
 if not exist "%PY%" set "PY=python"
 
 REM Startup dep check — abort on failure rather than starting broken server.
@@ -515,7 +515,7 @@ if (Test-Path -LiteralPath $HostArchFile -PathType Leaf) {
 } else {
     $VenvName = if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { '.venv_arm64_313' } else { '.venv_x64_313' }
 }
-$Py = "$env:LOCALAPPDATA\QAIModelBuilder\envs\$VenvName\Scripts\python.exe"
+$Py = Join-Path $RepoRoot "envs\$VenvName\Scripts\python.exe"
 if (-not (Test-Path -LiteralPath $Py)) { $Py = "python" }
 # Startup dependency check (reads requirements.txt, installs missing, runs pack
 # predeploy hooks). Abort on failure with the message it printed.

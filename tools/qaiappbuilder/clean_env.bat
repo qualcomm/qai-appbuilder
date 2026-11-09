@@ -18,7 +18,7 @@ REM   --purge-data       also delete the WHOLE data\ directory (user data!)
 REM   --purge-python     also remove uv-managed cpython-3.13 for this arch
 REM                      (with --all-envs: 3.13 arm64+x64 and the 3.10 x64 converter)
 REM                      ^(shared by other QAI installs on this machine^)
-REM   --all-envs         remove every venv under %LOCALAPPDATA%\QAIModelBuilder\envs
+REM   --all-envs         remove every venv under <repo>\envs
 REM   --purge-qairt      also remove the QAIRT SDK installed by --builder: C:\Qualcomm\AIStack\QAIRT\<ver>
 REM                      (only the version pinned in scripts\qairt_release.json), the kept SDK zip
 REM                      data\sdk\qairt, the script backup data\sdk\qairt-scripts, data\config\qairt_env.json
@@ -84,7 +84,7 @@ if /i not "%HOST_ARCH%"=="arm64" if /i not "%HOST_ARCH%"=="x64" (
 set "VENV_DIR_NAME=.venv_arm64_313"
 set "PY_SPEC=cpython-3.13-windows-aarch64"
 if /i "%HOST_ARCH%"=="x64" ( set "VENV_DIR_NAME=.venv_x64_313" & set "PY_SPEC=cpython-3.13-windows-x86_64" )
-set "ENVS_DIR=%LOCALAPPDATA%\QAIModelBuilder\envs"
+set "ENVS_DIR=%ROOT_DIR%envs"
 set "VENV_DIR=%ENVS_DIR%\%VENV_DIR_NAME%"
 set "VENV_310_DIR=%ENVS_DIR%\.venv_x64_310"
 set "QAI_LAD=%LOCALAPPDATA%\QAIModelBuilder"
@@ -233,7 +233,7 @@ echo   Default: runtime venv ^(.venv_^<arch^>_313^) + x64 converter venv ^(.venv
 echo            data\downloads, data\bin\uv^|aria2c^|7zr, data\config\host_arch, vendor bundle.
 echo.
 echo   --arch arm64^|x64     which runtime venv ^(default: data\config\host_arch, else detect^)
-echo   --all-envs           every venv under %%LOCALAPPDATA%%\QAIModelBuilder\envs
+echo   --all-envs           every venv under ^<repo^>\envs
 echo   --purge-python       uv-managed Python builds ^(shared with other installs^)
 echo   --purge-qairt        QAIRT SDK C:\Qualcomm\AIStack\QAIRT\^<pinned ver^> + data\sdk\qairt* + qairt_env.json
 echo   --purge-frontend     portable Node, corepack, pnpm shim, frontend\node_modules, data\pnpm-virtual-store
