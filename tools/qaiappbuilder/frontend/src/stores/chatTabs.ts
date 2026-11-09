@@ -1326,7 +1326,10 @@ export const useChatTabsStore = defineStore("chatTabs", {
         return 0;
       }
       const created: ChatTab[] = [];
+      // Index into `created` of each persisted entry (-1 = skipped), so `activeIndex` still points at the right tab.
+      const createdIndexOf: number[] = [];
       for (const entry of layout.tabs) {
+        createdIndexOf.push(created.length);
         if (entry.kind === "subagent" && typeof entry.subagentId === "string") {
           // Sub-agent placeholder: synchronously create a `kind: "subagent"`
           // tab so the strip shows it immediately in the saved position.
@@ -1352,15 +1355,17 @@ export const useChatTabsStore = defineStore("chatTabs", {
           void this._hydrateRestoredSubAgentTab(placeholderTab.id, subagentId);
           continue;
         }
-        // openTab with a conversationId is never gated by MAX_OPEN_TABS;
-        // a null-conversation (blank) entry is a normal new tab. Pass the
-        // saved title so the strip shows it immediately (before history
-        // loads). `conversationId: null` → omit so it counts as a blank tab.
-        const tab = this.openTab(
-          entry.conversationId !== null
-            ? { conversationId: entry.conversationId, title: entry.title }
-            : { title: entry.title },
-        );
+        // A main-agent entry with NO conversation holds nothing worth restoring: no messages were ever sent in it,
+        // or its conversation was found missing and the id was dropped (which used to keep the stale title, so the
+        // strip showed a ghost tab for a conversation that no longer exists). Skip it; when nothing is left the
+        // caller opens one fresh blank tab.
+        if (entry.conversationId === null || entry.conversationId === "") {
+          createdIndexOf[createdIndexOf.length - 1] = -1;
+          continue;
+        }
+        // openTab with a conversationId is never gated by MAX_OPEN_TABS. Pass the saved title so the strip shows
+        // it immediately (before history loads).
+        const tab = this.openTab({ conversationId: entry.conversationId, title: entry.title });
         // Restore the per-session tool / SKILL override saved with this tab
         // (close+reopen / reload persistence). Normalised on load; only a
         // non-empty diff is present here.
@@ -1376,7 +1381,8 @@ export const useChatTabsStore = defineStore("chatTabs", {
         // the right entry.
         created.push(tab);
       }
-      const activeTab = created[layout.activeIndex] ?? created[0];
+      const activeCreated = createdIndexOf[layout.activeIndex] ?? -1;
+      const activeTab = (activeCreated >= 0 ? created[activeCreated] : undefined) ?? created[0];
       if (activeTab !== undefined) {
         this.activeTabId = activeTab.id;
       }
@@ -6082,7 +6088,8 @@ export const useChatTabsStore = defineStore("chatTabs", {
           ) {
             this.closeTab(tabId, "destroy");
           } else if (cur !== undefined && cur.conversationId === convId) {
-            this._patchTab(tabId, { conversationId: null });
+            // The old title belongs to the vanished conversation: drop it with the id.
+            this._patchTab(tabId, { conversationId: null, title: "" });
           }
         }
         // Otherwise silent — sidebar already surfaces history-load failures.
