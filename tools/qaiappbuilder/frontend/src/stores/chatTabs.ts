@@ -6062,8 +6062,28 @@ export const useChatTabsStore = defineStore("chatTabs", {
         // a blank conversation so the next send auto-creates a fresh one (V1
         // parity: sending is never dead-ended by a stale id). A transient
         // network/5xx error must NOT drop a valid id — only reset on not_found.
+        //
+        // A tab that is still an untouched shell for that dead conversation
+        // (no messages, idle, still bound to the same id) is CLOSED instead:
+        // keeping it would leave a ghost tab with the old title on the strip
+        // (e.g. after a reinstall that kept the WebView localStorage but has an
+        // empty DB). `closeTab` always leaves at least one blank tab open.
+        // `destroy`: the conversation is gone, so its per-session override /
+        // scroll memory are purged too. A tab the user already started using
+        // keeps the old behaviour (unbind only, so nothing typed is lost).
         if (isConversationNotFound(err)) {
-          this._patchTab(tabId, { conversationId: null });
+          const cur = this.tabs.find((t) => t.id === tabId);
+          if (
+            cur !== undefined &&
+            cur.kind !== "subagent" &&
+            cur.conversationId === convId &&
+            cur.messages.length === 0 &&
+            cur.status === "idle"
+          ) {
+            this.closeTab(tabId, "destroy");
+          } else if (cur !== undefined && cur.conversationId === convId) {
+            this._patchTab(tabId, { conversationId: null });
+          }
         }
         // Otherwise silent — sidebar already surfaces history-load failures.
         return;
