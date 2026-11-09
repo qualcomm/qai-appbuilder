@@ -143,7 +143,7 @@ english.UninstIntro=Untick what you want to keep for a later reinstall.
 english.UninstData=Your data (chat history, settings, secrets)
 english.UninstSdk=QAIRT SDK %1 (model conversion, several GB; other tools may use it too)
 english.UninstOk=Uninstall
-english.UninstKeepAll=Keep all
+english.UninstCancel=Cancel
 english.SdkRemoveFailed=Could not fully delete the QAIRT SDK folder:%n%1%n%nA file in it may be in use. Close programs that use it and delete the folder by hand.
 chinesesimp.NetTitle=网络
 chinesesimp.NetSub=安装程序应从哪里下载 Python 和依赖?
@@ -179,7 +179,7 @@ chinesesimp.UninstIntro=取消勾选即可保留,供以后重新安装使用。
 chinesesimp.UninstData=你的数据(聊天记录、设置、密钥)
 chinesesimp.UninstSdk=QAIRT SDK %1(模型转换用,占用数 GB;其他工具也可能在使用)
 chinesesimp.UninstOk=卸载
-chinesesimp.UninstKeepAll=全部保留
+chinesesimp.UninstCancel=取消
 chinesesimp.SdkRemoveFailed=未能完全删除 QAIRT SDK 文件夹:%n%1%n%n其中可能有文件正被占用。请关闭使用它的程序后手动删除该文件夹。
 
 [Code]
@@ -675,9 +675,10 @@ var
 // A window of its own, shown when the uninstall starts. It is NOT put inside "Uninstall Status": Inno disables that
 // window while it uninstalls, so controls placed in it cannot be clicked (measured). The window is sized and
 // centred like Uninstall Status. One tick box per optional item, all ticked; an item whose folder is not there is
-// not listed. "Keep all" (or closing the window) ticks nothing. The SDK path comes from qairt_env.json, which
-// lives in data\, so this must run BEFORE data\ is deleted.
-procedure AskUninstallChoices;
+// not listed. "Uninstall" goes on with what is ticked; "Cancel" (or closing the window) returns False and the caller
+// stops the uninstall with nothing removed. The SDK path comes from qairt_env.json, which lives in data\, so this
+// must run BEFORE data\ is deleted.
+function AskUninstallChoices: Boolean;
 var
   Form: TSetupForm;
   List: TNewCheckListBox;
@@ -685,6 +686,7 @@ var
   IxData, IxSdk, W, H, Pct: Integer;
   DataDir: String;
 begin
+  Result := True;
   RemoveAllData := False;
   DelSdk := False;
   DataDir := ExpandConstant('{app}\app\data');
@@ -710,7 +712,7 @@ begin
     OkBtn.Default := True;
     KeepBtn := TNewButton.Create(Form);
     KeepBtn.Parent := Form;
-    KeepBtn.Caption := CustomMessage('UninstKeepAll');
+    KeepBtn.Caption := CustomMessage('UninstCancel');
     KeepBtn.ModalResult := mrCancel;
     KeepBtn.Cancel := True;
     W := Form.CalculateButtonWidth([OkBtn.Caption, KeepBtn.Caption]);
@@ -751,7 +753,8 @@ begin
 
     Form.FlipAndCenterIfNeeded(True, UninstallProgressForm, False);
 
-    if Form.ShowModal = mrOk then
+    Result := Form.ShowModal = mrOk;
+    if Result then
     begin
       RemoveAllData := (IxData >= 0) and List.Checked[IxData];
       DelSdk := (IxSdk >= 0) and List.Checked[IxSdk];
@@ -768,6 +771,11 @@ begin
   if CurUninstallStep = usUninstall then
   begin
     RemoveAllData := False;
+    // Ask FIRST, before anything is stopped or deleted: "Cancel" must leave the app exactly as it was. Abort in
+    // usUninstall ends the uninstaller without removing anything (Inno: Abort is honoured in this step).
+    // Silent: no dialog; keep data and the SDK (envs\ still goes in usPostUninstall).
+    if not UninstallSilent then
+      if not AskUninstallChoices then Abort;
     // The backend server / a conversion / a download may still be running from here: stop them first, or their
     // open files survive the delete. This includes the venvs: the server runs from {app}\app\envs\.venv_*.
     StopProcessesUnder(App);
@@ -775,8 +783,6 @@ begin
     // remove it, also on a silent uninstall. The window was stopped just above (it runs from {app}\app\desktop), so the
     // folder is no longer locked. Keeping it would restore tabs for conversations a fresh database does not have.
     DelTree(WebViewDataDir, True, True, True);
-    if UninstallSilent then Exit;  // silent: keep data and the SDK (envs\ still goes in usPostUninstall)
-    AskUninstallChoices;
     if RemoveAllData then
     begin
       DelTree(ExpandConstant('{app}\app\data'), True, True, True);
