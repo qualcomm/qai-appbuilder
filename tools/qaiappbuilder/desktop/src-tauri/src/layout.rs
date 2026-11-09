@@ -34,11 +34,9 @@ pub fn host_arch(root: &Path) -> &'static str {
     if cfg!(target_arch = "aarch64") { "arm64" } else { "x64" }
 }
 
-/// `%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_<arch>_313\Scripts\python.exe`, or None when it does not exist.
+/// `<root>\envs\.venv_<arch>_313\Scripts\python.exe` (same place Start.bat uses), or None when it does not exist.
 pub fn venv_python(root: &Path) -> Option<PathBuf> {
-    let local = std::env::var_os("LOCALAPPDATA")?;
-    let p = PathBuf::from(local)
-        .join("QAIModelBuilder")
+    let p = root
         .join("envs")
         .join(format!(".venv_{}_313", host_arch(root)))
         .join("Scripts")

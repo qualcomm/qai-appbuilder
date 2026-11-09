@@ -11,7 +11,7 @@ REM
 REM   Thin wrapper that delegates to ``scripts/init/uninstall.py``.
 REM   Rolls back ONLY what Setup.bat installed OUTSIDE the project directory:
 REM     1. Stop running services
-REM     2. Delete venvs + signed Python (WDAC fallback) + PortableGit + Node.js (%LOCALAPPDATA%\QAIModelBuilder\)
+REM     2. Delete venvs (<repo>\envs\) + signed Python (WDAC fallback) + PortableGit + Node.js (%LOCALAPPDATA%\QAIModelBuilder\)
 REM     3. Delete temp files (%TEMP%\QAIModelBuilder\)
 REM     4. Clean install temp archives in data\downloads\ (whitelist)
 REM     5. Remove data\bin (uv / aria2c / 7zr Setup-installed tooling)
@@ -49,8 +49,8 @@ REM                                  SHARED with every other Rust project.
 REM                                  Implies --desktop. NOT implied by --all.
 REM     Uninstall.bat --all --vs     Everything: --all PLUS uninstall VS 2022.
 REM
-REM   IMPORTANT: This script does NOT touch the project directory or its
-REM   data/ folder (qai.db, logs, sandboxes, downloads, config) -- that is
+REM   IMPORTANT: Apart from envs\ (venvs) and data\bin (tools), this script does
+REM   NOT touch the project directory or its data/ folder (qai.db, logs, sandboxes, downloads, config) -- that is
 REM   USER DATA and is left fully intact. Delete the project folder yourself
 REM   only if you want to remove the application entirely.
 REM ===========================================================================
@@ -90,9 +90,9 @@ REM   4. None of the above -> fall through to :manual_cleanup, which now
 REM      handles --all and --vs in pure batch / PowerShell.
 REM
 REM NOTE: the venv/interpreter locator only picks WHICH python drives
-REM uninstall.py; the actual cleanup deletes the whole
-REM %LOCALAPPDATA%\QAIModelBuilder tree -- venvs (.venv_arm64_313 /
-REM .venv_x64_313 / .venv_x64_310), the WDAC-fallback signed Python under
+REM uninstall.py; the actual cleanup deletes the whole <repo>\envs tree
+REM (.venv_arm64_313 / .venv_x64_313 / .venv_x64_310) and the whole
+REM %LOCALAPPDATA%\QAIModelBuilder tree -- the WDAC-fallback signed Python under
 REM python\3.13 + python\3.10, PortableGit, Node.js -- and, below, uv
 REM interpreters for BOTH architectures, so removal is host-arch-independent.
 REM (A signed Python REUSED from an existing system install, e.g. an official
@@ -141,7 +141,8 @@ if /i "%HOST_ARCH%"=="x64" set "VENV_DIR_NAME=.venv_x64_313"
 if /i "%HOST_ARCH%"=="x64" set "UV_CPY_ARCH=x86_64"
 
 set "LOCALAPP_QAI=%LOCALAPPDATA%\QAIModelBuilder"
-set "VENV_PYTHON=%LOCALAPP_QAI%\envs\%VENV_DIR_NAME%\Scripts\python.exe"
+set "REPO_ENVS=%~dp0envs"
+set "VENV_PYTHON=%REPO_ENVS%\%VENV_DIR_NAME%\Scripts\python.exe"
 set "UV_PYTHON_ROOT=%APPDATA%\uv\python"
 set "UV_CPY313=%UV_PYTHON_ROOT%\cpython-3.13-windows-%UV_CPY_ARCH%-none\python.exe"
 set "PYTHON="
@@ -152,7 +153,7 @@ if exist "%VENV_PYTHON%" (
     REM The interpreter lives INSIDE the tree we are about to delete. A
     REM running EXE image is locked on Windows, so uninstall.py cannot
     REM rmtree it from within (WinError 5). We tell Python to SKIP the
-    REM LOCALAPPDATA tree and delete it ourselves below, after Python exits.
+    REM venv / LOCALAPPDATA trees and delete them ourselves below, after Python exits.
     set "PYTHON_IN_TREE=1"
     goto :python_ready
 )
@@ -248,14 +249,24 @@ REM Python has now exited, so the venv python.exe is no longer locked. Only
 REM do this when (a) we ran the in-tree interpreter AND (b) Python completed
 REM successfully (exit 0) -- never on user-cancel (exit 1) or error (exit 2).
 if defined PYTHON_IN_TREE if "!PY_EXIT!"=="0" (
+    if exist "%REPO_ENVS%" (
+        echo  [INFO] Removing venvs post-exit: %REPO_ENVS%
+        rd /s /q "%REPO_ENVS%" 2>nul
+        if exist "%REPO_ENVS%" (
+            echo  [WARN] Could not fully remove %REPO_ENVS%.
+            echo         Some files may still be locked; reboot and delete it manually.
+        ) else (
+            echo  [OK]   Venvs removed.
+        )
+    )
     if exist "%LOCALAPP_QAI%" (
-        echo  [INFO] Removing venvs tree post-exit: %LOCALAPP_QAI%
+        echo  [INFO] Removing tools tree post-exit: %LOCALAPP_QAI%
         rd /s /q "%LOCALAPP_QAI%" 2>nul
         if exist "%LOCALAPP_QAI%" (
             echo  [WARN] Could not fully remove %LOCALAPP_QAI%.
             echo         Some files may still be locked; reboot and delete it manually.
         ) else (
-            echo  [OK]   Venvs tree removed.
+            echo  [OK]   Tools tree removed.
         )
     )
 )
@@ -321,6 +332,7 @@ timeout /t 3 /nobreak >nul
 for /f "tokens=2" %%p in ('wmic process where "ExecutablePath like '%%%LOCALAPPDATA:\=\\%%%\\QAIModelBuilder%%'" get ProcessId 2^>nul ^| findstr /r "[0-9]"') do (
     taskkill /f /pid %%p >nul 2>&1
 )
+powershell -NoProfile -Command "$p = '%REPO_ENVS%'; Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($p, 'OrdinalIgnoreCase') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }" >nul 2>&1
 timeout /t 2 /nobreak >nul
 
 REM NOTE: we deliberately do NOT touch %~dp0data\ files outside data\bin\ or
@@ -328,9 +340,16 @@ REM data\downloads\ install temp archives. data\ otherwise holds USER DATA
 REM (qai.db, logs, runtime model weights, config) and must survive.
 
 echo -- Manual fallback: removing venvs ----------------------------------------
+if exist "%REPO_ENVS%" (
+    rd /s /q "%REPO_ENVS%" 2>nul
+    echo    [OK] Venvs removed.
+) else (
+    echo    [SKIP] Not present.
+)
+echo -- Manual fallback: removing %LOCALAPPDATA%\QAIModelBuilder -------------
 if exist "%LOCALAPPDATA%\QAIModelBuilder" (
     rd /s /q "%LOCALAPPDATA%\QAIModelBuilder" 2>nul
-    echo    [OK] Venvs removed.
+    echo    [OK] Tools removed.
 ) else (
     echo    [SKIP] Not present.
 )

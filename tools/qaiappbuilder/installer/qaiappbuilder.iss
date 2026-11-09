@@ -62,7 +62,7 @@ OutputBaseFilename=QAIAppBuilder-{#AppVersion}-qairt{#QairtTag}-{#Arch}-setup
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
-; _setup_env.bat (without --builder) creates the runtime venv (~0.75 GB, measured) plus download caches
+; _setup_env.bat (without --builder) creates the runtime venv in {app}\app\envs (~0.75 GB, measured) plus download caches
 ; (+ ~0.2 GB vendor wheels on ARM64), + Chromium (~0.4 GB unpacked, in %LOCALAPPDATA%\ms-playwright) and
 ; ast-grep (~0.1 GB). The converter venv (.venv_x64_310) and the QAIRT SDK are NOT installed here.
 ExtraDiskSpaceRequired=3000000000
@@ -135,7 +135,6 @@ english.RepairName=Repair or complete environment setup
 english.LaunchNow=Start QAI AppBuilder now
 english.UninstTitle=Choose what else to remove
 english.UninstIntro=Untick what you want to keep for a later reinstall.
-english.UninstEnvs=Python environments
 english.UninstData=Your data (chat history, settings, secrets)
 english.UninstSdk=QAIRT SDK %1 (model conversion, several GB; other tools may use it too)
 english.UninstBrowser=Chromium browser for the browser tools (~0.4 GB; other Playwright programs may use it too)
@@ -174,7 +173,6 @@ chinesesimp.RepairName=修复或完成环境配置
 chinesesimp.LaunchNow=立即启动 QAI AppBuilder
 chinesesimp.UninstTitle=选择还要删除的内容
 chinesesimp.UninstIntro=取消勾选即可保留,供以后重新安装使用。
-chinesesimp.UninstEnvs=Python 环境
 chinesesimp.UninstData=你的数据(聊天记录、设置、密钥)
 chinesesimp.UninstSdk=QAIRT SDK %1(模型转换用,占用数 GB;其他工具也可能在使用)
 chinesesimp.UninstBrowser=浏览器工具用的 Chromium(约 0.4 GB;其他 Playwright 程序也可能在使用)
@@ -659,7 +657,6 @@ end;
 
 var
   RemoveAllData: Boolean;   // user ticked "your data"
-  DelEnvs: Boolean;         // user ticked "Python environments"
   DelSdk: Boolean;          // user ticked the QAIRT SDK
   DelBrowser: Boolean;      // user ticked the Playwright Chromium cache
   DelUv: Boolean;           // user ticked uv's Python installs + cache (%APPDATA%\uv, %LOCALAPPDATA%\uv)
@@ -675,11 +672,10 @@ var
   Form: TSetupForm;
   List: TNewCheckListBox;
   OkBtn, KeepBtn: TNewButton;
-  IxEnv, IxData, IxSdk, IxBrowser, IxUv, W, H, Pct: Integer;
-  EnvDir, DataDir, BrowserDir, UvRoaming, UvLocal: String;
+  IxData, IxSdk, IxBrowser, IxUv, W, H, Pct: Integer;
+  DataDir, BrowserDir, UvRoaming, UvLocal: String;
 begin
   RemoveAllData := False;
-  DelEnvs := False;
   DelSdk := False;
   DelBrowser := False;
   DelUv := False;
@@ -687,12 +683,11 @@ begin
   // user, so this item is offered UNticked.
   UvRoaming := ExpandConstant('{userappdata}\uv');
   UvLocal := ExpandConstant('{localappdata}\uv');
-  EnvDir := ExpandConstant('{localappdata}\QAIModelBuilder\envs');
   DataDir := ExpandConstant('{app}\app\data');
   // _setup_env.bat --with-browser: `playwright install chromium` puts the browser in this per-user cache
   BrowserDir := ExpandConstant('{localappdata}\ms-playwright');
   SdkPath := SdkToOffer;
-  if not (DirExists(EnvDir) or DirExists(DataDir) or DirExists(BrowserDir) or DirExists(UvRoaming)
+  if not (DirExists(DataDir) or DirExists(BrowserDir) or DirExists(UvRoaming)
           or DirExists(UvLocal) or (SdkPath <> '')) then Exit;
 
   // CreateCustomForm scales its size arguments to the screen DPI itself, so give it 96-dpi numbers: take the
@@ -733,18 +728,12 @@ begin
     List.Top := ScaleY(12);
     List.Width := Form.ClientWidth - ScaleX(24);
     List.Height := KeepBtn.Top - List.Top - ScaleY(12);
-    IxEnv := -1;
     IxData := -1;
     IxSdk := -1;
     IxBrowser := -1;
     IxUv := -1;
     // The intro text is the first row, then each item with its folder on an indented line below it.
     List.AddGroup(CustomMessage('UninstIntro'), '', 0, nil);
-    if DirExists(EnvDir) then
-    begin
-      IxEnv := List.AddCheckBox(CustomMessage('UninstEnvs'), '', 0, True, True, False, False, nil);
-      List.AddGroup(EnvDir, '', 1, nil);
-    end;
     if DirExists(DataDir) then
     begin
       IxData := List.AddCheckBox(CustomMessage('UninstData'), '', 0, True, True, False, False, nil);
@@ -774,7 +763,6 @@ begin
 
     if Form.ShowModal = mrOk then
     begin
-      DelEnvs := (IxEnv >= 0) and List.Checked[IxEnv];
       RemoveAllData := (IxData >= 0) and List.Checked[IxData];
       DelSdk := (IxSdk >= 0) and List.Checked[IxSdk];
       DelBrowser := (IxBrowser >= 0) and List.Checked[IxBrowser];
@@ -793,17 +781,15 @@ begin
   begin
     RemoveAllData := False;
     // The backend server / a conversion / a download may still be running from here: stop them first, or their
-    // open files survive the delete. Envs are included (the server runs from envs\.venv_*).
+    // open files survive the delete. This includes the venvs: the server runs from {app}\app\envs\.venv_*.
     StopProcessesUnder(App);
-    StopProcessesUnder(ExpandConstant('{localappdata}\QAIModelBuilder\envs'));
-    if UninstallSilent then Exit;  // silent: keep envs, data and the SDK (see usPostUninstall for the rest)
+    if UninstallSilent then Exit;  // silent: keep data and the SDK (envs\ still goes in usPostUninstall)
     AskUninstallChoices;
-    if DelEnvs then DelTree(ExpandConstant('{localappdata}\QAIModelBuilder\envs'), True, True, True);
     if RemoveAllData then DelTree(ExpandConstant('{app}\app\data'), True, True, True);
     if DelBrowser then DelTree(ExpandConstant('{localappdata}\ms-playwright'), True, True, True);
     if DelUv then
     begin
-      // the venvs' python.exe live under Roaming\uv\python; their processes were stopped above with envs\
+      // the venvs' base python.exe live under Roaming\uv\python; their processes were stopped above with {app}\app
       StopProcessesUnder(ExpandConstant('{userappdata}\uv'));
       DelTree(ExpandConstant('{userappdata}\uv'), True, True, True);
       DelTree(ExpandConstant('{localappdata}\uv'), True, True, True);
@@ -817,9 +803,9 @@ begin
 
   if CurUninstallStep = usPostUninstall then
   begin
-    // Inno has removed the files it installed. Whatever is left in {app}\app was created at run time (models\,
-    // vendor\, logs, caches ...) and is ours too: remove it all, keeping only data\ unless the user chose to
-    // delete their data.
+    // Inno has removed the files it installed. Whatever is left in {app}\app was created at run time (envs\ with
+    // the venvs, models\, vendor\, logs, caches ...) and is ours too: remove it all, keeping only data\ unless the
+    // user chose to delete their data.
     if DirExists(App) then
     begin
       if RemoveAllData or (not DirExists(AddBackslash(App) + 'data')) then
@@ -828,7 +814,7 @@ begin
         DeleteDirContentsExcept(App, 'data');
     end;
     // The parent the user picked: removed only when nothing is left in it (RemoveDir fails on a non-empty dir),
-    // e.g. %LOCALAPPDATA%\QAIModelBuilder once app\ and envs\ are gone.
+    // e.g. %LOCALAPPDATA%\QAIModelBuilder once app\ is gone.
     RemoveDir(ExpandConstant('{app}'));
   end;
 end;

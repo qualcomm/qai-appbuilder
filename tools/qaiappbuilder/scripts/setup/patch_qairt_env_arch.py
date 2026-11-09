@@ -15,6 +15,9 @@ host (shared network path, copied deployment). Without this patch the
 App Builder persistent runner would launch the ARM64 Python interpreter on
 an x64 machine (or vice-versa).
 
+It also points the venv keys at ``<root>/envs`` (root = two levels above this script), so a
+qairt_env.json kept in data/ from an install whose venvs lived elsewhere is corrected.
+
 Idempotent: exits silently when values already match.
 """
 
@@ -48,20 +51,29 @@ def main() -> int:
     venv_name = ".venv_arm64_313" if host_arch == "arm64" else ".venv_x64_313"
     subdir = "arm64x-windows-msvc" if host_arch == "arm64" else "x86_64-windows-msvc"
     arch_val = "aarch64" if host_arch == "arm64" else "x86_64"
-    local_app_data = os.environ.get("LOCALAPPDATA", "")
-    expected_venv = os.path.join(local_app_data, "QAIModelBuilder", "envs", venv_name)
+    envs_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "envs")
+    expected_venv = os.path.join(envs_dir, venv_name)
 
     changed = False
 
+    def _same(a: str, b: str) -> bool:
+        return os.path.normcase(os.path.normpath(a)) == os.path.normcase(os.path.normpath(b))
+
     # --- python_runtime_venv ---
     cur_rv = data.get("python_runtime_venv", "")
-    if cur_rv:
-        # Normalise separators for comparison.
-        normalised = cur_rv.replace("\\", "/")
-        if not normalised.endswith(venv_name):
-            data["python_runtime_venv"] = expected_venv
-            changed = True
+    if cur_rv and not _same(cur_rv, expected_venv):
+        data["python_runtime_venv"] = expected_venv
+        changed = True
     # If key is absent, don't add it (Step 8.6 generates the full file).
+
+    # --- python_x64_venv / python_arm64_venv: keep the venv name, move it under <root>/envs ---
+    for key in ("python_x64_venv", "python_arm64_venv"):
+        cur = data.get(key, "")
+        if cur:
+            want = os.path.join(envs_dir, os.path.basename(os.path.normpath(cur)))
+            if not _same(cur, want):
+                data[key] = want
+                changed = True
 
     # --- python_arm64_venv (legacy key, also read by QairtEnvJsonResolver) ---
     cur_arm64 = data.get("python_arm64_venv", "")

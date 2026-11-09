@@ -130,13 +130,13 @@ def _qairt_sentinel(sdk_root: Path) -> Path:
         relative = _QAIRT_SENTINEL_LINUX_X64
     return sdk_root / relative
 
-# Canonical install locations (S8 audit P0-L2):
+# Canonical install locations (S8 audit P0-L2). The venvs live in <repo>/envs (Setup.bat / _setup_env.bat).
 LOCALAPPDATA_RELATIVE = Path("QAIModelBuilder")
-ARM64_VENV_RELATIVE = LOCALAPPDATA_RELATIVE / "envs" / ".venv_arm64_313"
-X64_VENV_RELATIVE = LOCALAPPDATA_RELATIVE / "envs" / ".venv_x64_310"
+ARM64_VENV_NAME = ".venv_arm64_313"
+X64_VENV_NAME = ".venv_x64_310"
 # x64 host runtime venv (Python 3.13, mirrors setup_qairt_env.py). Distinct
-# from X64_VENV_RELATIVE which is the x64 CONVERTER venv (Python 3.10).
-X64_RUNTIME_VENV_RELATIVE = LOCALAPPDATA_RELATIVE / "envs" / ".venv_x64_313"
+# from X64_VENV_NAME which is the x64 CONVERTER venv (Python 3.10).
+X64_RUNTIME_VENV_NAME = ".venv_x64_313"
 QAIRT_CONFIG_RELATIVE = LOCALAPPDATA_RELATIVE / "config" / "qairt_env.json"
 
 
@@ -152,11 +152,11 @@ def _current_arch() -> str:
     return "x64"
 
 
-def _runtime_venv_relative() -> Path:
-    """Host-arch runtime venv relative path (Python 3.13)."""
+def _runtime_venv_name() -> str:
+    """Host-arch runtime venv directory name (Python 3.13)."""
     if _current_arch() == "arm64":
-        return ARM64_VENV_RELATIVE
-    return X64_RUNTIME_VENV_RELATIVE
+        return ARM64_VENV_NAME
+    return X64_RUNTIME_VENV_NAME
 
 
 def _qairt_runtime_subdir() -> str:
@@ -268,9 +268,9 @@ def _resolve_paths(args: argparse.Namespace) -> InstallPaths:
         default_config_path = repo / "data" / "config" / "qairt_env.json"
     else:
         lad = _localappdata()
-        arm64 = lad / "QAIModelBuilder" / "envs" / ".venv_arm64_313"
-        x64 = lad / "QAIModelBuilder" / "envs" / ".venv_x64_310"
-        runtime = lad / _runtime_venv_relative()
+        arm64 = repo / "envs" / ARM64_VENV_NAME
+        x64 = repo / "envs" / X64_VENV_NAME
+        runtime = repo / "envs" / _runtime_venv_name()
         default_config_path = lad / "QAIModelBuilder" / "config" / "qairt_env.json"
 
     sdk_root_override = args.sdk_root or os.environ.get("QAIRT_SDK_ROOT")

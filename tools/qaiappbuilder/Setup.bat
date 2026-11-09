@@ -4,7 +4,7 @@ REM Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 REM SPDX-License-Identifier: BSD-3-Clause
 REM ---------------------------------------------------------------------
 REM QAIModelBuilder - One-click Python environment setup (uv)
-REM Downloads uv, installs Python 3.13 ARM64 native, creates venv in %LOCALAPPDATA%\QAIModelBuilder\envs, installs dependencies.
+REM Downloads uv, installs Python 3.13 ARM64 native, creates venv in <repo>\envs (git-ignored), installs dependencies.
 
 REM NOTE: Do NOT use "chcp 65001" here - it causes cmd.exe to silently drop leading
 REM       characters from command output on some Windows versions (known OS bug).
@@ -234,7 +234,8 @@ set "UV_BIN_DIR=data\bin\uv"
 set "UV_EXE=data\bin\uv\uv.exe"
 set "UV_URL=https://github.com/astral-sh/uv/releases/latest/download/uv-%UV_ARCH%-pc-windows-msvc.zip"
 set "UV_ZIP=data\downloads\_uv_tmp.zip"
-set "VENV_DIR=%LOCALAPPDATA%\QAIModelBuilder\envs\%VENV_DIR_NAME%"
+set "ENVS_DIR=%ROOT_DIR%envs"
+set "VENV_DIR=%ENVS_DIR%\%VENV_DIR_NAME%"
 set "VENDOR_DIR=vendor"
 set "WHL_DIR=vendor\whl"
 REM Only ARM64-native wheels that PyPI does NOT provide (or has revoked
@@ -266,7 +267,7 @@ set "WHL_GRIMP=vendor\whl\grimp-3.14-cp313-cp313-win_arm64.whl"
 if not exist "data\bin\uv" mkdir "data\bin\uv"
 if not exist "data\bin\aria2c" mkdir "data\bin\aria2c"
 if not exist "data\bin\7zr" mkdir "data\bin\7zr"
-if not exist "%LOCALAPPDATA%\QAIModelBuilder\envs" mkdir "%LOCALAPPDATA%\QAIModelBuilder\envs"
+if not exist "%ENVS_DIR%" mkdir "%ENVS_DIR%"
 if not exist "%DL_DIR%" mkdir "%DL_DIR%"
 
 REM --- Step 0: Download aria2c if not present (needed for fast multi-thread downloads) ---
@@ -2581,7 +2582,7 @@ echo  +----------------------------------------------------------+
 echo  ^|   Step 8: QAIRT model-builder environment                ^|
 echo  +----------------------------------------------------------+
 
-set "VENV_310_DIR=%LOCALAPPDATA%\QAIModelBuilder\envs\.venv_x64_310"
+set "VENV_310_DIR=%ROOT_DIR%envs\.venv_x64_310"
 set "SETUP_HELPER=scripts\setup\setup_qairt_env.py"
 set "ARIA2C_EXE=data\bin\aria2c\aria2c.exe"
 
