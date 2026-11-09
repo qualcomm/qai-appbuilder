@@ -68,7 +68,7 @@ Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
 ; _setup_env.bat (without --builder) creates the runtime venv in {app}\app\envs (~0.75 GB, measured) plus download caches
-; (+ ~0.2 GB vendor wheels on ARM64), + Chromium (~0.4 GB unpacked, in %LOCALAPPDATA%\ms-playwright) and
+; (+ ~0.2 GB vendor wheels on ARM64), + Chromium (~0.7 GB unpacked, in {app}\app\envs\ms-playwright) and
 ; ast-grep (~0.1 GB). The converter venv (.venv_x64_310) and the QAIRT SDK are NOT installed here.
 ExtraDiskSpaceRequired=3000000000
 UninstallDisplayName={#AppName} ({#Arch})
@@ -142,8 +142,6 @@ english.UninstTitle=Choose what else to remove
 english.UninstIntro=Untick what you want to keep for a later reinstall.
 english.UninstData=Your data (chat history, settings, secrets)
 english.UninstSdk=QAIRT SDK %1 (model conversion, several GB; other tools may use it too)
-english.UninstBrowser=Chromium browser for the browser tools (~0.4 GB; other Playwright programs may use it too)
-english.UninstUv=uv-managed Python interpreters and uv cache (shared: other programs that use uv lose them too)
 english.UninstOk=Uninstall
 english.UninstKeepAll=Keep all
 english.SdkRemoveFailed=Could not fully delete the QAIRT SDK folder:%n%1%n%nA file in it may be in use. Close programs that use it and delete the folder by hand.
@@ -180,8 +178,6 @@ chinesesimp.UninstTitle=选择还要删除的内容
 chinesesimp.UninstIntro=取消勾选即可保留,供以后重新安装使用。
 chinesesimp.UninstData=你的数据(聊天记录、设置、密钥)
 chinesesimp.UninstSdk=QAIRT SDK %1(模型转换用,占用数 GB;其他工具也可能在使用)
-chinesesimp.UninstBrowser=浏览器工具用的 Chromium(约 0.4 GB;其他 Playwright 程序也可能在使用)
-chinesesimp.UninstUv=uv 管理的 Python 解释器和 uv 缓存(共享目录:其他使用 uv 的程序也会失去它们)
 chinesesimp.UninstOk=卸载
 chinesesimp.UninstKeepAll=全部保留
 chinesesimp.SdkRemoveFailed=未能完全删除 QAIRT SDK 文件夹:%n%1%n%n其中可能有文件正被占用。请关闭使用它的程序后手动删除该文件夹。
@@ -669,13 +665,16 @@ end;
 var
   RemoveAllData: Boolean;   // user ticked "your data"
   DelSdk: Boolean;          // user ticked the QAIRT SDK
-  DelBrowser: Boolean;      // user ticked the Playwright Chromium cache
-  DelUv: Boolean;           // user ticked uv's Python installs + cache (%APPDATA%\uv, %LOCALAPPDATA%\uv)
   SdkPath: String;
+// Not offered, on purpose:
+//  * Chromium for the browser tools: _setup_env.bat installs it into {app}\app\envs\ms-playwright, so it goes with the
+//    program. Playwright's shared per-user cache (%LOCALAPPDATA%\ms-playwright) is not ours and is left alone.
+//  * uv's per-user folders (%APPDATA%\uv managed Pythons, %LOCALAPPDATA%\uv cache): shared with every other uv user
+//    on the machine, and a reinstall reuses them. Always kept.
 
 // A window of its own, shown when the uninstall starts. It is NOT put inside "Uninstall Status": Inno disables that
 // window while it uninstalls, so controls placed in it cannot be clicked (measured). The window is sized and
-// centred like Uninstall Status. One tick box per optional item, all ticked except the shared uv folders; an item whose folder is not there is
+// centred like Uninstall Status. One tick box per optional item, all ticked; an item whose folder is not there is
 // not listed. "Keep all" (or closing the window) ticks nothing. The SDK path comes from qairt_env.json, which
 // lives in data\, so this must run BEFORE data\ is deleted.
 procedure AskUninstallChoices;
@@ -683,23 +682,14 @@ var
   Form: TSetupForm;
   List: TNewCheckListBox;
   OkBtn, KeepBtn: TNewButton;
-  IxData, IxSdk, IxBrowser, IxUv, W, H, Pct: Integer;
-  DataDir, BrowserDir, UvRoaming, UvLocal: String;
+  IxData, IxSdk, W, H, Pct: Integer;
+  DataDir: String;
 begin
   RemoveAllData := False;
   DelSdk := False;
-  DelBrowser := False;
-  DelUv := False;
-  // uv's own per-user folders: managed Pythons (Roaming) and the package cache (Local). Shared with any other uv
-  // user, so this item is offered UNticked.
-  UvRoaming := ExpandConstant('{userappdata}\uv');
-  UvLocal := ExpandConstant('{localappdata}\uv');
   DataDir := ExpandConstant('{app}\app\data');
-  // _setup_env.bat --with-browser: `playwright install chromium` puts the browser in this per-user cache
-  BrowserDir := ExpandConstant('{localappdata}\ms-playwright');
   SdkPath := SdkToOffer;
-  if not (DirExists(DataDir) or DirExists(BrowserDir) or DirExists(UvRoaming)
-          or DirExists(UvLocal) or (SdkPath <> '')) then Exit;
+  if not (DirExists(DataDir) or (SdkPath <> '')) then Exit;
 
   // CreateCustomForm scales its size arguments to the screen DPI itself, so give it 96-dpi numbers: take the
   // Uninstall Status window's pixel size and divide the DPI factor back out (ScaleX(100) px = 100 units).
@@ -741,8 +731,6 @@ begin
     List.Height := KeepBtn.Top - List.Top - ScaleY(12);
     IxData := -1;
     IxSdk := -1;
-    IxBrowser := -1;
-    IxUv := -1;
     // The intro text is the first row, then each item with its folder on an indented line below it.
     List.AddGroup(CustomMessage('UninstIntro'), '', 0, nil);
     // The desktop window's WebView2 profile is not offered here: it is window state only and is always removed
@@ -752,21 +740,10 @@ begin
       IxData := List.AddCheckBox(CustomMessage('UninstData'), '', 0, True, True, False, False, nil);
       List.AddGroup(DataDir, '', 1, nil);
     end;
-    if DirExists(BrowserDir) then
-    begin
-      IxBrowser := List.AddCheckBox(CustomMessage('UninstBrowser'), '', 0, True, True, False, False, nil);
-      List.AddGroup(BrowserDir, '', 1, nil);
-    end;
     if SdkPath <> '' then
     begin
       IxSdk := List.AddCheckBox(FmtMessage(CustomMessage('UninstSdk'), [ExtractFileName(SdkPath)]), '', 0, True, True, False, False, nil);
       List.AddGroup(SdkPath, '', 1, nil);
-    end;
-    if DirExists(UvRoaming) or DirExists(UvLocal) then
-    begin
-      IxUv := List.AddCheckBox(CustomMessage('UninstUv'), '', 0, False, True, False, False, nil);
-      if DirExists(UvRoaming) then List.AddGroup(UvRoaming, '', 1, nil);
-      if DirExists(UvLocal) then List.AddGroup(UvLocal, '', 1, nil);
     end;
     // shrink the frame to its rows (about 18 px each at 96 dpi) instead of stretching it down to the buttons
     H := List.Items.Count * ScaleY(18) + ScaleY(8);
@@ -778,8 +755,6 @@ begin
     begin
       RemoveAllData := (IxData >= 0) and List.Checked[IxData];
       DelSdk := (IxSdk >= 0) and List.Checked[IxSdk];
-      DelBrowser := (IxBrowser >= 0) and List.Checked[IxBrowser];
-      DelUv := (IxUv >= 0) and List.Checked[IxUv];
     end;
   finally
     Form.Free;
@@ -805,14 +780,6 @@ begin
     if RemoveAllData then
     begin
       DelTree(ExpandConstant('{app}\app\data'), True, True, True);
-    end;
-    if DelBrowser then DelTree(ExpandConstant('{localappdata}\ms-playwright'), True, True, True);
-    if DelUv then
-    begin
-      // the venvs' base python.exe live under Roaming\uv\python; their processes were stopped above with {app}\app
-      StopProcessesUnder(ExpandConstant('{userappdata}\uv'));
-      DelTree(ExpandConstant('{userappdata}\uv'), True, True, True);
-      DelTree(ExpandConstant('{localappdata}\uv'), True, True, True);
     end;
     if DelSdk and (SdkPath <> '') then
     begin

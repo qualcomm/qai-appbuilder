@@ -822,14 +822,17 @@ echo [INFO] pip is ready in .venv.
 REM --- Step 4d: Install Playwright Chromium browser (DEFAULT) ------------------
 REM The ``playwright`` package is installed by DEFAULT via the ``search`` extra
 REM (Step 4b2). This step downloads the pinned ~150MB Chromium 149 binary into
-REM the user-scoped cache at %LOCALAPPDATA%\ms-playwright\chromium-*. It is
+REM the app's own %ENVS_DIR%\ms-playwright (removed together with the venvs; not
+REM Playwright's shared per-user cache %LOCALAPPDATA%\ms-playwright). The backend
+REM points Playwright at the same folder at startup. It is
 REM needed by BOTH runtime consumers: the ``web`` search ``google_browser``
 REM engine AND the interactive ``browser`` agent tool. Idempotent (re-run is a
 REM fast no-op once the browser is cached). Non-fatal: a download failure only
 REM warns — the search browser engine self-disables via its import/launch guard
 REM (keyless + API search engines keep working), and the ``browser`` tool is
 REM SERVICE_GATED so it simply stays unadvertised until Chromium is present.
-echo [INFO] Installing Playwright Chromium browser ^(skipped if already present^)...
+echo [INFO] Installing Playwright Chromium browser into %ENVS_DIR%\ms-playwright ^(skipped if already present^)...
+set "PLAYWRIGHT_BROWSERS_PATH=%ENVS_DIR%\ms-playwright"
 "%VENV_DIR%\Scripts\python.exe" -m playwright install chromium 2>nul
 if errorlevel 1 (
     echo [WARN] Playwright Chromium install failed. The browser-backed Google

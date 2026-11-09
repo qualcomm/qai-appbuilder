@@ -28,6 +28,7 @@ from qai.platform.web_automation import (
     CHROMIUM_LAUNCH_ARGS,
     DEFAULT_IDLE_CLOSE_SECONDS,
     async_playwright,
+    browsers_base_dir,
     build_context_options,
     is_playwright_available,
 )
@@ -56,19 +57,16 @@ def is_available() -> bool:
 
 
 def _find_chromium_executable() -> str | None:
-    """Probe the ms-playwright directory for a usable Chromium executable.
+    """Probe the Playwright browsers directory for a usable Chromium executable.
 
     Playwright hard-codes the revision it downloads during ``install``, but the
     user may have only the full ``chromium-XXXX`` or a newer
     ``chromium_headless_shell-XXXX`` installed.  We scan for known layouts and
-    return the first existing path, or ``None`` if nothing is found.
+    return the first existing path, or ``None`` if nothing is found. The
+    directory is the one Playwright itself uses (``PLAYWRIGHT_BROWSERS_PATH`` --
+    ``<app_root>/envs/ms-playwright`` in an installed app -- or its default cache).
     """
-    if sys.platform == "win32":
-        base = os.path.join(os.environ.get("LOCALAPPDATA", ""), "ms-playwright")
-    elif sys.platform == "darwin":
-        base = os.path.expanduser("~/Library/Caches/ms-playwright")
-    else:
-        base = os.path.expanduser("~/.cache/ms-playwright")
+    base = browsers_base_dir()
     if not os.path.isdir(base):
         return None
     # Candidates ordered by preference: headless_shell (lighter), then full
@@ -85,8 +83,15 @@ def _find_chromium_executable() -> str | None:
         if not os.path.isdir(dir_path):
             continue
         if sys.platform == "win32":
-            for exe_name in ("headless_shell.exe", "chrome.exe"):
-                exe = os.path.join(dir_path, "chrome-win", exe_name)
+            # Newer Playwright: chrome-win64\chrome.exe and
+            # chrome-headless-shell-win64\chrome-headless-shell.exe; older: chrome-win\.
+            for sub, exe_name in (
+                ("chrome-headless-shell-win64", "chrome-headless-shell.exe"),
+                ("chrome-win64", "chrome.exe"),
+                ("chrome-win", "headless_shell.exe"),
+                ("chrome-win", "chrome.exe"),
+            ):
+                exe = os.path.join(dir_path, sub, exe_name)
                 if os.path.isfile(exe):
                     candidates.append(exe)
         elif sys.platform == "darwin":

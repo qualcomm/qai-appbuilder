@@ -171,7 +171,7 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
    建 Python 3.13 运行时 venv(`<安装目录>\app\envs\`,和 `data\` 同级)、装依赖、初始化 `data\`。
    ARM64 另外会在线下载 `vendor-deps.7z`(约 210 MB,来自 aidevhome.com),取其中除 `qai_appbuilder` 以外的 ARM64 wheel。
    - `--with-browser`:`search` extra(`playwright==1.61.0`、`selectolax`、`lxml`、`cssselect`、`browserforge`,来自 PyPI)+ `python -m playwright install chromium`。
-     Chromium 来自 `cdn.playwright.dev`(国内档由 `net_config.ps1` 设 `PLAYWRIGHT_DOWNLOAD_HOST` 指向 npmmirror),装到 `%LOCALAPPDATA%\ms-playwright\`。失败不中断安装,只是浏览器工具不可用。
+     Chromium 来自 `cdn.playwright.dev`(国内档由 `net_config.ps1` 设 `PLAYWRIGHT_DOWNLOAD_HOST` 指向 npmmirror),装到应用自己的 `app\envs\ms-playwright\`(安装时设 `PLAYWRIGHT_BROWSERS_PATH`;后端启动时发现该目录有浏览器就设同一变量),不用 Playwright 的按用户共享缓存 `%LOCALAPPDATA%\ms-playwright\`。失败不中断安装,只是浏览器工具不可用。
    - `--with-astgrep`:从 PyPI 的 `ast-grep-cli` 0.45.1 wheel 取出 `ast-grep.exe`、`sg.exe`(各约 49 MB)到 `vendor\bin\<arch>\`;PyPI 不通时回退 GitHub release。ARM64 上 `vendor-deps.7z` 已带这两个文件,会直接 `[SKIP]`。
    **不装**模型转换环境(`.venv_x64_310`)和 QAIRT SDK。
 4. 环境配置失败时,文件仍已安装;开始菜单有"修复 / 完成环境配置",重跑 `_setup_env.bat`,可断点续。
@@ -188,13 +188,12 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 控制面板 / 开始菜单卸载会先结束从 `app\`(含 `app\envs\`)启动的进程(后台服务、转换、下载),然后弹出一个选项窗口(大小、位置与"卸载状态"窗口一致,单独一个窗口,不在状态窗口里:Inno 在卸载期间会禁用状态窗口,放进去的按钮点不了),列出可选删除的内容,**默认全部勾选**(取消勾选即保留;点"全部保留"或关闭窗口则都不删):
 
 - **你的数据**(`app\data`:聊天记录、设置、密钥):目录存在就列出。
-- **浏览器工具用的 Chromium**(`%LOCALAPPDATA%\ms-playwright`):目录存在才列出。这是 Playwright 的按用户共享缓存,其他用 Playwright 的程序也可能在用,所以和其它项一样可以取消勾选。
 - **QAIRT SDK `<版本>`**:`data\config\qairt_env.json` 的 `qairt_sdk_root` 指向的目录存在就列出(不再检查标记文件;默认位置 `C:\Qualcomm\AIStack\QAIRT\<版本>`,在 `app\` 之外)。路径必须是绝对本地路径且至少 3 层深,避免误删盘根或 `C:\Qualcomm`。勾选项旁边显示完整路径。
-- 程序文件和 Python 环境(`app\envs\`)一定会删。
+- 程序文件、Python 环境和浏览工具用的 Chromium(都在 `app\envs\` 下)一定会删。Playwright 的共享缓存 `%LOCALAPPDATA%\ms-playwright` 不是本程序的,不动(旧版本曾装在那里,需要的话手动删)。
 - 桌面窗口的 WebView2 数据 `%LOCALAPPDATA%\<tauri identifier>`(打开的 TAB 布局、Cookie、缓存)只是窗口状态,不算用户数据,**一定会删**,不在窗口里列出(静默卸载也删)。否则重装后旧 TAB 布局会指向新数据库里没有的会话。identifier 由 `build_installer.ps1` 从 `desktop\src-tauri\tauri.conf.json` 读取后传给 ISCC。
 - 没勾"你的数据"时:删除 `app\` 里除 `data\` 以外的全部内容(包括运行时下载的 `models\` 等)。勾了:删除整个 `app\`;所选的上层目录空了也一起删除。`data\downloads\_qairt_tmp.zip` 这类下载临时文件无论如何都会删。
 - 静默卸载(`/SILENT`、`/VERYSILENT`)不弹窗,什么可选内容都不删(与"全部保留"相同);`app\envs\` 和 WebView2 数据照样删除。
-- uv / pip 的全局缓存(`%LOCALAPPDATA%\uv\cache` 等)是机器上共享的,不删。
+- uv 的按用户目录(`%APPDATA%\uv` 里的 Python 解释器、`%LOCALAPPDATA%\uv` 里的包缓存)是机器上所有用 uv 的程序共享的,重装时也能直接复用,**一律保留**,不在窗口里列出。
 
 ## 已知限制
 

@@ -299,8 +299,11 @@ if errorlevel 1 goto :fail_install
 :deps_done
 call :tick "5b pyproject deps (uv pip install)"
 
+REM Chromium goes into the app's own envs\ms-playwright (removed with the program on uninstall), not Playwright's shared
+REM per-user cache %LOCALAPPDATA%\ms-playwright. The backend points Playwright at the same folder at startup.
 if "%WITH_BROWSER%"=="1" (
-    echo [INFO] installing Playwright Chromium ^(non-fatal^)...
+    echo [INFO] installing Playwright Chromium into %ENVS_DIR%\ms-playwright ^(non-fatal^)...
+    set "PLAYWRIGHT_BROWSERS_PATH=%ENVS_DIR%\ms-playwright"
     "%VPY%" -m playwright install chromium
     if errorlevel 1 echo [WARN] Chromium download failed; browser tools stay disabled. Retry later with --with-browser.
     call :tick "5c Playwright Chromium"

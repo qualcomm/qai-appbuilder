@@ -57,6 +57,7 @@ from qai.platform.ids import IdGenerator, UlidGenerator
 from qai.platform.persistence import Database
 from qai.platform.persistence.secrets import SecretStore, build_secret_store
 from qai.platform.process import prepend_bundled_paths_to_process
+from qai.platform.web_automation.browsers_path import configure_browsers_path
 from qai.platform.time import Clock, SystemClock
 
 from ._aihub_di import AiHubServices, build_aihub_services
@@ -296,6 +297,9 @@ class Container:
         # one mutation makes bare-name commands (``uvx`` / ``npx`` / …) resolve to
         # our copy first — the generic fix, not a per-spawn-site patch.
         prepend_bundled_paths_to_process(data_paths.root, repo_root=repo_root)
+        # Same idea for Playwright: setup installs Chromium into <repo_root>/envs/ms-playwright (removed with the app),
+        # and the Playwright driver started later finds it through PLAYWRIGHT_BROWSERS_PATH.
+        configure_browsers_path(repo_root)
 
         database = Database(path=data_paths.db_path())
         secret_store = build_secret_store(data_paths=data_paths, prefer="auto")
