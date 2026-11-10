@@ -675,4 +675,7 @@ MESSAGES: dict[str, str] = {
     "chat.context_recovery.failed_no_room": "上下文已满且无法进一步压缩。请发送 /compact 手动压缩历史，或发送 /new 开启新会话继续 \u2014 你的消息没有丢失。",
     "chat.context_recovery.unavailable_mid_tool": "上下文在工具执行过程中被占满，这种情况无法自动压缩。等本轮结束后，请发送 /compact 压缩历史，或发送 /new 开启新会话继续。",
     "service_release.aria2c.start_denied": "访问被拒绝,可能是安全模式拦截,请到 Settings > Security 把模式设为 Disabled 后重试",
+    "chat.local.context_overflow": "本地模型服务无法把本次请求放进模型的上下文（本次请求约 {est_tokens} tokens，服务已压缩到极限）。本轮工具调用累积的内容过多，请发送 /new 开启新会话，或把任务拆小后重试。服务原文：{detail}",
+    "chat.local.service_error": "本地模型服务返回了错误：{detail}",
+    "chat.empty_reply.after_retry": "\n\n_(模型连续两次返回了空回复，本轮已结束。本次请求约 {est_tokens} tokens（上一次模型实际收到 {last_prompt_tokens} tokens，上下文上限 {context_limit}）。可能是上下文已满或服务出错；请发送\"继续\"重试，或发送 /new 开启新会话。)_",
 }

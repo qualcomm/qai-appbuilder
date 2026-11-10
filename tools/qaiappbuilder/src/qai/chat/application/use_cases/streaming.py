@@ -1775,6 +1775,10 @@ def _log_turn_end(
             if outcome in ("completed", "llm_error"):
                 outcome = "stalled"
                 level = "warning"
+        if (_TURN_DIAG.get() or {}).get("empty_reply") and outcome == "completed":
+            # Ended on "the model answered with nothing, even after a retry".
+            outcome = "empty_reply"
+            level = "warning"
         getattr(_log, level)(
             "chat.turn.end",
             outcome=outcome,
@@ -12205,6 +12209,10 @@ class StreamChatUseCase:
         # stamps the round's frames with it.
         _round_rid: str | None = None
         _no_progress_text: str | None = None
+        # Set when the model still answered with nothing after the one-shot
+        # empty-completion retry: the turn ends with a visible notice instead
+        # of silently (the reported "会话收到空回复后就停止了").
+        _empty_reply_text: str | None = None
         # ── Turn-internal SYSTEM_NOTICE integration state (§A3) ───────────
         # ``_pending_integration_count`` counts CONSECUTIVE re-opens caused
         # by newly-landed pending notices; reset to 0 at the start of every
@@ -12946,7 +12954,7 @@ class StreamChatUseCase:
             nonlocal empty_completion_retry_used, compressed_history_override
             nonlocal last_tool_round, _last_call_sig, _repeat_count
             nonlocal _consecutive_length_retries
-            nonlocal _no_progress_text
+            nonlocal _no_progress_text, _empty_reply_text
             nonlocal last_round_usage
             nonlocal _budget_exceeded
             nonlocal _budget_used_at_stop, _budget_max_at_stop
@@ -13198,6 +13206,24 @@ class StreamChatUseCase:
                 return RoundEndDecision(
                     retry=True, retry_wire=list(wire_messages)
                 )
+            # The retry above came back empty as well: stop and tell the user
+            # why, with the size of the request that got the empty reply.
+            if (
+                is_stop
+                and not text_clean
+                and not has_pending
+                and last_tool_round > 0
+                and empty_completion_retry_used
+                and round_no > 1
+            ):
+                _empty_reply_text = self._empty_reply_notice(
+                    request=request,
+                    end_payload=end_payload,
+                    wire_messages=wire_messages,
+                    last_round_usage=last_round_usage,
+                    round_no=round_no,
+                )
+                return RoundEndDecision(stop=True, final_text="")
             if has_pending:
                 # This round issued tool calls → it ran a tool; run the
                 # no-progress detection on this batch's signature.
@@ -13639,6 +13665,22 @@ class StreamChatUseCase:
                         ),
                     )
                     return
+                if _empty_reply_text is not None:
+                    # Empty reply even after the retry: visible notice + END.
+                    seq += 1
+                    yield StreamFrame.chunk(
+                        frame_id=f"fu-empty-{seq}",
+                        sequence=seq,
+                        text=_empty_reply_text,
+                        round_index=kev.round_no,
+                    )
+                    seq += 1
+                    yield StreamFrame.end(
+                        frame_id=f"fu-empty-end-{seq}",
+                        sequence=seq,
+                        reason="empty_reply",
+                    )
+                    return
                 if _no_progress_text is not None:
                     # Graceful no-progress close (Fix B): friendly chunk + a
                     # normal END so the turn closes via ``confirmDone``.
@@ -13876,6 +13918,71 @@ class StreamChatUseCase:
                     )
 
         return _gen()
+
+    def _empty_reply_notice(
+        self,
+        *,
+        request: "StreamChatInput",
+        end_payload: dict[str, Any],
+        wire_messages: list[dict[str, Any]],
+        last_round_usage: dict[str, Any] | None,
+        round_no: int,
+    ) -> str:
+        """User-facing text (and a WARNING log) for an empty reply after the retry.
+
+        Sizes, best source first: the request size the local adapter measured
+        on the body it sent (``request_est_tokens`` on END, includes system
+        prompt + tools), else an estimate of the wire; plus the last round's
+        provider-measured prompt and the context limit the turn ran with.
+        """
+        est: int | None = None
+        source = "none"
+        _req_est = end_payload.get("request_est_tokens")
+        if isinstance(_req_est, int) and _req_est > 0:
+            est, source = _req_est, "request_body"
+        else:
+            try:
+                est = _estimate_wire_tokens(
+                    wire_messages, model_hint=request.model_hint,
+                )
+                source = "wire_estimate"
+            except Exception:  # noqa: BLE001 - diagnostics only
+                est = None
+        last_prompt: int | None = None
+        if isinstance(last_round_usage, dict):
+            _lp = last_round_usage.get("prompt_tokens")
+            if isinstance(_lp, int) and _lp > 0:
+                last_prompt = _lp
+        try:
+            limit: int | None = int(
+                (request.extra or {}).get("_context_limit")
+                or get_context_limit(
+                    (request.model_hint or "").removeprefix("local::")
+                    or "__unknown__"
+                ),
+            )
+        except Exception:  # noqa: BLE001
+            limit = None
+        _log.warning(
+            "chat.empty_reply_after_retry",
+            round_no=round_no,
+            model_hint=request.model_hint,
+            request_est_tokens=est,
+            request_size_source=source,
+            request_messages=end_payload.get("request_messages")
+            or len(wire_messages),
+            last_prompt_tokens=last_prompt,
+            context_limit=limit,
+        )
+        _diag = _TURN_DIAG.get()
+        if _diag is not None:
+            _diag["empty_reply"] = True
+        return _t(
+            "chat.empty_reply.after_retry",
+            est_tokens=est if est is not None else "?",
+            last_prompt_tokens=last_prompt if last_prompt is not None else "?",
+            context_limit=limit if limit is not None else "?",
+        )
 
     async def _maybe_compress_round(
         self,
