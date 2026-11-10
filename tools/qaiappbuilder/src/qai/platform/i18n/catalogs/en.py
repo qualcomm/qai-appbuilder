@@ -646,4 +646,7 @@ MESSAGES: dict[str, str] = {
     "chat.context_recovery.failed_no_room": "Context is full and cannot be compressed any further. Send /compact to compress the history manually, or /new to continue in a fresh session \u2014 your message was not lost.",
     "chat.context_recovery.unavailable_mid_tool": "Context filled up in the middle of a tool run, which cannot be compressed automatically. Once this turn stops, send /compact to compress the history, or /new to continue in a fresh session.",
     "service_release.aria2c.start_denied": "Access denied. The security mode may be blocking it. Go to Settings > Security, set the mode to Disabled, then retry.",
+    "chat.local.context_overflow": "The local model service could not fit this request into the model context (about {est_tokens} tokens; the service already compressed as far as it can). This turn has piled up too much tool output. Send /new to start a fresh session, or split the task into smaller steps. Service message: {detail}",
+    "chat.local.service_error": "The local model service returned an error: {detail}",
+    "chat.empty_reply.after_retry": "\n\n_(The model returned an empty reply twice in a row, so this turn has stopped. The request was about {est_tokens} tokens (the model last received {last_prompt_tokens} tokens; context limit {context_limit}). The context may be full or the service may have failed. Send \"continue\" to retry, or /new to start a fresh session.)_",
 }
