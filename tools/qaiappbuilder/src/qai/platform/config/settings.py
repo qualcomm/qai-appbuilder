@@ -184,10 +184,16 @@ class LoggingSettings(BaseModel):
     # httpx logs one INFO line per request. Requests whose URL contains any of
     # these strings are not logged (console + file); warnings/errors still are.
     # Default: the local aria2c JSON-RPC ports, polled every 0.5 s during a
-    # download (service_release 6800, platform download engine 6810).
+    # download (service_release 6800, platform download engine 6810), and the
+    # GenieAPIService readiness probe GET /status on its default port 8910
+    # (service panel refresh / waiting for a model to load).
     # An empty list logs every request.
     mute_http_urls: list[str] = Field(
-        default_factory=lambda: ["127.0.0.1:6800/jsonrpc", "127.0.0.1:6810/jsonrpc"]
+        default_factory=lambda: [
+            "127.0.0.1:6800/jsonrpc",
+            "127.0.0.1:6810/jsonrpc",
+            "127.0.0.1:8910/status",
+        ]
     )
 
     @field_validator("level")
