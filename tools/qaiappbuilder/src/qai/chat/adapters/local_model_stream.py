@@ -216,13 +216,119 @@ class LocalModelStreamAdapter:
         self,
         request: LLMStreamRequest,
     ) -> AsyncIterator[StreamFrame]:
-        return self._run(request)
+        return self._run_logged(request)
+
+    async def _run_logged(
+        self,
+        request: LLMStreamRequest,
+    ) -> AsyncIterator[StreamFrame]:
+        """:meth:`_run` plus one ``local_model_stream.end`` summary line.
+
+        Diagnostics only: frames pass through unchanged. The summary tells a
+        reply the model finished (``finish_reason=stop`` + ``done_seen``) from
+        one the service cut off (no finish_reason, no ``[DONE]``), a
+        length-capped one, an HTTP error, or a stream the caller closed.
+        """
+        stats: dict[str, Any] = {
+            "http_status": None,
+            "sse_lines": 0,
+            "status_frames": 0,
+            "bad_json_lines": 0,
+            "done_seen": False,
+            "finish_reason": None,
+            "first_byte_ms": None,
+            "retries": 0,
+        }
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        stats["_t0"] = started
+        chunks = chars = reasoning_chars = tool_calls = 0
+        error_code: str | None = None
+        end_reason: str | None = None
+        usage: dict[str, Any] | None = None
+        truncated = False
+        outcome = "ended"
+        try:
+            async for frame in self._run(request, stats=stats):
+                ft = frame.frame_type
+                if ft is StreamFrameType.CHUNK:
+                    chunks += 1
+                    chars += len(str(frame.payload.get("text") or ""))
+                elif ft is StreamFrameType.REASONING:
+                    reasoning_chars += len(str(frame.payload.get("text") or ""))
+                elif ft is StreamFrameType.TOOL_CALL:
+                    tool_calls += 1
+                elif ft is StreamFrameType.ERROR:
+                    error_code = str(frame.payload.get("code") or "unknown")
+                elif ft is StreamFrameType.END:
+                    end_reason = str(frame.payload.get("reason") or "")
+                    _u = frame.payload.get("usage")
+                    usage = _u if isinstance(_u, dict) else usage
+                    truncated = bool(frame.payload.get("truncated"))
+                yield frame
+        except GeneratorExit:
+            outcome = "closed_by_caller"
+            raise
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+            raise
+        except BaseException as exc:
+            outcome = f"raised:{type(exc).__name__}"
+            raise
+        finally:
+            try:
+                fr = stats.get("finish_reason")
+                # The service finished the reply on its own only when it sent a
+                # finish_reason (or [DONE]); otherwise the HTTP stream simply ended.
+                cut_off = (
+                    outcome == "ended"
+                    and error_code is None
+                    and stats.get("http_status") == 200
+                    and not fr
+                    and not stats.get("done_seen")
+                )
+                abnormal = (
+                    cut_off
+                    or error_code is not None
+                    or outcome.startswith("raised")
+                    or fr in ("length", "content_filter")
+                )
+                (_log.warning if abnormal else _log.info)(
+                    "local_model_stream.end",
+                    outcome="cut_off_by_service" if cut_off else outcome,
+                    finish_reason=fr,
+                    done_seen=stats.get("done_seen"),
+                    end_reason=end_reason,
+                    error_code=error_code,
+                    http_status=stats.get("http_status"),
+                    duration_ms=int((loop.time() - started) * 1000),
+                    first_byte_ms=stats.get("first_byte_ms"),
+                    sse_lines=stats.get("sse_lines"),
+                    status_frames=stats.get("status_frames"),
+                    bad_json_lines=stats.get("bad_json_lines"),
+                    chunks=chunks,
+                    chars=chars,
+                    reasoning_chars=reasoning_chars,
+                    tool_calls=tool_calls,
+                    truncated=truncated,
+                    retries=stats.get("retries"),
+                    prompt_tokens=(usage or {}).get("prompt_tokens"),
+                    completion_tokens=(usage or {}).get("completion_tokens"),
+                    model=self._model_name,
+                    base_url=self._base_url,
+                )
+            except Exception:  # noqa: BLE001 - diagnostics must never break a stream
+                pass
 
     async def _run(
         self,
         request: LLMStreamRequest,
         service_ready_deadline: float | None = None,
+        stats: dict[str, Any] | None = None,
     ) -> AsyncIterator[StreamFrame]:
+        # Diagnostics counters for ``local_model_stream.end`` (see _run_logged).
+        if stats is None:
+            stats = {}
         if not self._base_url:
             # No endpoint configured — yield friendly fallback.
             async for frame in self._yield_service_unavailable_fallback():
@@ -292,6 +398,7 @@ class LocalModelStreamAdapter:
                     headers=headers,
                     json=payload,
                 ) as response:
+                    stats["http_status"] = response.status_code
                     if response.status_code >= 400:
                         body_text = await response.aread()
                         body_str = body_text.decode(
@@ -351,15 +458,24 @@ class LocalModelStreamAdapter:
                     async for raw_line in response.aiter_lines():
                         if not raw_line:
                             continue
+                        if stats.get("first_byte_ms") is None and "_t0" in stats:
+                            stats["first_byte_ms"] = int(
+                                (asyncio.get_running_loop().time() - stats["_t0"]) * 1000
+                            )
                         if not raw_line.startswith("data:"):
                             continue
                         data_str = raw_line[len("data:"):].strip()
-                        if not data_str or data_str == "[DONE]":
+                        stats["sse_lines"] = stats.get("sse_lines", 0) + 1
+                        if data_str == "[DONE]":
+                            stats["done_seen"] = True
+                            continue
+                        if not data_str:
                             continue
 
                         try:
                             event = json.loads(data_str)
                         except json.JSONDecodeError:
+                            stats["bad_json_lines"] = stats.get("bad_json_lines", 0) + 1
                             _log.debug(
                                 "local_model_stream.bad_sse_json",
                                 preview=data_str[:200],
@@ -400,6 +516,7 @@ class LocalModelStreamAdapter:
                         if status is not None and not self._extract_delta_text(
                             event
                         ):
+                            stats["status_frames"] = stats.get("status_frames", 0) + 1
                             _log.debug(
                                 "local_model_stream.status_frame",
                                 status=status,
@@ -476,6 +593,7 @@ class LocalModelStreamAdapter:
                         fr = self._extract_finish_reason(event)
                         if fr:
                             last_finish_reason = fr
+                            stats["finish_reason"] = fr
 
                         # ── finish_reason == "tool_calls": emit accumulated ──
                         # V1 chat_handler.py:1974-1983: the round closes with a
@@ -715,9 +833,11 @@ class LocalModelStreamAdapter:
                         await asyncio.sleep(
                             min(_SERVICE_READY_RETRY_INTERVAL_SECONDS, remaining)
                         )
+                        stats["retries"] = stats.get("retries", 0) + 1
                         async for frame in self._run(
                             request,
                             service_ready_deadline=service_ready_deadline,
+                            stats=stats,
                         ):
                             yield frame
                         return
