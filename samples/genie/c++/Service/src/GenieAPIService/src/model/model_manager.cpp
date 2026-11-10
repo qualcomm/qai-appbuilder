@@ -1605,11 +1605,14 @@ bool ModelManager::InitializeConfig()
                     const auto &grg = pe_json["generation_repeat_guard"];
                     grg_cfg.enabled = grg.value("enabled", grg_cfg.enabled);
                     grg_cfg.max_period_tokens = grg.value("max_period_tokens", grg_cfg.max_period_tokens);
+                    grg_cfg.min_span_bytes = grg.value("min_span_bytes", grg_cfg.min_span_bytes);
                 }
                 LLAMACppBuilder::SetDegenerateRepeatGuardEnabled(grg_cfg.enabled);
                 LLAMACppBuilder::SetDegenerateRepeatGuardMaxPeriod(grg_cfg.max_period_tokens);
+                LLAMACppBuilder::SetDegenerateRepeatGuardMinSpanBytes(grg_cfg.min_span_bytes);
                 My_Log{} << "[Config] generation_repeat_guard loaded: enabled=" << grg_cfg.enabled
-                         << ", max_period_tokens=" << grg_cfg.max_period_tokens << std::endl;
+                         << ", max_period_tokens=" << grg_cfg.max_period_tokens
+                         << ", min_span_bytes=" << grg_cfg.min_span_bytes << std::endl;
                 {
                     bool prefix_cache_enabled = true;
                     int head_checkpoints = 2;

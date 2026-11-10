@@ -39,7 +39,8 @@ static std::atomic<bool> g_llama_prefix_cache_enabled{true};
 static std::atomic<int> g_llama_prefix_head_checkpoints{2};
 static std::atomic<bool> g_llama_prefix_head_checkpoints_explicit{false};
 static std::atomic<bool> g_degenerate_repeat_guard_enabled{true};
-static std::atomic<int> g_degenerate_repeat_guard_max_period{48};
+static std::atomic<int> g_degenerate_repeat_guard_max_period{128};
+static std::atomic<int> g_degenerate_repeat_guard_min_span_bytes{256};
 static std::mutex g_llama_backend_mutex;
 static std::atomic<int> g_llama_backend_refs{0};
 
@@ -323,6 +324,7 @@ public:
         };
 
         stopped_by_output_limit_ = false;
+        stopped_by_repeat_guard_ = false;
         if (!is_aux_inference)
         {
             std::lock_guard<std::mutex> metrics_lock(trace_metrics_mutex_);
@@ -535,9 +537,11 @@ public:
             }
         }
 
+        size_t last_piece_bytes = 0;
         auto emit_generated_token = [&](llama_token id) -> bool
         {
             std::string token_str = common_token_to_piece(ctx, id, params_.special);
+            last_piece_bytes = token_str.size();
 
             if (token_str == "<|im_end|>")
             {
@@ -605,60 +609,28 @@ public:
 
         degenerate_repeat_guard::StreamGuard repeat_guard(
                 g_degenerate_repeat_guard_enabled.load(),
-                std::max(0, g_degenerate_repeat_guard_max_period.load()));
-        std::vector<std::pair<llama_token, int>> guard_pending;
-        bool degenerate_loop_hit = false;
+                std::max(0, g_degenerate_repeat_guard_max_period.load()),
+                static_cast<size_t>(std::max(0, g_degenerate_repeat_guard_min_span_bytes.load())));
 
-        auto flush_guard_pending = [&]() -> bool
+        auto guarded_emit = [&](llama_token id) -> bool
         {
-            for (const auto &pending : guard_pending)
+            if (!emit_generated_token(id))
             {
-                if (!emit_generated_token(pending.first))
-                {
-                    guard_pending.clear();
-                    return false;
-                }
+                return false;
             }
-            guard_pending.clear();
-            return true;
-        };
-
-        auto guarded_emit = [&](llama_token id, int kv_pos) -> bool
-        {
-
-            const bool terminal = (params_.n_predict > 0 && n_remain <= 0)
-                                  || llama_vocab_is_eog(vocab, id);
-            const auto decision = repeat_guard.Observe(static_cast<int32_t>(id), terminal);
-            switch (decision.action)
+            const auto decision = repeat_guard.Observe(static_cast<int32_t>(id), last_piece_bytes);
+            if (!decision.abort)
             {
-                case degenerate_repeat_guard::Action::kEmit:
-                    return emit_generated_token(id);
-                case degenerate_repeat_guard::Action::kHold:
-                    guard_pending.emplace_back(id, kv_pos);
-                    return true;
-                case degenerate_repeat_guard::Action::kFlush:
-                    guard_pending.emplace_back(id, kv_pos);
-                    return flush_guard_pending();
-                case degenerate_repeat_guard::Action::kAbort:
-                {
-                    guard_pending.emplace_back(id, kv_pos);
-                    const int rollback_pos = guard_pending.front().second;
-                    guard_pending.clear();
-                    n_past = rollback_pos;
-                    if (!is_speculative_)
-                    {
-                        llama_memory_seq_rm(mem, 0, rollback_pos, -1);
-                    }
-                    degenerate_loop_hit = true;
-                    should_stop = true;
-                    My_Log{My_Log::Level::kWarning}
-                        << "[LLAMACpp] " << query_type
-                        << " Degenerate repeat guard stopped period=" << decision.period
-                        << " rollback_pos=" << rollback_pos << "\n";
-                    return false;
-                }
+                return true;
             }
-            return true;
+            stopped_by_repeat_guard_ = true;
+            should_stop = true;
+            My_Log{My_Log::Level::kWarning}
+                << "[LLAMACpp] " << query_type
+                << " Degenerate repeat guard stopped period=" << decision.period
+                << " span_bytes=" << decision.span_bytes
+                << " n_generated=" << n_generated << "\n";
+            return false;
         };
 
         while (n_remain != 0)
@@ -821,7 +793,7 @@ public:
             {
                 for (auto id: embd)
                 {
-                    if (!guarded_emit(id, n_past))
+                    if (!guarded_emit(id))
                     {
                         break;
                     }
@@ -977,7 +949,6 @@ public:
                     draft_accept_hist.resize(ids.size(), 0);
                 }
                 draft_accept_hist[ids.size() - 1]++;
-                const int round_base = n_past;
                 n_past += (int) ids.size() - 1;
 
                 bool stop_now = false;
@@ -987,7 +958,7 @@ public:
                     spec_prompt.push_back(id_last);
                     id_last = next_id;
                     --n_remain;
-                    if (!guarded_emit(id_last, round_base + static_cast<int>(j)))
+                    if (!guarded_emit(id_last))
                     {
                         stop_now = true;
                         break;
@@ -1037,12 +1008,6 @@ public:
             }
         }
 
-        for (const auto &pending : guard_pending)
-        {
-            emit_generated_token(pending.first);
-        }
-        guard_pending.clear();
-
         auto t_query_end = std::chrono::steady_clock::now();
         int64_t total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             t_query_end - t_query_start).count();
@@ -1080,7 +1045,7 @@ public:
                               " | verify_ms=" + std::to_string(spec_verify_ms) +
                               " | readback_ms=" + std::to_string(spec_readback_ms) +
                               " | post_ms=" + std::to_string(spec_post_ms)) : std::string())
-                 << (degenerate_loop_hit ? " | degenerate_repeat_guard=1" : "")
+                 << (stopped_by_repeat_guard_ ? " | degenerate_repeat_guard=1" : "")
                  << "\n";
 
         if (is_aux_inference && !generated_text_buf.empty()) {
@@ -1216,6 +1181,7 @@ public:
 
     int max_length_ = 0;
     bool stopped_by_output_limit_ = false;
+    bool stopped_by_repeat_guard_ = false;
 
     mutable std::mutex trace_metrics_mutex_;
     json last_trace_metrics_ = nullptr;
@@ -2014,6 +1980,7 @@ bool LLAMACppBuilder::Query(const ModelInput &model_input, const Callback& callb
                                 query_type_bracketed.c_str(), is_aux_inference,
                                 stop_epoch_, query_scope.epoch());
     stopped_by_output_limit_ = impl_->stopped_by_output_limit_;
+    stopped_by_repeat_guard_ = impl_->stopped_by_repeat_guard_;
     return result;
 }
 
@@ -2048,6 +2015,11 @@ void LLAMACppBuilder::SetDegenerateRepeatGuardEnabled(bool enabled)
 void LLAMACppBuilder::SetDegenerateRepeatGuardMaxPeriod(int max_period)
 {
     g_degenerate_repeat_guard_max_period.store(max_period);
+}
+
+void LLAMACppBuilder::SetDegenerateRepeatGuardMinSpanBytes(int min_span_bytes)
+{
+    g_degenerate_repeat_guard_min_span_bytes.store(min_span_bytes);
 }
 
 void LLAMACppBuilder::SetPrefixHeadCheckpoints(int n, bool from_config)

@@ -9,87 +9,67 @@
 #include "degenerate_repeat_guard.h"
 
 #include <algorithm>
-#include <cstddef>
 
 namespace degenerate_repeat_guard
 {
 
-int FindRepeatedPeriod(const std::vector<int32_t> &ids, int max_period)
+StreamGuard::StreamGuard(bool enabled, int max_period, std::size_t min_span_bytes)
+    : enabled_(enabled && max_period > 0 && min_span_bytes > 0),
+      max_period_(enabled_ ? max_period : 0),
+      min_span_bytes_(min_span_bytes)
 {
-    if (max_period <= 0 || ids.size() < 2)
+    if (enabled_)
     {
-        return 0;
+        const std::size_t ring = static_cast<std::size_t>(max_period_) + 1;
+        ids_.assign(ring, 0);
+        cumulative_bytes_.assign(ring, 0);
+        run_.assign(ring, 0);
     }
-
-    const int upper_bound = std::min<int>(max_period, static_cast<int>(ids.size() / 2));
-    const auto end = ids.end();
-    for (int period = 1; period <= upper_bound; ++period)
-    {
-        const auto first = end - period * 2;
-        const auto middle = end - period;
-        if (std::equal(first, middle, middle, end))
-        {
-            return period;
-        }
-    }
-    return 0;
 }
 
-StreamGuard::StreamGuard(bool enabled, int max_period)
-    : enabled_(enabled && max_period > 0), max_period_(max_period > 0 ? max_period : 0)
+Decision StreamGuard::Observe(int32_t id, std::size_t piece_bytes)
 {
-}
-
-void StreamGuard::ResetHold()
-{
-    holding_ = false;
-    period_ = 0;
-    held_ = 0;
-}
-
-Decision StreamGuard::Observe(int32_t id, bool terminal)
-{
+    Decision decision;
     if (!enabled_)
     {
-        return Decision{Action::kEmit, 0};
+        return decision;
     }
 
-    ids_.push_back(id);
+    const std::size_t ring = ids_.size();
+    const std::size_t index = observed_;
+    const std::size_t slot = index % ring;
 
-    if (!holding_)
+    for (std::size_t period = 1; period <= static_cast<std::size_t>(max_period_); ++period)
     {
-        const int period = FindRepeatedPeriod(ids_, max_period_);
-        if (period > 0)
+        const bool same = index >= period && ids_[(index - period) % ring] == id;
+        run_[period] = same ? run_[period] + 1 : 0;
+    }
+
+    total_bytes_ += piece_bytes;
+    ids_[slot] = id;
+    cumulative_bytes_[slot] = total_bytes_;
+    ++observed_;
+
+    for (std::size_t period = 1; period <= static_cast<std::size_t>(max_period_); ++period)
+    {
+        const std::size_t repeats = (run_[period] + period) / period;
+        if (repeats < static_cast<std::size_t>(kMinRepeats))
         {
-            holding_ = true;
-            period_ = period;
-            held_ = 0;
+            continue;
         }
-        return Decision{Action::kEmit, 0};
+        const uint64_t before_unit = index >= period ? cumulative_bytes_[(index - period) % ring] : 0;
+        const uint64_t unit_bytes = total_bytes_ - before_unit;
+        const uint64_t span_bytes = unit_bytes * repeats;
+        const uint64_t required = period == 1 ? std::max<std::size_t>(1, min_span_bytes_ / 2) : min_span_bytes_;
+        if (span_bytes >= required)
+        {
+            decision.abort = true;
+            decision.period = static_cast<int>(period);
+            decision.span_bytes = static_cast<std::size_t>(span_bytes);
+            return decision;
+        }
     }
-
-    ++held_;
-    if (terminal)
-    {
-        ResetHold();
-        return Decision{Action::kFlush, 0};
-    }
-    if (held_ < period_)
-    {
-        return Decision{Action::kHold, 0};
-    }
-
-    // 进入持有态时尾部两块已逐 token 相同（FindRepeatedPeriod 的语义），此刻又攒满了第三块，
-    // 故 ids_.size() >= 3 * period_，下面两个下标不会下溢。
-    const std::size_t pending_start = ids_.size() - static_cast<std::size_t>(period_);
-    const std::size_t previous_start = pending_start - static_cast<std::size_t>(period_);
-    const bool repeated = std::equal(ids_.begin() + static_cast<std::ptrdiff_t>(previous_start),
-                                     ids_.begin() + static_cast<std::ptrdiff_t>(pending_start),
-                                     ids_.begin() + static_cast<std::ptrdiff_t>(pending_start),
-                                     ids_.end());
-    const int detected = period_;
-    ResetHold();
-    return repeated ? Decision{Action::kAbort, detected} : Decision{Action::kFlush, 0};
+    return decision;
 }
 
 }

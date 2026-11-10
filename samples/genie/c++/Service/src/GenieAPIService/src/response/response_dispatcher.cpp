@@ -486,12 +486,8 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                 first_query_ok = false;
             }
         }
-        if (!first_query_ok && mimicry_soft_stop && !mimicry_soft_retry_used && !connection_broken
-            && instance_config_ && !retry_request_data_.is_null()
-            && retry_request_data_.contains("messages") && retry_request_data_["messages"].is_array()
-            && RepeatGateLogic::TryConsumeExtraRetry(extra_retry_used))
+        auto run_soft_landing_retry = [&](const std::string &correction_text, const char *label)
         {
-            mimicry_soft_retry_used = true;
             try
             {
                 json scratch_data = retry_request_data_;
@@ -500,7 +496,7 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                 assistant_msg["content"] = response_buffer;
                 json correction_msg;
                 correction_msg["role"] = "user";
-                correction_msg["content"] = MimicryRecovery::BuildCorrectionMessage();
+                correction_msg["content"] = correction_text;
                 scratch_data["messages"].push_back(assistant_msg);
                 scratch_data["messages"].push_back(correction_msg);
 
@@ -529,16 +525,32 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                 harmony_thinking_status_sent = false;
                 last_hold_keepalive_at = std::chrono::steady_clock::now();
 
-                My_Log{} << "--- Query Context Start (mimicry soft-landing retry) ---" << std::endl;
+                My_Log{} << "--- Query Context Start (" << label << " soft-landing retry) ---" << std::endl;
                 first_query_ok = handle->Query(scratch_model_input, genie_callback, prefill_heartbeat);
-                My_Log{} << "--- Query Context End (mimicry soft-landing retry) ---\n" << std::endl;
+                My_Log{} << "--- Query Context End (" << label << " soft-landing retry) ---\n" << std::endl;
             }
             catch (const std::exception &e)
             {
                 My_Log{My_Log::Level::kError}
-                    << "[SendResponse] Exception during mimicry soft-landing retry: " << e.what() << std::endl;
+                    << "[SendResponse] Exception during " << label << " soft-landing retry: " << e.what() << std::endl;
                 first_query_ok = false;
             }
+        };
+        if (!first_query_ok && mimicry_soft_stop && !mimicry_soft_retry_used && !connection_broken
+            && instance_config_ && !retry_request_data_.is_null()
+            && retry_request_data_.contains("messages") && retry_request_data_["messages"].is_array()
+            && RepeatGateLogic::TryConsumeExtraRetry(extra_retry_used))
+        {
+            mimicry_soft_retry_used = true;
+            run_soft_landing_retry(MimicryRecovery::BuildCorrectionMessage(), "mimicry");
+        }
+        if (first_query_ok && handle->was_stopped_by_repeat_guard() && !connection_broken
+            && instance_config_ && !retry_request_data_.is_null()
+            && retry_request_data_.contains("messages") && retry_request_data_["messages"].is_array()
+            && response_buffer.find("<tool_call>") == std::string::npos
+            && RepeatGateLogic::TryConsumeExtraRetry(extra_retry_used))
+        {
+            run_soft_landing_retry(MimicryRecovery::BuildRepeatGuardCorrectionMessage(), "repeat-guard");
         }
         bool mimicry_degraded = false;
         if (MimicryRecovery::ShouldDegradeInsteadOfAbort(first_query_ok, degenerate_mimicry_stop, connection_broken,
@@ -578,11 +590,13 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
         auto finalize_generation_result = [&]()
         {
 
-            if (handle->was_stopped_by_output_limit())
+            const bool repeat_stopped = handle->was_stopped_by_repeat_guard();
+            if (handle->was_stopped_by_output_limit() || repeat_stopped)
             {
                 finishReason = "length";
                 My_Log{My_Log::Level::kWarning}
-                    << "[SendResponse] Generation stopped due to output token limit. "
+                    << "[SendResponse] Generation stopped due to "
+                    << (repeat_stopped ? "degenerate repetition" : "output token limit") << ". "
                     << "finish_reason = \"length\"" << std::endl;
             }
 
@@ -1004,7 +1018,8 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                 repetition_key = ToolCallRepetitionStore::MakeKey(session_key, instance_config_->get_model_name());
             }
             const bool redundant_guard_enabled = model_config_.GetToolCallRepairConfig().redundant_call_guard.enabled;
-            const bool output_truncated = handle->was_stopped_by_output_limit();
+            const bool repeat_truncated = handle->was_stopped_by_repeat_guard();
+            const bool output_truncated = handle->was_stopped_by_output_limit() || repeat_truncated;
 
             if (!IsUnknowToolCallJson(toolResponse))
             {
@@ -1086,8 +1101,14 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                                 ? std::string()
                                 : TaskMemoBuilder::ExtractThinkConclusion(response_buffer);
                             if (output_truncated && !reasoning_note_mimicry)
-                                conclusion += (conclusion.empty() ? "" : " ") + std::string("this call was cut off by the output token limit after ")
-                                    + std::to_string(response_buffer.size()) + " characters, so its arguments are incomplete; split the content into several smaller calls";
+                                conclusion += (conclusion.empty() ? "" : " ")
+                                    + std::string(repeat_truncated
+                                                      ? "this call was cut off because the output started repeating itself after "
+                                                      : "this call was cut off by the output token limit after ")
+                                    + std::to_string(response_buffer.size()) + " characters, so its arguments are incomplete; "
+                                    + std::string(repeat_truncated
+                                                      ? "do not repeat content, send a shorter call"
+                                                      : "split the content into several smaller calls");
                             if (!conclusion.empty()) {
                                 auto compute_tool_call_signature = [](const json& call) {
                                     std::string args = "{}";

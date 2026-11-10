@@ -46,6 +46,13 @@ inline std::string BuildCorrectionMessage()
            "Do not repeat that note. Either call a tool with a new action, or answer the user directly "
            "in your own words.";
 }
+
+inline std::string BuildRepeatGuardCorrectionMessage()
+{
+    return "Your previous reply started repeating the same text over and over, so it was cut off. "
+           "Do not repeat it. Either call a tool with a new action, or give the user a short direct "
+           "answer in your own words.";
+}
 }
 
 #endif

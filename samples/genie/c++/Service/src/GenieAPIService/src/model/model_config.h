@@ -252,7 +252,8 @@ struct AdaptiveThinkingConfig {
 
 struct GenerationRepeatGuardConfig {
     bool enabled = true;
-    int max_period_tokens = 48;
+    int max_period_tokens = 128;
+    int min_span_bytes = 256;
 };
 
 struct CloudModelConfig {
