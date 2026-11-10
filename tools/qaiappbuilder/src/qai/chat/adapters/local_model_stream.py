@@ -267,7 +267,11 @@ class LocalModelStreamAdapter:
                     truncated = bool(frame.payload.get("truncated"))
                 yield frame
         except GeneratorExit:
-            outcome = "closed_by_caller"
+            # Closed after the terminal END frame = the stream had already
+            # finished (callers stop reading at END); only an earlier close is
+            # the caller walking away mid-stream.
+            if end_reason is None:
+                outcome = "closed_by_caller"
             raise
         except asyncio.CancelledError:
             outcome = "cancelled"
