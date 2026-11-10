@@ -100,6 +100,9 @@ class ProcessBackedInferenceService:
         loglevel_provider: _IntProvider | None = None,
         install_dir_provider: _StrProvider | None = None,
         port_provider: _IntProvider | None = None,
+        output_log_path: str | os.PathLike[str] | None = None,
+        output_log_max_bytes: int = 10 * 1024 * 1024,
+        output_log_backup_count: int = 5,
     ) -> None:
         """Construct the subprocess-backed inference service adapter.
 
@@ -126,6 +129,11 @@ class ProcessBackedInferenceService:
         (e.g. download-center install / manual drop into ``data/bin``)
         without restarting the API server — V1 parity. When omitted the
         adapter falls back to the static ``install_dir``.
+
+        ``output_log_path`` (optional): every line the service prints is ALSO
+        appended to this size-rotated file (e.g. ``data/logs/genie_service.log``)
+        together with a start / exit record (pid, exit code, uptime), so the
+        output survives a backend restart. The in-memory buffer is unchanged.
         """
         self._install_dir = install_dir
         self._default_port = default_port
@@ -172,6 +180,15 @@ class ProcessBackedInferenceService:
         # next to the graceful ``stop()`` — it is never the status truth
         # source (铁律 1: status stays on ``poll()``).
         self._kill_group: ProcessKillGroup | None = None
+
+        # Persistent copy of the service output (None = in-memory buffer only).
+        self._output_log_path = Path(output_log_path) if output_log_path else None
+        self._output_log_max_bytes = int(output_log_max_bytes)
+        self._output_log_backup_count = int(output_log_backup_count)
+        self._output_logger: logging.Logger | None = None
+        # Pids whose exit was already recorded (stop() and the reader thread
+        # can both observe the same exit).
+        self._exit_logged_pids: set[int] = set()
 
     # ------------------------------------------------------------------
     # InferenceServicePort implementation
@@ -826,6 +843,73 @@ class ProcessBackedInferenceService:
         self._log_buffer.append(line)
         self._total_written += 1
         self._new_line_event.set()
+        self._write_output_file(f"[qai] {line}")
+
+    # ------------------------------------------------------------------
+    # Persistent output log (data/logs/genie_service.log)
+    # ------------------------------------------------------------------
+
+    def _get_output_logger(self) -> logging.Logger | None:
+        if self._output_log_path is None:
+            return None
+        if self._output_logger is None:
+            from qai.platform.logging import open_rotating_file_handler
+
+            handler = open_rotating_file_handler(
+                self._output_log_path,
+                max_bytes=self._output_log_max_bytes,
+                backup_count=self._output_log_backup_count,
+            )
+            if handler is None:
+                self._output_log_path = None  # unusable: stop retrying
+                return None
+            handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+            out = logging.getLogger(f"qai.genie_service_output.{id(self)}")
+            out.handlers.clear()
+            out.addHandler(handler)
+            out.setLevel(logging.INFO)
+            out.propagate = False  # raw service output stays out of backend.log
+            self._output_logger = out
+        return self._output_logger
+
+    def _write_output_file(self, line: str) -> None:
+        """Append one line to the output log file. Never raises."""
+        try:
+            out = self._get_output_logger()
+            if out is not None:
+                out.info(line)
+        except Exception:  # noqa: BLE001 - logging must never break the service
+            pass
+
+    def _record_exit(self, proc: subprocess.Popen[str], *, expected: bool) -> None:
+        """Log the service exit once per pid: backend.log + the output file."""
+        pid = proc.pid
+        if pid in self._exit_logged_pids:
+            return
+        code = proc.poll()
+        if code is None:
+            return
+        self._exit_logged_pids.add(pid)
+        uptime = (
+            round(time.monotonic() - self._start_time, 1)
+            if self._start_time is not None
+            else None
+        )
+        hex_code = f"0x{code & 0xFFFFFFFF:08X}" if isinstance(code, int) else None
+        msg = (
+            f"service exited pid={pid} exit_code={code} ({hex_code}) "
+            f"uptime_s={uptime} model={self._loaded_model} expected={expected}"
+        )
+        self._write_output_file(f"[qai] {msg}")
+        if expected:
+            logger.info("genie_service.exited %s", msg)
+        else:
+            last = [ln for ln in list(self._log_buffer)[-20:] if ln]
+            logger.warning(
+                "genie_service.exited_unexpectedly %s last_output=%r",
+                msg,
+                last[-10:],
+            )
 
     # Markers that identify an unconfigured cloud_model.base_url
     # (empty string, or still the factory placeholder shipped in the template).
@@ -951,6 +1035,9 @@ class ProcessBackedInferenceService:
             )
             self._log_thread.start()
             logger.info("Inference service started (pid=%d)", proc.pid)
+            self._write_output_file(
+                f"[qai] service started pid={proc.pid} port={port} model={model_name} cmd={cmd_str}"
+            )
 
     def _do_stop(self) -> None:
         """Blocking stop logic — run in a thread."""
@@ -994,6 +1081,7 @@ class ProcessBackedInferenceService:
                 except subprocess.TimeoutExpired:
                     logger.error("Process still alive after kill (pid=%d)", pid)
 
+            self._record_exit(proc, expected=True)
             self._proc = None
             self._start_time = None
             self._state = ServiceState.STOPPED
@@ -1008,12 +1096,26 @@ class ProcessBackedInferenceService:
                 line = proc.stdout.readline()
                 if not line:
                     break  # EOF — process exited
-                self._log_buffer.append(line.rstrip("\r\n"))
+                text = line.rstrip("\r\n")
+                self._log_buffer.append(text)
                 self._total_written += 1
                 self._new_line_event.set()
+                self._write_output_file(text)
         except Exception as exc:  # noqa: BLE001
             logger.debug("Log reader ended: %s", exc)
         finally:
+            # EOF: the process is gone (or about to be). Record its exit now
+            # so a crash is in the logs even if nobody polls the status.
+            try:
+                proc.wait(timeout=5)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                self._record_exit(
+                    proc, expected=self._state is ServiceState.STOPPING
+                )
+            except Exception:  # noqa: BLE001
+                pass
             # Wake any stream_logs waiter so it can observe process exit.
             self._new_line_event.set()
             logger.debug("Log reader thread exiting (pid=%s)", proc.pid)
@@ -1023,6 +1125,12 @@ class ProcessBackedInferenceService:
         if self._proc is not None and self._proc.poll() is not None:
             # Process has exited unexpectedly
             exit_code = self._proc.returncode
+            try:
+                self._record_exit(
+                    self._proc, expected=self._state is ServiceState.STOPPING
+                )
+            except Exception:  # noqa: BLE001
+                pass
             self._proc = None
             self._start_time = None
             if self._state == ServiceState.STOPPING:

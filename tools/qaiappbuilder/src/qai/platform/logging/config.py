@@ -216,6 +216,18 @@ class _SafeRotatingFileHandler(logging.handlers.RotatingFileHandler):
                 self.stream = self._open()  # mode "a": keep appending
 
 
+def open_rotating_file_handler(
+    path: Path, *, max_bytes: int, backup_count: int
+) -> logging.Handler | None:
+    """Size-rotated UTF-8 append handler that survives a locked rollover.
+
+    Returns ``None`` (after a note on stderr) when the file cannot be opened.
+    Public so other components can keep their own log file (e.g. the
+    GenieAPIService output in ``data/logs/genie_service.log``).
+    """
+    return _open_file_handler(Path(path), max_bytes=max_bytes, backup_count=backup_count)
+
+
 def _open_file_handler(
     path: Path, *, max_bytes: int, backup_count: int
 ) -> logging.Handler | None:

@@ -39,7 +39,7 @@ import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from qai.model_runtime.adapters import StubInferenceService
 from qai.model_runtime.application.ports import (
@@ -209,6 +209,28 @@ def _resolve_install_dir(container: "Container", configured: str) -> str:
     if isinstance(gs, dict):
         return str(gs.get("root_path", "") or "").strip()
     return ""
+
+
+def _genie_output_log_path(container: "Container") -> str | None:
+    """``<data>/logs/genie_service.log``, or None when file logging is off."""
+    settings = getattr(container, "settings", None)
+    log_cfg = getattr(settings, "logging", None)
+    if log_cfg is not None and not getattr(log_cfg, "file_enabled", True):
+        return None
+    data_paths = getattr(container, "data_paths", None)
+    root = getattr(data_paths, "root", None)
+    if root is None:
+        return None
+    return str(root / "logs" / "genie_service.log")
+
+
+def _genie_output_log_limits(settings: Any) -> dict[str, int]:
+    """Same size / backup limits as backend.log (``[logging] file_*``)."""
+    log_cfg = getattr(settings, "logging", None)
+    return {
+        "output_log_max_bytes": int(getattr(log_cfg, "file_max_mb", 10)) * 1024 * 1024,
+        "output_log_backup_count": int(getattr(log_cfg, "file_backup_count", 5)),
+    }
 
 
 def _resolve_default_models_root(container: "Container") -> str:
@@ -575,6 +597,10 @@ def build_model_runtime_services(
             loglevel_provider=loglevel_provider_for_adapter,
             install_dir_provider=install_dir_provider_for_adapter,
             port_provider=port_provider_for_adapter,
+            # Persistent copy of the GenieAPIService output (start / exit
+            # records included), rotated like backend.log.
+            output_log_path=_genie_output_log_path(container),
+            **_genie_output_log_limits(settings),
         )
     else:
         # Minimal test container (no data_paths → cannot resolve forge_config).

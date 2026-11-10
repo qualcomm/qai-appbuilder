@@ -45,6 +45,7 @@ Multi-tab semantics:
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import contextlib
 import json
 import math
@@ -236,7 +237,7 @@ from qai.chat.application.use_cases.tool_advertise import (
 from qai.platform.events import EventBus
 from qai.platform.i18n import t as _t
 from qai.platform.ids import IdGenerator
-from qai.platform.logging import get_logger
+from qai.platform.logging import bind_log_fields, get_logger, reset_log_fields
 from qai.platform.scheduling.tool_concurrency import ToolConcurrencyManager
 from qai.platform.time import Clock
 
@@ -1729,6 +1730,19 @@ class _TurnBodyState:
     turn_end_logged: bool = False
 
 
+#: Per-turn diagnostics record (set by ``_run_in_log_context``); the stall
+#: guard writes ``stalled_seconds`` into it. ``None`` outside a turn.
+_TURN_DIAG: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "qai_chat_turn_diag", default=None
+)
+
+
+def _mark_turn_stalled(seconds: float) -> None:
+    diag = _TURN_DIAG.get()
+    if diag is not None:
+        diag["stalled_seconds"] = seconds
+
+
 def _log_turn_end(
     state: _TurnBodyState,
     *,
@@ -1753,6 +1767,14 @@ def _log_turn_end(
     state.turn_end_logged = True
     try:
         usage = state.turn_usage or {}
+        stalled_s = (_TURN_DIAG.get() or {}).get("stalled_seconds")
+        if stalled_s is not None:
+            # The stall guard cut the model stream off; the turn then wound up
+            # through the normal tail, which would otherwise read "completed".
+            extra["stall_seconds"] = round(float(stalled_s), 1)
+            if outcome in ("completed", "llm_error"):
+                outcome = "stalled"
+                level = "warning"
         getattr(_log, level)(
             "chat.turn.end",
             outcome=outcome,
@@ -2574,7 +2596,41 @@ class StreamChatUseCase:
         by the caller; each yielded frame has already been persisted as
         an event before reaching the caller.
         """
-        return self._run(request)
+        return self._run_in_log_context(request)
+
+    async def _run_in_log_context(
+        self,
+        request: StreamChatInput,
+    ) -> AsyncIterator[StreamFrame]:
+        """Run :meth:`_run` with the turn bound into the log context.
+
+        Every log line emitted while this turn runs (adapters, guards,
+        tools, tasks spawned from it) carries ``tab_id`` / ``conversation_id``
+        via structlog contextvars, and a per-turn diagnostics record lets the
+        stall guard mark the turn (``chat.turn.end outcome=stalled``).
+        Frames pass through unchanged. The inner generator is closed
+        explicitly so its interrupt handlers run exactly when they did before.
+        """
+        tokens: Any = None
+        try:
+            tokens = bind_log_fields(
+                tab_id=request.tab_id.value,
+                conversation_id=request.conversation_id.value,
+            )
+        except Exception:  # noqa: BLE001 - diagnostics must never block a turn
+            tokens = None
+        diag_token = _TURN_DIAG.set({})
+        inner = self._run(request)
+        try:
+            async for frame in inner:
+                yield frame
+        finally:
+            await inner.aclose()
+            try:
+                _TURN_DIAG.reset(diag_token)
+            except (ValueError, RuntimeError):  # closed from another context
+                pass
+            reset_log_fields(tokens)
 
     async def collect_completion_text(self, request: StreamChatInput) -> str:
         """Run a turn and return the concatenated assistant text.
@@ -2857,6 +2913,7 @@ class StreamChatUseCase:
             stream_frames,
             handle,
             frame_stall_budget_s=self._frame_stall_budget_s,
+            on_stall=_mark_turn_stalled,
         ):
             yield frame
 
