@@ -133,6 +133,88 @@ def test_unopenable_file_only_warns(tmp_path: Path, capsys: pytest.CaptureFixtur
     assert "cannot open log file" in capsys.readouterr().err
 
 
+_ARIA2 = "127.0.0.1:6800/jsonrpc"
+
+
+def _httpx_request_line(url: str, level: int = logging.INFO) -> None:
+    # the exact shape httpx logs for every request
+    logging.getLogger("httpx").log(
+        level, 'HTTP Request: %s %s "%s %d %s"', "POST", url, "HTTP/1.1", 200, "OK",
+    )
+
+
+def test_muted_http_urls_are_dropped_from_console_and_file(tmp_path: Path) -> None:
+    log_file = tmp_path / "backend.log"
+    stream = io.StringIO()
+    configure_logging(stream=stream, file_path=log_file, mute_http_urls=[_ARIA2])
+
+    _httpx_request_line(f"http://{_ARIA2}")
+    _httpx_request_line("http://127.0.0.1:8910/v1/chat/completions")
+    _flush()
+
+    for text in (stream.getvalue(), log_file.read_text(encoding="utf-8")):
+        assert "6800/jsonrpc" not in text
+        assert "8910/v1/chat/completions" in text  # other requests still logged
+
+
+def test_muted_url_warning_is_kept(tmp_path: Path) -> None:
+    stream = io.StringIO()
+    configure_logging(stream=stream, mute_http_urls=[_ARIA2])
+
+    _httpx_request_line(f"http://{_ARIA2}", level=logging.WARNING)
+    assert "6800/jsonrpc" in stream.getvalue()
+
+
+def test_mute_only_applies_to_httpx_records(tmp_path: Path) -> None:
+    """Our own download logs that name the URL are never muted."""
+    stream = io.StringIO()
+    configure_logging(stream=stream, mute_http_urls=[_ARIA2])
+
+    logging.getLogger("qai.service_release").info("aria2c rpc at http://%s ready", _ARIA2)
+    assert "6800/jsonrpc ready" in stream.getvalue()
+
+
+def test_empty_mute_list_logs_everything(tmp_path: Path) -> None:
+    stream = io.StringIO()
+    configure_logging(stream=stream, mute_http_urls=[])
+
+    _httpx_request_line(f"http://{_ARIA2}")
+    assert "6800/jsonrpc" in stream.getvalue()
+
+
+def test_settings_default_mutes_both_aria2c_ports() -> None:
+    from qai.platform.config.settings import LoggingSettings
+
+    assert LoggingSettings().mute_http_urls == [
+        "127.0.0.1:6800/jsonrpc",
+        "127.0.0.1:6810/jsonrpc",
+    ]
+    assert LoggingSettings(mute_http_urls=[]).mute_http_urls == []
+
+
+def test_server_toml_logging_section_is_read(tmp_path: Path) -> None:
+    from qai.platform.config.settings import load_settings
+
+    cfg = tmp_path / "server.toml"
+    cfg.write_text(
+        '[logging]\nlevel = "DEBUG"\nmute_http_urls = ["127.0.0.1:9999/status"]\n',
+        encoding="utf-8",
+    )
+    s = load_settings(config_file=cfg)
+    assert s.logging.level == "DEBUG"
+    assert s.logging.mute_http_urls == ["127.0.0.1:9999/status"]
+
+
+def test_shipped_server_toml_still_parses() -> None:
+    """The commented [logging] example must not change what the file sets."""
+    from qai.platform.config.settings import load_settings
+
+    shipped = Path(__file__).resolve().parents[5] / "factory" / "config" / "server.toml"
+    s = load_settings(config_file=shipped)
+    assert s.logging.level == "INFO"
+    assert "127.0.0.1:6800/jsonrpc" in s.logging.mute_http_urls
+
+
 def test_failed_rollover_keeps_writing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Windows: the rename fails while another program holds the file open."""
     log_file = tmp_path / "backend.log"

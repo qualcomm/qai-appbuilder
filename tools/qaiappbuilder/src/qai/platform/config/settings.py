@@ -181,6 +181,14 @@ class LoggingSettings(BaseModel):
     file_max_mb: int = Field(default=10, ge=1, le=1024)
     file_backup_count: int = Field(default=5, ge=0, le=100)
     file_fmt: str = Field(default="console", description="'json' or 'console' (plain text, no colours)")
+    # httpx logs one INFO line per request. Requests whose URL contains any of
+    # these strings are not logged (console + file); warnings/errors still are.
+    # Default: the local aria2c JSON-RPC ports, polled every 0.5 s during a
+    # download (service_release 6800, platform download engine 6810).
+    # An empty list logs every request.
+    mute_http_urls: list[str] = Field(
+        default_factory=lambda: ["127.0.0.1:6800/jsonrpc", "127.0.0.1:6810/jsonrpc"]
+    )
 
     @field_validator("level")
     @classmethod

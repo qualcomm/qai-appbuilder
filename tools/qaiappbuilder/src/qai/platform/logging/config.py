@@ -77,6 +77,7 @@ def configure_logging(
     file_max_bytes: int = 10 * 1024 * 1024,
     file_backup_count: int = 5,
     file_fmt: LogFormat = "console",
+    mute_http_urls: list[str] | tuple[str, ...] | None = None,
 ) -> None:
     """Configure structlog + stdlib logging.
 
@@ -98,6 +99,9 @@ def configure_logging(
             that cannot be opened is reported on stderr and skipped; logging
             to stderr keeps working.
         file_fmt: ``"console"`` (plain text, no colours) or ``"json"``.
+        mute_http_urls: drop httpx INFO/DEBUG request lines whose message
+            contains any of these strings (e.g. a local RPC endpoint polled
+            twice a second). Warnings and errors are never dropped.
     """
     resolved_stream = stream if stream is not None else sys.stderr
     resolved_fmt: LogFormat = fmt if fmt is not None else _auto_fmt(resolved_stream)
@@ -147,9 +151,12 @@ def configure_logging(
     for handler in list(root.handlers):
         if getattr(handler, "_qai_managed", False):
             root.removeHandler(handler)
+    mute_filter = _HttpUrlMuteFilter(mute_http_urls) if mute_http_urls else None
     handler = logging.StreamHandler(resolved_stream)
     handler.setFormatter(formatter)
     handler._qai_managed = True  # type: ignore[attr-defined]
+    if mute_filter is not None:
+        handler.addFilter(mute_filter)
     root.addHandler(handler)
     if file_path is not None:
         file_handler = _open_file_handler(
@@ -160,8 +167,30 @@ def configure_logging(
                 _make_formatter(shared_processors, file_fmt, colors=False)
             )
             file_handler._qai_managed = True  # type: ignore[attr-defined]
+            if mute_filter is not None:
+                file_handler.addFilter(mute_filter)
             root.addHandler(file_handler)
     root.setLevel(level)
+
+
+class _HttpUrlMuteFilter(logging.Filter):
+    """Drop httpx / httpcore request lines for muted URLs (below WARNING)."""
+
+    def __init__(self, patterns: list[str] | tuple[str, ...]) -> None:
+        super().__init__()
+        self._patterns = tuple(p for p in (str(x).strip() for x in patterns) if p)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if not self._patterns or record.levelno >= logging.WARNING:
+            return True
+        name = record.name
+        if not (name == "httpx" or name.startswith(("httpx.", "httpcore"))):
+            return True
+        try:
+            msg = record.getMessage()
+        except Exception:  # noqa: BLE001
+            return True
+        return not any(p in msg for p in self._patterns)
 
 
 def _make_formatter(

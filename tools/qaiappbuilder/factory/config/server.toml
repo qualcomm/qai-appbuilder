@@ -19,3 +19,20 @@
 # enabled = true
 [auth]
 enabled = true
+
+# Backend logging (data\logs\backend.log + console). Every key is optional; the
+# values shown are the code defaults. Environment variables win over this file,
+# e.g. QAI_LOGGING__LEVEL=DEBUG. Restart the backend after a change.
+# NOTE: this file is part of the program and is replaced on reinstall / upgrade,
+# so keep diagnostic tweaks here temporary.
+#
+# [logging]
+# level = "INFO"              # DEBUG / INFO / WARNING / ERROR / CRITICAL
+# file_enabled = true         # false = console only, no data\logs\*.log
+# file_max_mb = 10            # size of one log file before it rolls over
+# file_backup_count = 5       # rolled-over files kept: backend.log.1 .. .5
+# file_fmt = "console"        # "console" (plain text) or "json"
+# # HTTP requests whose URL contains one of these strings are not logged
+# # (warnings / errors still are). Default: the local aria2c download RPC,
+# # polled twice a second while a download runs. [] logs every request.
+# mute_http_urls = ["127.0.0.1:6800/jsonrpc", "127.0.0.1:6810/jsonrpc"]
