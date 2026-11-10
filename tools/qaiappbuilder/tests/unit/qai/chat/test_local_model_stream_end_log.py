@@ -166,6 +166,21 @@ async def test_closed_by_caller(log_stream) -> None:
     assert rec["level"] == "INFO"
 
 
+async def test_close_after_end_frame_is_a_normal_end(log_stream) -> None:
+    """The use case stops reading at END and closes the stream: not 'closed_by_caller'."""
+    agen = _adapter(b'{"error": "insufficient_memory"}', status=500).stream(_request())
+    async for frame in agen:
+        if frame.frame_type.value == "end":
+            break
+    await agen.aclose()
+
+    (rec,) = _end_records(log_stream)
+    assert rec["outcome"] == "ended"
+    assert rec["http_status"] == 500
+    assert rec["error_code"] == "chat.local.http_error"
+    assert rec["level"] == "WARNING"
+
+
 async def test_frames_are_unchanged(log_stream) -> None:
     """The summary wrapper must not alter what the caller receives."""
     body = _sse(_delta("Hi", "stop"), "[DONE]")
