@@ -297,6 +297,12 @@ class LocalModelStreamAdapter:
                         body_str = body_text.decode(
                             "utf-8", errors="replace"
                         )
+                        _log.warning(
+                            "local_model_stream.http_error",
+                            base_url=self._base_url,
+                            status=response.status_code,
+                            body=body_str[:1000],
+                        )
                         # V1 parity (chat_handler.py:1908-1919): classify the
                         # error body so prompt-too-long triggers compression
                         # retry and throttling triggers backoff retry. The
@@ -738,6 +744,12 @@ class LocalModelStreamAdapter:
                 yield frame
             return
         except httpx.TimeoutException as exc:
+            _log.warning(
+                "local_model_stream.timeout",
+                base_url=self._base_url,
+                exc_type=type(exc).__name__,
+                error=str(exc),
+            )
             sequence += 1
             yield StreamFrame.error(
                 frame_id=self._next_frame_id("err"),
