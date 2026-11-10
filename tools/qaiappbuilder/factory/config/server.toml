@@ -34,5 +34,7 @@ enabled = true
 # file_fmt = "console"        # "console" (plain text) or "json"
 # # HTTP requests whose URL contains one of these strings are not logged
 # # (warnings / errors still are). Default: the local aria2c download RPC,
-# # polled twice a second while a download runs. [] logs every request.
-# mute_http_urls = ["127.0.0.1:6800/jsonrpc", "127.0.0.1:6810/jsonrpc"]
+# # polled twice a second while a download runs, and the local model service
+# # readiness probe (GenieAPIService /status, default port 8910 - change it here
+# # if you moved the service to another port). [] logs every request.
+# mute_http_urls = ["127.0.0.1:6800/jsonrpc", "127.0.0.1:6810/jsonrpc", "127.0.0.1:8910/status"]
