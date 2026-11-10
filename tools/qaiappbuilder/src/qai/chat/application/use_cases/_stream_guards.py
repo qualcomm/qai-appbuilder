@@ -110,8 +110,13 @@ async def abortable_frames(
     *,
     frame_stall_budget_s: float = 600.0,
     poll_seconds: float = 0.05,
+    on_stall: Callable[[float], None] | None = None,
 ) -> AsyncIterator[StreamFrame]:
     """Yield from *stream_frames* but stop promptly when *handle* fires.
+
+    ``on_stall`` (optional, diagnostics only) is called with the stalled
+    seconds when the stall budget ends the stream, so the caller can report
+    the turn as stalled instead of completed. It must not raise.
 
     Two failsafes:
 
@@ -151,8 +156,14 @@ async def abortable_frames(
                 ):
                     _log.warning(
                         "chat.streaming.frame_stream_stalled",
-                        stall_seconds=_since_last_frame,
+                        stall_seconds=round(_since_last_frame, 1),
+                        stall_budget_s=frame_stall_budget_s,
                     )
+                    if on_stall is not None:
+                        try:
+                            on_stall(_since_last_frame)
+                        except Exception:  # noqa: BLE001 - diagnostics only
+                            pass
                     return
                 continue
             task = pending

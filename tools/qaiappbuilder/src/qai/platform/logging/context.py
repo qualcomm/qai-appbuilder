@@ -57,6 +57,36 @@ def bind_correlation_id(value: str | None) -> Iterator[None]:
         _correlation_id.reset(token)
 
 
+def bind_log_fields(**fields: object) -> object:
+    """Add ``fields`` to every log record of the current context.
+
+    Returns an opaque token for :func:`reset_log_fields`. Works across
+    ``await`` and into tasks created from this context (contextvars).
+    """
+    import structlog
+
+    return structlog.contextvars.bind_contextvars(**fields)
+
+
+def reset_log_fields(token: object) -> None:
+    """Undo :func:`bind_log_fields`. Never raises.
+
+    Falls back to unbinding the keys when the token belongs to another
+    context (an async generator closed from a different task).
+    """
+    import structlog
+
+    if not isinstance(token, dict) or not token:
+        return
+    try:
+        structlog.contextvars.reset_contextvars(**token)
+    except (ValueError, RuntimeError):
+        try:
+            structlog.contextvars.unbind_contextvars(*token.keys())
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def clear_context() -> None:
     """Reset both context vars to ``None``.
 

@@ -58,6 +58,11 @@ class _ScriptedLLM:
             self.on_first_chunk()
         if self._mode == "hang":
             await asyncio.sleep(3600)
+        if self._mode == "adapter_log":
+            # an adapter-level log line: must carry the turn's tab/conversation
+            from qai.platform.logging import get_logger
+
+            get_logger("qai.test.adapter").warning("adapter.something_happened")
         if self._mode == "error_frame":
             yield StreamFrame.error(
                 frame_id="err-1", sequence=1, code="chat.llm.timeout", message="timed out",
@@ -98,7 +103,7 @@ def _events(stream: io.StringIO, name: str) -> list[dict]:
     return out
 
 
-async def _start_turn(mode: str):
+async def _start_turn(mode: str, *, stall_budget_s: float | None = None):
     repo, tabs = FakeConversationRepository(), FakeTabSessionStore()
     clock, ids = FakeClock(), FakeIdGenerator()
     conv = await CreateConversationUseCase(
@@ -120,6 +125,8 @@ async def _start_turn(mode: str):
         clock=clock,
         ids=ids,
     )
+    if stall_budget_s is not None:
+        uc._frame_stall_budget_s = stall_budget_s
     agen = await uc.execute(
         StreamChatInput(
             tab_id=tab.id,
@@ -216,6 +223,47 @@ async def test_cancelled_task_logs_end(log_stream) -> None:
     assert len(ends) == 1
     assert ends[0]["outcome"] == "cancelled"
     assert ends[0]["level"] == "WARNING"
+
+
+async def test_stalled_stream_is_reported_as_stalled(log_stream) -> None:
+    """The stall guard ends a silent stream; the turn must not read 'completed'."""
+    agen, conv = await _start_turn("hang", stall_budget_s=0.3)
+    async for _ in agen:
+        pass
+
+    ends = _events(log_stream, "chat.turn.end")
+    assert len(ends) == 1
+    assert ends[0]["outcome"] == "stalled"
+    assert ends[0]["level"] == "WARNING"
+    assert ends[0]["stall_seconds"] >= 0.3
+    stalls = _events(log_stream, "chat.streaming.frame_stream_stalled")
+    assert len(stalls) == 1
+    # item 4: the guard's own line now names the turn
+    assert stalls[0]["tab_id"] == "tab-1"
+    assert stalls[0]["conversation_id"] == conv.id.value
+
+
+async def test_adapter_logs_carry_turn_ids(log_stream) -> None:
+    agen, conv = await _start_turn("adapter_log")
+    async for _ in agen:
+        pass
+
+    (rec,) = _events(log_stream, "adapter.something_happened")
+    assert rec["tab_id"] == "tab-1"
+    assert rec["conversation_id"] == conv.id.value
+
+
+async def test_turn_ids_are_unbound_after_the_turn(log_stream) -> None:
+    from qai.platform.logging import get_logger
+
+    agen, _ = await _start_turn("ok")
+    async for _ in agen:
+        pass
+    get_logger("qai.test").info("after.turn")
+
+    (rec,) = _events(log_stream, "after.turn")
+    assert "tab_id" not in rec
+    assert "conversation_id" not in rec
 
 
 async def test_user_stop_logs_aborted(log_stream) -> None:

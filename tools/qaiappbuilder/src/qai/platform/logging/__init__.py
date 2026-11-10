@@ -26,21 +26,26 @@ Design constraints (refactor-plan v2.5 §6 / §15.1):
 
 from __future__ import annotations
 
-from .config import configure_logging, get_logger
+from .config import configure_logging, get_logger, open_rotating_file_handler
 from .context import (
     bind_correlation_id,
+    bind_log_fields,
     bind_request_id,
     clear_context,
     current_correlation_id,
     current_request_id,
+    reset_log_fields,
 )
 
 __all__ = [
     "bind_correlation_id",
+    "bind_log_fields",
+    "reset_log_fields",
     "bind_request_id",
     "clear_context",
     "configure_logging",
     "current_correlation_id",
     "current_request_id",
     "get_logger",
+    "open_rotating_file_handler",
 ]
