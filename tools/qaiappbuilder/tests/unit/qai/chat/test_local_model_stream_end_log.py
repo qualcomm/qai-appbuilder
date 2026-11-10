@@ -188,3 +188,76 @@ async def test_frames_are_unchanged(log_stream) -> None:
     wrapped = [(f.frame_type, dict(f.payload)) for f in await _drain(adapter)]
     raw = [(f.frame_type, dict(f.payload)) async for f in adapter._run(_request())]
     assert wrapped == raw
+
+
+# ── empty replies / service errors inside a 200 stream ───────────────────
+
+
+def _status(msg: str = "Inferencing...") -> dict:
+    return {"choices": [{"delta": {"content": ""}, "status": "inference", "status_message": msg}]}
+
+
+async def test_empty_reply_is_a_warning_with_preview_and_request_size(log_stream) -> None:
+    """HTTP 200, a status frame, [DONE] and nothing else: the reply was empty."""
+    frames = await _drain(_adapter(_sse(_status(), "[DONE]")))
+
+    (rec,) = _end_records(log_stream)
+    assert rec["outcome"] == "empty_reply"
+    assert rec["level"] == "WARNING"
+    assert rec["request_messages"] >= 1
+    assert rec["request_est_tokens"] > 0
+    assert rec["request_bytes"] >= rec["request_est_tokens"] * 4
+    assert any("inference" in line for line in rec["sse_preview"])
+    end = [f for f in frames if f.frame_type.value == "end"][-1]
+    assert end.payload["reason"] == "completed"
+    assert end.payload["request_est_tokens"] == rec["request_est_tokens"]
+
+
+async def test_finished_reply_has_no_preview(log_stream) -> None:
+    await _drain(_adapter(_sse(_delta("ok", "stop"), "[DONE]")))
+    (rec,) = _end_records(log_stream)
+    assert rec["outcome"] == "ended"
+    assert "sse_preview" not in rec
+    assert rec["request_est_tokens"] > 0
+
+
+async def test_service_context_overflow_becomes_an_error_frame(log_stream) -> None:
+    """GenieAPIService: pre-filter cannot fit the request -> error object + [DONE]."""
+    err = {
+        "error": {
+            "message": "Failed to process request: Protected messages (last user message and "
+            "all subsequent messages) exceed context size (16384 tokens). Current total: "
+            "22593 tokens. Cannot compress further.",
+            "type": "internal_error",
+            "code": "build_failed",
+        }
+    }
+    frames = await _drain(_adapter(_sse(_status("Preparing"), err, "[DONE]")))
+
+    errs = [f for f in frames if f.frame_type.value == "error"]
+    assert len(errs) == 1
+    assert errs[0].payload["code"] == "chat.local.context_overflow"
+    assert "Cannot compress further" in errs[0].payload["message"]
+    assert frames[-1].frame_type.value == "end"
+    assert frames[-1].payload["reason"] == "failed"
+
+    (rec,) = _end_records(log_stream)
+    assert rec["error_code"] == "chat.local.context_overflow"
+    assert rec["level"] == "WARNING"
+    assert "Cannot compress further" in rec["service_error"]
+    svc = [
+        json.loads(line)
+        for line in log_stream.getvalue().splitlines()
+        if '"local_model_stream.service_error"' in line
+    ]
+    assert svc and svc[0]["context_overflow"] is True
+
+
+async def test_other_service_error_becomes_an_error_frame(log_stream) -> None:
+    err = {"error": {"message": "model not loaded", "code": "build_failed"}}
+    frames = await _drain(_adapter(_sse(err, "[DONE]")))
+    errs = [f for f in frames if f.frame_type.value == "error"]
+    assert errs and errs[0].payload["code"] == "chat.local.service_error"
+    assert "model not loaded" in errs[0].payload["message"]
+    (rec,) = _end_records(log_stream)
+    assert rec["error_code"] == "chat.local.service_error"

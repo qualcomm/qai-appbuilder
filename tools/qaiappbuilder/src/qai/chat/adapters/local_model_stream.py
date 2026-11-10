@@ -56,6 +56,7 @@ from qai.chat.infrastructure.notice_text import (
     make_content_filter_notice,
     make_truncation_notice,
 )
+from qai.platform.i18n import t as _t
 from qai.platform.ids import IdGenerator
 from qai.platform.logging import get_logger
 
@@ -64,6 +65,61 @@ __all__ = ["LocalModelStreamAdapter"]
 
 
 _log = get_logger(__name__)
+
+#: How many SSE ``data:`` lines ``local_model_stream.end`` keeps as a preview
+#: (each cut to :data:`_SSE_PREVIEW_CHARS`) so an empty / failed reply shows
+#: what the service actually sent.
+_SSE_PREVIEW_LINES = 6
+_SSE_PREVIEW_CHARS = 300
+
+#: GenieAPIService wording when its pre-filter cannot fit the request into the
+#: model's context (``message_pre_filter.cpp`` / ``chat_request_handler.cpp``).
+_SERVICE_CONTEXT_OVERFLOW_MARKERS = (
+    "cannot compress further",
+    "exceed context size",
+    "exceeds context size",
+)
+
+
+def _request_size(payload: dict[str, Any]) -> dict[str, int]:
+    """Size of the request body sent to the service (messages + tools).
+
+    ``est_tokens`` is UTF-8 bytes // 4 - a rough figure (the service's own
+    tokenizer decides), meant only to tell a 5K request from a 50K one.
+    """
+    msgs = payload.get("messages") or []
+    tools = payload.get("tools") or []
+    n_bytes = len(json.dumps(msgs, ensure_ascii=False).encode("utf-8"))
+    n_bytes += len(json.dumps(tools, ensure_ascii=False).encode("utf-8")) if tools else 0
+    return {
+        "request_messages": len(msgs) if isinstance(msgs, list) else 0,
+        "request_bytes": n_bytes,
+        "request_est_tokens": n_bytes // 4,
+    }
+
+
+def _sse_error_text(event: dict[str, Any]) -> str | None:
+    """The error carried by an SSE ``data:`` object, or ``None``.
+
+    GenieAPIService reports a failure inside an HTTP-200 stream as
+    ``{"error": {"message": ..., "code": ...}}`` followed by ``[DONE]``.
+    """
+    err = event.get("error")
+    if not err:
+        return None
+    if isinstance(err, dict):
+        msg = err.get("message")
+        if isinstance(msg, str) and msg.strip():
+            return msg.strip()
+        return json.dumps(err, ensure_ascii=False)
+    return str(err).strip() or None
+
+
+def _is_service_context_overflow(message: str) -> bool:
+    low = message.lower()
+    return any(m in low for m in _SERVICE_CONTEXT_OVERFLOW_MARKERS) or (
+        is_prompt_too_long_error(message)
+    )
 
 # V1 ``backend/local_prompt_builder.py:93`` — the marker that makes
 # GenieAPIService's PromptOptimizer.DetectAgentType() take the MAIN_AGENT
@@ -238,6 +294,8 @@ class LocalModelStreamAdapter:
             "finish_reason": None,
             "first_byte_ms": None,
             "retries": 0,
+            "sse_preview": [],
+            "service_error": None,
         }
         loop = asyncio.get_running_loop()
         started = loop.time()
@@ -291,15 +349,43 @@ class LocalModelStreamAdapter:
                     and not fr
                     and not stats.get("done_seen")
                 )
+                # A clean 200 stream that produced nothing at all (no text, no
+                # reasoning, no tool call, no error): the turn cannot continue.
+                empty_reply = (
+                    outcome == "ended"
+                    and not cut_off
+                    and error_code is None
+                    and stats.get("http_status") == 200
+                    and chunks == 0
+                    and reasoning_chars == 0
+                    and tool_calls == 0
+                )
                 abnormal = (
                     cut_off
+                    or empty_reply
                     or error_code is not None
                     or outcome.startswith("raised")
                     or fr in ("length", "content_filter")
                 )
+                if cut_off:
+                    _outcome = "cut_off_by_service"
+                elif empty_reply:
+                    _outcome = "empty_reply"
+                else:
+                    _outcome = outcome
+                _extra_diag: dict[str, Any] = {}
+                if abnormal:
+                    # Raw service output: what an empty / failed reply really was.
+                    _extra_diag["sse_preview"] = stats.get("sse_preview") or []
+                if stats.get("service_error"):
+                    _extra_diag["service_error"] = stats["service_error"]
                 (_log.warning if abnormal else _log.info)(
                     "local_model_stream.end",
-                    outcome="cut_off_by_service" if cut_off else outcome,
+                    outcome=_outcome,
+                    request_messages=stats.get("request_messages"),
+                    request_bytes=stats.get("request_bytes"),
+                    request_est_tokens=stats.get("request_est_tokens"),
+                    **_extra_diag,
                     finish_reason=fr,
                     done_seen=stats.get("done_seen"),
                     end_reason=end_reason,
@@ -353,6 +439,10 @@ class LocalModelStreamAdapter:
             headers["Authorization"] = f"Bearer {self._api_key}"
 
         payload = self._build_payload(request)
+        try:
+            stats.update(_request_size(payload))
+        except Exception:  # noqa: BLE001 - diagnostics must never break a stream
+            pass
 
         sequence = 0
         content_buffer = ""
@@ -470,6 +560,9 @@ class LocalModelStreamAdapter:
                             continue
                         data_str = raw_line[len("data:"):].strip()
                         stats["sse_lines"] = stats.get("sse_lines", 0) + 1
+                        _preview = stats.setdefault("sse_preview", [])
+                        if len(_preview) < _SSE_PREVIEW_LINES:
+                            _preview.append(data_str[:_SSE_PREVIEW_CHARS])
                         if data_str == "[DONE]":
                             stats["done_seen"] = True
                             continue
@@ -485,6 +578,53 @@ class LocalModelStreamAdapter:
                                 preview=data_str[:200],
                             )
                             continue
+
+                        # ── Service-side failure inside a 200 stream ──
+                        # GenieAPIService reports e.g. "Cannot compress
+                        # further" (the request does not fit the model's
+                        # context) as an ``error`` object + ``[DONE]``. Without
+                        # this the round looked like an empty reply.
+                        if isinstance(event, dict):
+                            svc_err = _sse_error_text(event)
+                            if svc_err is not None:
+                                stats["service_error"] = svc_err[:500]
+                                overflow = _is_service_context_overflow(svc_err)
+                                _log.warning(
+                                    "local_model_stream.service_error",
+                                    base_url=self._base_url,
+                                    context_overflow=overflow,
+                                    request_est_tokens=stats.get("request_est_tokens"),
+                                    error=svc_err[:1000],
+                                )
+                                sequence += 1
+                                if overflow:
+                                    yield StreamFrame.error(
+                                        frame_id=self._next_frame_id("err"),
+                                        sequence=sequence,
+                                        code="chat.local.context_overflow",
+                                        message=_t(
+                                            "chat.local.context_overflow",
+                                            est_tokens=stats.get("request_est_tokens") or "?",
+                                            detail=svc_err[:300],
+                                        ),
+                                    )
+                                else:
+                                    yield StreamFrame.error(
+                                        frame_id=self._next_frame_id("err"),
+                                        sequence=sequence,
+                                        code="chat.local.service_error",
+                                        message=_t(
+                                            "chat.local.service_error",
+                                            detail=svc_err[:300],
+                                        ),
+                                    )
+                                sequence += 1
+                                yield StreamFrame.end(
+                                    frame_id=self._next_frame_id("end"),
+                                    sequence=sequence,
+                                    reason="failed",
+                                )
+                                return
 
                         usage_event = self._extract_usage(event)
                         if usage_event is not None:
@@ -808,13 +948,20 @@ class LocalModelStreamAdapter:
                     text=make_content_filter_notice(),
                 )
 
+            # Tail-appended request size (AGENTS.md §3.1): lets the turn tell
+            # the user how big the request was when the service answered with
+            # nothing (local usage is often absent on such a reply).
+            _end_extra: dict[str, Any] = {}
+            if plain_text_length_truncated:
+                _end_extra["truncated"] = True
+            if stats.get("request_est_tokens") is not None:
+                _end_extra["request_est_tokens"] = stats["request_est_tokens"]
+                _end_extra["request_messages"] = stats.get("request_messages")
             sequence += 1
             yield StreamFrame.end(
                 frame_id=self._next_frame_id("end"),
                 sequence=sequence,
-                extra=(
-                    {"truncated": True} if plain_text_length_truncated else None
-                ),
+                extra=_end_extra or None,
                 reason="completed",
                 usage=last_usage,
             )
