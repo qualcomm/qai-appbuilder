@@ -33,6 +33,20 @@ static constexpr int kShutdownWatchdogExitCode = 124;
 namespace
 {
     volatile std::sig_atomic_t g_pending_signal = 0;
+
+    std::string Utf8PreviewPrefix(const std::string &body, size_t max_bytes)
+    {
+        if (body.size() <= max_bytes)
+        {
+            return body;
+        }
+        size_t cut = max_bytes;
+        while (cut > 0 && (static_cast<unsigned char>(body[cut]) & 0xC0) == 0x80)
+        {
+            --cut;
+        }
+        return body.substr(0, cut);
+    }
 }
 
 class GenieService::Route : public std::enable_shared_from_this<Route>
@@ -70,10 +84,6 @@ private:
         {
             (self_->svr.*action_func_)(path, [route, this](const httplib::Request &req, httplib::Response &res)
             {
-                My_Log{} << "---------------------------------------------------\n"
-                         << "Time: " << My_Log::GetTimeString() << "\n"
-                         << "Path: " << req.path << std::endl;
-
                 ErrorHandle error_handle;
                 try
                 {
@@ -371,14 +381,67 @@ void GenieService::setupHttpServer()
     svr.set_write_timeout(300, 0);
     svr.set_idle_interval(300, 0);
 
+    svr.set_pre_routing_handler([](const httplib::Request &req, httplib::Response &) -> httplib::Server::HandlerResponse
+    {
+        std::string block = "---------------------------------------------------\n";
+        block += "Time: " + My_Log::GetTimeString() + "\n";
+        block += "Path: " + req.path + "\n";
+        block += "Method: " + req.method + " Target: " + req.target + "\n";
+        block += "From: " + req.remote_addr + ":" + std::to_string(req.remote_port) + "\n";
+        static constexpr const char *kLoggedHeaders[] = {
+                "Origin", "Content-Type", "Content-Length", "User-Agent",
+                "Access-Control-Request-Method", "Access-Control-Request-Headers"};
+        for (const char *name: kLoggedHeaders)
+        {
+            if (req.has_header(name))
+            {
+                block += std::string(name) + ": " + req.get_header_value(name) + "\n";
+            }
+        }
+        My_Log{} << block << std::endl;
+        return httplib::Server::HandlerResponse::Unhandled;
+    });
+
     svr.set_logger([](const auto &req, const httplib::Response &res)
                    {
                        if (!res.has_header("X-Skip"))
                        {
-                           My_Log{} << req.path << " handling is done";
+                           std::string line = req.method + " " + req.path + " -> " + std::to_string(res.status) + ", ";
+                           if (req.matched_route.empty())
+                           {
+                               line += "no route matched";
+                               if (!req.body.empty())
+                               {
+                                   line += "\nbody (" + std::to_string(req.body.size()) + " bytes): " +
+                                           Utf8PreviewPrefix(req.body, 256);
+                               }
+                           }
+                           else
+                           {
+                               line += "route " + req.matched_route;
+                           }
+                           line += " handling is done";
+                           My_Log{} << line;
                            My_Log{}.original(true) << "\n\n";
                        }
                    });
+
+    svr.set_default_headers({{"Access-Control-Allow-Origin", "*"},
+                             {"Access-Control-Expose-Headers", "*"}});
+
+    svr.Options(R"(.*)", [](const httplib::Request &req, httplib::Response &res)
+    {
+        res.set_header("Access-Control-Allow-Methods",
+                       req.get_header_value("Access-Control-Request-Method", "GET, POST, OPTIONS"));
+        res.set_header("Access-Control-Allow-Headers",
+                       req.get_header_value("Access-Control-Request-Headers", "*"));
+        if (req.has_header("Access-Control-Request-Private-Network"))
+        {
+            res.set_header("Access-Control-Allow-Private-Network", "true");
+        }
+        res.set_header("Access-Control-Max-Age", "86400");
+        res.status = 204;
+    });
 
     Route::CreateGetRoute({"/"}, &ChatRequestHandler::HandleWelcome);
 
