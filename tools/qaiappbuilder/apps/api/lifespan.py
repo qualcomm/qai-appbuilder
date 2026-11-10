@@ -91,6 +91,8 @@ def make_lifespan(
             file_max_bytes=_log_cfg.file_max_mb * 1024 * 1024,
             file_backup_count=_log_cfg.file_backup_count,
             file_fmt=_log_cfg.file_fmt,  # type: ignore[arg-type]
+            # e.g. the aria2c progress poll (2 lines/s during a download)
+            mute_http_urls=_log_cfg.mute_http_urls,
         )
         _log.info(
             "lifespan.starting",

@@ -191,6 +191,7 @@ async def cli_container(
         level=settings.logging.level,  # type: ignore[arg-type]
         fmt="console",
         stream=sys.stderr,
+        mute_http_urls=settings.logging.mute_http_urls,
     )
 
     container = Container.build(settings=settings, repo_root=resolved_root)
