@@ -211,7 +211,7 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 - 启动:先显示启动页,后台用安装时建的 venv 运行 `python -m apps.cli.serve --port 8989`(隐藏控制台窗口),`/api/system/health` 返回 200 后再打开应用页。端口从 `factory/config/ports.json` 读,固定为 8989(SSO 回调地址写死了端口)。端口被占用(例如正在跑 `Start.bat`)时不启动后端,直接在窗口里提示。
 - 关窗口:弹出"退出 / 最小化到托盘 / 取消",可勾选"记住我的选择"。记住的结果存在 `data\config\desktop-settings.json` 的 `close_action`(`ask` / `quit` / `tray`),删掉这个文件就会重新询问。后端还没起来或已出错时关窗直接退出。
 - 托盘:左键恢复窗口,右键菜单"显示窗口 / 退出"。单实例:再次双击快捷方式只会把已有窗口调到前台。
-- 退出:先 `POST /api/system/exit`(带 CSRF 令牌)让后端正常关闭,超时才强杀进程树。后端放在 Job Object 里,壳被任务管理器强杀时,后端也会被系统回收。后端中途崩溃或被杀时,窗口回到错误页并显示日志路径(`data\logs\desktop-backend.log`)。
+- 退出:先 `POST /api/system/exit`(带 CSRF 令牌)让后端正常关闭,超时才强杀进程树。后端放在 Job Object 里,壳被任务管理器强杀时,后端也会被系统回收。后端中途崩溃或被杀时,窗口回到错误页并显示日志路径(`data\logs\desktop-backend.log`)。后端自己的日志(含每轮对话的开始、结束和结束原因)在 `data\logs\backend.log`,按大小分卷,说明见 `desktop/README.md` 的"调试"一节。
 - 链接:应用自己的地址在窗口里打开(SSO 登录弹窗也一样);其他 http(s) 链接交给系统浏览器;其他协议一律拒绝。
 - 语言:按 Windows 显示语言选中文或英文。
 - 构建、源码结构、调试方法:见 [`desktop/README.md`](../desktop/README.md)。打包命令见上面的"打包"一节(一条命令会自动编译桌面版)。

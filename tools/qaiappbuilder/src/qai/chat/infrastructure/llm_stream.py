@@ -2524,6 +2524,18 @@ class HttpOpenAICompatibleLLMStream:
             payload["retry_after_seconds"] = float(retry_after_seconds)
         if provider_message:
             payload["provider_message"] = str(provider_message)
+        # Every cloud-stream failure the user sees passes through here: log it
+        # once, so the reason is in backend.log even after the UI is closed.
+        _log.warning(
+            "chat.llm.error_frame",
+            code=code,
+            message=str(message)[:500],
+            retryable=bool(retryable),
+            model_id=model_id,
+            param=param,
+            retry_after_seconds=retry_after_seconds,
+            provider_message=str(provider_message)[:1000] if provider_message else None,
+        )
         yield StreamFrame(
             frame_id=self._ids.new_id(),
             frame_type=StreamFrameType.ERROR,

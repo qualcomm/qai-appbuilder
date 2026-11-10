@@ -78,9 +78,19 @@ def make_lifespan(
 
     @contextlib.asynccontextmanager
     async def lifespan(_app: "FastAPI") -> AsyncIterator[None]:
+        _log_cfg = container.settings.logging
         configure_logging(
-            level=container.settings.logging.level,  # type: ignore[arg-type]
-            fmt=_resolve_fmt(container.settings.logging.fmt),
+            level=_log_cfg.level,  # type: ignore[arg-type]
+            fmt=_resolve_fmt(_log_cfg.fmt),
+            # data/logs/backend.log: kept after the console window / desktop shell is closed.
+            file_path=(
+                container.data_paths.root / "logs" / "backend.log"
+                if _log_cfg.file_enabled
+                else None
+            ),
+            file_max_bytes=_log_cfg.file_max_mb * 1024 * 1024,
+            file_backup_count=_log_cfg.file_backup_count,
+            file_fmt=_log_cfg.file_fmt,  # type: ignore[arg-type]
         )
         _log.info(
             "lifespan.starting",

@@ -1721,6 +1721,57 @@ class _TurnBodyState:
     #: from ``meta`` entirely (no migration needed: ``meta_json`` is a TEXT
     #: JSON blob, and absent means "no chip").
     pending_integration_keys_this_turn: set[str] = field(default_factory=set)
+    #: Diagnostics only (``chat.turn.end`` log line): the ``code`` of the last
+    #: ERROR frame the LLM stream surfaced this turn (e.g. ``chat.llm.timeout``).
+    last_error_code: str | None = None
+    #: Diagnostics only: set once ``chat.turn.end`` was logged, so a later exit
+    #: path never logs the same turn twice.
+    turn_end_logged: bool = False
+
+
+def _log_turn_end(
+    state: _TurnBodyState,
+    *,
+    outcome: str,
+    tab_id: str,
+    conversation_id: str,
+    model_hint: str,
+    started_ms: int,
+    now_ms: int,
+    level: str = "info",
+    **extra: Any,
+) -> None:
+    """Log one ``chat.turn.end`` line: how and why a chat turn ended.
+
+    Synchronous and never raises, so it is safe on every exit path of
+    :meth:`StreamChatUseCase._run` — including ``GeneratorExit`` /
+    ``CancelledError`` handlers, where awaiting is not allowed. Reads ``state``
+    only; never changes the turn.
+    """
+    if state.turn_end_logged:
+        return
+    state.turn_end_logged = True
+    try:
+        usage = state.turn_usage or {}
+        getattr(_log, level)(
+            "chat.turn.end",
+            outcome=outcome,
+            tab_id=tab_id,
+            conversation_id=conversation_id,
+            model=model_hint,
+            duration_ms=max(0, now_ms - started_ms),
+            ttft_ms=state.ttft_ms,
+            frames=state.frame_count,
+            rounds=max(1, len(state.round_request_ids)),
+            tool_calls=len(state.tc_frames),
+            text_chars=sum(len(p) for p in state.assistant_text_parts),
+            prompt_tokens=usage.get("prompt_tokens"),
+            completion_tokens=usage.get("completion_tokens"),
+            llm_error=state.last_error_code,
+            **extra,
+        )
+    except Exception:  # noqa: BLE001 - diagnostics must never break a turn
+        pass
 
 
 class StreamChatUseCase:
@@ -3285,6 +3336,7 @@ class StreamChatUseCase:
                 # message on the frontend (the real frame was already
                 # published above via ``_publish``).
                 state.had_llm_error = True
+                state.last_error_code = str(frame.payload.get("code") or "unknown")
             elif frame.frame_type in _SUBAGENT_FRAME_TYPES:
                 # V1 parity (useChat.js:62 / 2404): fold the relayed
                 # sub-agent frame into a persistable block so a reload
@@ -3612,6 +3664,7 @@ class StreamChatUseCase:
                 # closes the turn). Parity with the round-0 ERROR branch in
                 # ``_drain_main_stream`` (streaming.py ~1763).
                 state.had_llm_error = True
+                state.last_error_code = str(fu_frame.payload.get("code") or "unknown")
             elif fu_frame.frame_type is StreamFrameType.END:
                 # Last END frame of the agentic turn carries the
                 # cumulative usage; keep the latest seen.
@@ -4045,6 +4098,13 @@ class StreamChatUseCase:
                         model_hint, provider,
                     )
                 except MissingModelContextLengthError as exc:
+                    _log.warning(
+                        "chat.turn.rejected",
+                        reason=exc.code,
+                        model=model_hint,
+                        provider=provider,
+                        error=str(exc),
+                    )
                     yield StreamFrame.error(
                         frame_id="context-window-error",
                         sequence=0,
@@ -4186,6 +4246,12 @@ class StreamChatUseCase:
         except Exception:
             # Pre-stream setup failed — release the STREAMING tab so it does
             # not stay permanently dead. Best-effort (shield + swallow).
+            _log.exception(
+                "chat.turn.setup_failed",
+                tab_id=tab.id.value,
+                conversation_id=conv.id.value,
+                model=model_hint,
+            )
             try:
                 await asyncio.shield(
                     self._release_streaming_tab(tab=tab, now=self._clock.now())
@@ -4234,6 +4300,32 @@ class StreamChatUseCase:
         # leaves every completed tool round on disk (V1 frontend-save parity,
         # done server-side).
         state.turn_persist_baseline = len(conv.messages)
+        # Diagnostics: one ``chat.turn.start`` here and exactly one
+        # ``chat.turn.end`` on whichever exit path the turn takes (see
+        # ``_log_turn_end``). A ``start`` with no ``end`` in the log means the
+        # backend process itself died mid-turn.
+        _turn_log = {
+            "tab_id": tab.id.value,
+            "conversation_id": conv.id.value,
+            "model_hint": model_hint,
+            "started_ms": _turn_started_ms,
+        }
+        _tool_params = (request.extra or {}).get("tool_params") if request.extra else None
+        _log.info(
+            "chat.turn.start",
+            tab_id=tab.id.value,
+            conversation_id=conv.id.value,
+            model=model_hint,
+            provider=(
+                _tool_params.get("selected_model_provider")
+                if isinstance(_tool_params, dict)
+                else None
+            ),
+            context_limit=(request.extra or {}).get("_context_limit") if request.extra else None,
+            history_messages=len(conv.messages),
+            user_chars=len(getattr(request.user_message, "text", "") or ""),
+            subagent_takeover=state.is_subagent_takeover,
+        )
 
         # ── tool_mode_changed detection ──────────────────────────────
         # Discover the effective tool mode (which may differ from the
@@ -4445,6 +4537,12 @@ class StreamChatUseCase:
             # cancellation still propagates (asyncio contract). ``shield``
             # protects the flush from the in-flight cancellation.
             _cancel_now = self._clock.now()
+            _log_turn_end(
+                state, outcome="cancelled", level="warning",
+                now_ms=_now_ms(self._clock),
+                detail="task cancelled (page refresh / client disconnect / server shutdown)",
+                **_turn_log,
+            )
 
             async def _flush_and_mark_interrupted() -> None:
                 _last = await self._flush_tool_calls_on_interrupt(
@@ -4511,6 +4609,8 @@ class StreamChatUseCase:
             raise
         except ChatStreamAbortedError:
             state.aborted = True
+            # ``chat.turn.end`` for this path is logged in the ``if state.aborted``
+            # block below (with the abort reason).
             await self._fire_hook(
                 HookEvent.ON_ERROR, payload={"category": "aborted"}
             )
@@ -4532,6 +4632,12 @@ class StreamChatUseCase:
             # ``yield`` when the consumer calls ``aclose()``. Awaiting here is
             # legal as long as we do NOT ``yield`` again; we release the tab
             # then re-raise so the generator closes cleanly (asyncio contract).
+            _log_turn_end(
+                state, outcome="consumer_closed", level="warning",
+                now_ms=_now_ms(self._clock),
+                detail="stream closed by its consumer before the turn finished",
+                **_turn_log,
+            )
             try:
                 _gx_now = self._clock.now()
                 # Flush parity with the CancelledError / Exception paths: a
@@ -4607,6 +4713,14 @@ class StreamChatUseCase:
             # server-side, so we replicate that durability guarantee here
             # by persisting the accumulated tool frames before re-raising.
             state.run_error = exc
+            _log_turn_end(
+                state, outcome="exception", level="error",
+                now_ms=_now_ms(self._clock),
+                error_type=type(exc).__name__,
+                error=str(exc)[:500],
+                exc_info=exc,
+                **_turn_log,
+            )
             try:
                 await self._flush_tool_calls_on_interrupt(
                     conv=conv, user_msg=user_msg, now=self._clock.now(),
@@ -4810,6 +4924,12 @@ class StreamChatUseCase:
             await self._persist_subagent_takeover(
                 takeover_session, request=request, state=state,
             )
+            _log_turn_end(
+                state, outcome="aborted", level="warning",
+                now_ms=_now_ms(self._clock),
+                abort_reason=state.abort_reason,
+                **_turn_log,
+            )
             # Operator hooks: session end on the abort exit.
             await self._fire_hook(HookEvent.ON_SESSION_END)
             await self._handle_abort(
@@ -4835,6 +4955,13 @@ class StreamChatUseCase:
             state=state,
         ):
             yield fr
+        _log_turn_end(
+            state,
+            outcome="llm_error" if state.had_llm_error else "completed",
+            level="warning" if state.had_llm_error else "info",
+            now_ms=_now_ms(self._clock),
+            **_turn_log,
+        )
 
         # Operator hook: post message (the assistant's reply for this turn is
         # fully finalized + persisted). Fires BEFORE on_complete / on_session_end

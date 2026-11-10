@@ -107,7 +107,8 @@
 
 ## 调试
 
-- 后端输出:`data\logs\desktop-backend.log`。
+- 后端输出:`data\logs\desktop-backend.log`(进程的 stdout/stderr,含崩溃时的输出)。
+- 后端日志:`data\logs\backend.log`,不论用桌面版还是 `Start.bat` 启动都会写。按大小分卷(默认 10 MB,保留 5 个旧文件 `backend.log.1`..`.5`)。每轮对话写一条 `chat.turn.start` 和一条 `chat.turn.end`,`outcome` 说明怎么结束的:`completed` / `llm_error`(看 `llm_error` 字段)/ `aborted`(点了停止)/ `cancelled`(刷新页面、断开连接或后端关闭)/ `consumer_closed`(前端提前关闭了流)/ `exception`(带堆栈)。只有 `start` 没有 `end` 说明后端进程中途挂了,去看 `desktop-backend.log`。上游错误另记:云端 `chat.llm.error_frame`,本地 `local_model_stream.*`。设置(环境变量):`QAI_LOGGING__FILE_ENABLED=false` 关掉文件,`QAI_LOGGING__FILE_MAX_MB`、`QAI_LOGGING__FILE_BACKUP_COUNT`,`QAI_LOGGING__FILE_FMT=json` 改成 JSON 行,`QAI_LOGGING__LEVEL=DEBUG` 记得更细。
 - 以管理员身份运行时后端会拒绝启动(退出码 78),启动页直接显示原因和两种办法(换普通账号,或设置环境变量 `QAI_ALLOW_ELEVATED=1` 后重开),不用去看日志。其他意外退出仍显示退出码和日志路径。
 - 打开 WebView2 调试端口:启动前设置 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9333`,然后访问 `http://127.0.0.1:9333/json`。
 - 单元测试:`cd desktop\src-tauri; cargo test --release --lib`(3 项:`host_arch` 解析、端口缺省、设置读写)。
