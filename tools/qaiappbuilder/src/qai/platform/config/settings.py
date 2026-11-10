@@ -175,6 +175,12 @@ class LoggingSettings(BaseModel):
 
     level: str = Field(default="INFO")
     fmt: str = Field(default="auto", description="'auto', 'json', or 'console'")
+    # Backend server log file ``<data_dir>/logs/backend.log`` (in addition to stderr), rotated by size.
+    # Env: QAI_LOGGING__FILE_ENABLED / QAI_LOGGING__FILE_MAX_MB / QAI_LOGGING__FILE_BACKUP_COUNT / QAI_LOGGING__FILE_FMT.
+    file_enabled: bool = Field(default=True)
+    file_max_mb: int = Field(default=10, ge=1, le=1024)
+    file_backup_count: int = Field(default=5, ge=0, le=100)
+    file_fmt: str = Field(default="console", description="'json' or 'console' (plain text, no colours)")
 
     @field_validator("level")
     @classmethod
@@ -192,6 +198,15 @@ class LoggingSettings(BaseModel):
         lower = v.lower()
         if lower not in allowed:
             raise ValueError(f"fmt must be one of {sorted(allowed)}")
+        return lower
+
+    @field_validator("file_fmt")
+    @classmethod
+    def _valid_file_fmt(cls, v: str) -> str:
+        allowed = {"json", "console"}
+        lower = v.lower()
+        if lower not in allowed:
+            raise ValueError(f"file_fmt must be one of {sorted(allowed)}")
         return lower
 
 
