@@ -157,6 +157,22 @@ def test_muted_http_urls_are_dropped_from_console_and_file(tmp_path: Path) -> No
         assert "8910/v1/chat/completions" in text  # other requests still logged
 
 
+def test_default_mutes_genie_status_but_not_chat_requests(tmp_path: Path) -> None:
+    from qai.platform.config.settings import LoggingSettings
+
+    stream = io.StringIO()
+    configure_logging(stream=stream, mute_http_urls=LoggingSettings().mute_http_urls)
+
+    logging.getLogger("httpx").info(
+        'HTTP Request: %s %s "%s %d %s"', "GET", "http://127.0.0.1:8910/status", "HTTP/1.1", 200, "OK",
+    )
+    _httpx_request_line("http://127.0.0.1:8910/v1/chat/completions")
+
+    text = stream.getvalue()
+    assert "8910/status" not in text
+    assert "8910/v1/chat/completions" in text
+
+
 def test_muted_url_warning_is_kept(tmp_path: Path) -> None:
     stream = io.StringIO()
     configure_logging(stream=stream, mute_http_urls=[_ARIA2])
@@ -182,12 +198,13 @@ def test_empty_mute_list_logs_everything(tmp_path: Path) -> None:
     assert "6800/jsonrpc" in stream.getvalue()
 
 
-def test_settings_default_mutes_both_aria2c_ports() -> None:
+def test_settings_default_mutes_aria2c_and_genie_status() -> None:
     from qai.platform.config.settings import LoggingSettings
 
     assert LoggingSettings().mute_http_urls == [
         "127.0.0.1:6800/jsonrpc",
         "127.0.0.1:6810/jsonrpc",
+        "127.0.0.1:8910/status",
     ]
     assert LoggingSettings(mute_http_urls=[]).mute_http_urls == []
 
