@@ -91,6 +91,24 @@ inline std::string ExtractLatestAssistantReadRef(const json &messages)
     for (auto it = messages.rbegin(); it != messages.rend(); ++it) {
         if (!it->is_object() || it->value("role", "") != "assistant")
             continue;
+        if (it->contains("tool_calls") && (*it)["tool_calls"].is_array()) {
+            const auto &calls = (*it)["tool_calls"];
+            for (auto call = calls.rbegin(); call != calls.rend(); ++call) {
+                if (!call->is_object() || !call->contains("function") || !(*call)["function"].is_object())
+                    continue;
+                const auto &fn = (*call)["function"];
+                if (!fn.contains("name") || !fn["name"].is_string())
+                    continue;
+                std::string args = "{}";
+                if (fn.contains("arguments"))
+                    args = fn["arguments"].is_string() ? fn["arguments"].get<std::string>() : fn["arguments"].dump();
+                const std::string ref = TaskMemoBuilder::ExtractReadToolPath(
+                    "<tool_call>\n{\"name\": \"" + fn["name"].get<std::string>() + "\", \"arguments\": " + args +
+                    "}\n</tool_call>");
+                if (!ref.empty())
+                    return ref;
+            }
+        }
         return TaskMemoBuilder::ExtractReadToolPath(get_json_value<std::string>(*it, "content", ""));
     }
     return "";
@@ -1833,12 +1851,21 @@ private:
                 candidates.emplace_back("overlap:" + overlap_path, note);
         }
 
+        const uint64_t memo_epoch = entry ? static_cast<uint64_t>(entry->value("refresh_count", (size_t) 0)) : 0;
         for (const auto& candidate : candidates) {
             if (candidate.second.empty())
                 continue;
 
-            const uint64_t content_digest = static_cast<uint64_t>(std::hash<std::string>{}(candidate.second));
-            if (store.TryMarkNoteSlot(key, candidate.first, content_digest))
+            uint64_t content_digest = static_cast<uint64_t>(std::hash<std::string>{}(candidate.second));
+            const bool is_reread = candidate.first.rfind("reread:", 0) == 0;
+            if (is_reread)
+                content_digest ^= (memo_epoch + 1) * 0x9E3779B97F4A7C15ULL;
+            const bool accepted = store.TryMarkNoteSlot(key, candidate.first, content_digest);
+            if (is_reread)
+                My_Log{My_Log::Level::kInfo} << "[TaskMemo] RereadFromTop note: slot=" << candidate.first
+                                             << ", refresh_count=" << memo_epoch
+                                             << ", accepted=" << (accepted ? 1 : 0) << std::endl;
+            if (accepted)
                 return "\n\n## Task Memo\n" + candidate.second;
         }
         return "";

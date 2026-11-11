@@ -2039,8 +2039,17 @@ std::string TaskMemoBuilder::BuildRereadFromTopNote(const std::string& read_ref,
     oss << "Note: you are reading " << path << " from the beginning again, but lines "
         << JoinLineRanges(seen) << " of it were already shown earlier in this task.";
     const size_t next_offset = task_memo_scan::NextUnreadOffset(file_entry);
-    if (next_offset > 0)
+    if (next_offset > 0) {
         oss << " The first part you have not seen yet starts at line " << next_offset << ".";
+    } else if (task_memo_scan::IsFileFullyRead(file_entry)) {
+        oss << " It is fully read, so do not page through it again.";
+        std::string cursor = task_memo_scan::RenderCursorSuffix(file_entry);
+        if (cursor.rfind("; ", 0) == 0)
+            cursor.erase(0, 2);
+        if (!cursor.empty())
+            oss << " Where you left off: " << cursor << ".";
+        oss << " Read only the single section you need by passing its offset, or act on what you already know.";
+    }
     oss << "\n";
     const std::string fact = task_memo_scan::RenderNearCursorFact(path, file_entry);
     if (!fact.empty())
