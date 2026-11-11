@@ -428,6 +428,7 @@ struct PromptOptimizationConfig {
 
         size_t tag_weight = 2;
         bool anchor_first_user_message = true;
+        bool session_stable = true;
         double keep_all_tools_ratio = 0.15;
         bool protect_core_capability_tools = true;
         std::vector<std::string> core_capability_keywords = {

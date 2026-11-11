@@ -314,6 +314,20 @@ public:
                  << " | prompt_prefix=\"" << prompt_prefix << "\""
                  << " @" << My_Log::GetTimeString() << "\n";
 
+        if (!is_aux_inference)
+        {
+            const auto &sampling_params = params_.sampling;
+            My_Log{} << "[LLAMACpp] " << query_type << " Sampler"
+                     << " | temp=" << sampling_params.temp
+                     << " | top_k=" << sampling_params.top_k
+                     << " | top_p=" << sampling_params.top_p
+                     << " | min_p=" << sampling_params.min_p
+                     << " | penalty_repeat=" << sampling_params.penalty_repeat
+                     << " | penalty_last_n=" << sampling_params.penalty_last_n
+                     << " | seed=" << sampling_params.seed
+                     << " | speculative=" << (is_speculative_ ? 1 : 0) << "\n";
+        }
+
         {
             std::lock_guard<std::mutex> lk(m);
             done = false;

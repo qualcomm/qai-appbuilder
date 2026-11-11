@@ -24,6 +24,7 @@
 #include "prompt_ledger.h"
 #include "tool_call_circuit_breaker_store.h"
 #include "tool_call_repetition_store.h"
+#include "../response/repeat_gate.h"
 #include <chrono>
 #include <deque>
 #include <functional>
@@ -1784,9 +1785,19 @@ private:
 
         const int repeat_count = store.GetRepeatCount(key);
         if (cfg.repeat_threshold > 0 && repeat_count >= cfg.repeat_threshold) {
+            int forewarn_threshold = cfg.hard_block_threshold;
+            if (!last_signature.empty()) {
+                std::vector<size_t> dropped_raw;
+                if (MessagePreFilter::GetDroppedRawIndices(session_key, messages, dropped_raw)) {
+                    const int visible_executions = static_cast<int>(RepeatGateLogic::CountVisibleExecutions(
+                        RepeatGateLogic::CollectExecutedOutcomes(messages), last_signature, dropped_raw));
+                    if (visible_executions + 1 < cfg.hard_block_threshold)
+                        forewarn_threshold = 0;
+                }
+            }
             candidates.emplace_back("sig:" + last_signature,
                                     TaskMemoBuilder::RenderRedundantToolCallNote(repeat_count, preview, digest_stable,
-                                                                                  cfg.hard_block_threshold));
+                                                                                  forewarn_threshold));
         }
         const int non_contiguous_count = store.GetNonContiguousRepeatCount(key);
         const int non_contiguous_threshold = ToolCallRepetitionStore::EffectiveNonContiguousNoticeThreshold(

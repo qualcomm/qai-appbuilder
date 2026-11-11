@@ -10,6 +10,7 @@
 
 #include <deque>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace RepeatGateLogic
 {
@@ -148,8 +149,9 @@ std::vector<ExecutedOutcome> CollectExecutedOutcomes(const Json& messages, size_
     std::unordered_map<std::string, std::string> id_to_signature;
     std::deque<std::string> pending_without_id;
 
-    for (const auto& m : messages)
+    for (size_t msg_index = 0; msg_index < messages.size(); ++msg_index)
     {
+        const auto& m = messages[msg_index];
         if (!m.is_object())
             continue;
         std::string role;
@@ -201,12 +203,26 @@ std::vector<ExecutedOutcome> CollectExecutedOutcomes(const Json& messages, size_
 
             ExecutedOutcome record;
             record.signature = signature;
+            record.msg_index = msg_index;
             if (m.contains("content"))
                 record.content = ExtractContentText(m["content"]);
             out.push_back(std::move(record));
         }
     }
     return out;
+}
+
+size_t CountVisibleExecutions(const std::vector<ExecutedOutcome>& executed, const std::string& signature,
+                              const std::vector<size_t>& dropped_msg_indices)
+{
+    const std::unordered_set<size_t> dropped(dropped_msg_indices.begin(), dropped_msg_indices.end());
+    size_t visible = 0;
+    for (const auto& item : executed)
+    {
+        if (item.signature == signature && dropped.count(item.msg_index) == 0)
+            ++visible;
+    }
+    return visible;
 }
 
 Outcome ClassifyOutcome(const std::string& content)

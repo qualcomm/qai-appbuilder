@@ -772,6 +772,25 @@ MessagePreFilter::MessagePreFilter(IModelConfig& model_config, ContextBase* cont
     : model_config_(model_config), context_override_(context)
 {}
 
+bool MessagePreFilter::GetDroppedRawIndices(const std::string& evict_key, const json& raw_messages,
+                                            std::vector<size_t>& dropped_out)
+{
+    dropped_out.clear();
+    if (evict_key.empty() || !raw_messages.is_array())
+        return false;
+    std::lock_guard<std::mutex> lk(g_eviction_mutex);
+    auto it = g_eviction_states.find(evict_key);
+    if (it == g_eviction_states.end())
+        return false;
+    const EvictionState& st = it->second;
+    if (raw_messages.size() < st.raw_size || st.boundary > raw_messages.size())
+        return false;
+    if (HashRawPrefix(raw_messages, st.boundary) != st.prefix_hash)
+        return false;
+    dropped_out = st.dropped;
+    return true;
+}
+
 bool MessagePreFilter::PrefixCacheActive()
 {
     if (context_override_) {

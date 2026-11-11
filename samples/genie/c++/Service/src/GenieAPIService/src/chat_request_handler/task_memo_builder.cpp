@@ -1811,14 +1811,15 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
     const std::string tried_queries_summary = (entry.contains("tried_queries") && entry["tried_queries"].is_object())
         ? task_memo_scan::RenderTriedQueriesSummary(entry["tried_queries"], tried_queries_count_safe) : std::string();
 
+    const std::string completed_block = render_list("Completed", "completed");
     const std::string blocks[] = {
         render_list("Rules from documents you read (still in force)", "hard_rules"),
         pending_refs_block,
         render_list("Recovery episodes recorded from earlier context", "recovery_ledger"),
         artifacts_block,
         last_success_block,
+        completed_block,
         exec_cache_block,
-        render_list("Completed", "completed"),
         render_list("Next actions", "next_actions"),
         render_list("Facts / constraints", "facts_constraints"),
         render_list("Open questions", "open_questions"),
@@ -1828,7 +1829,7 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         page_directory_block,
     };
     static const char* kBlockNames[] = {
-        "hard_rules", "pending_refs", "recovery_ledger", "artifacts", "last_success", "exec_cache", "completed", "next_actions",
+        "hard_rules", "pending_refs", "recovery_ledger", "artifacts", "last_success", "completed", "exec_cache", "next_actions",
         "facts_constraints", "open_questions", "read_files", "tried_queries", "tool_state", "page_directory",
     };
     const size_t kBlockCount = sizeof(blocks) / sizeof(blocks[0]);
@@ -1854,7 +1855,37 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         budget_for_high_priority = (max_chars > reserved_for_memory) ? (max_chars - reserved_for_memory) : 0;
     }
 
+    const size_t progress_reserve = (max_chars > 0)
+        ? std::min(last_success_block.size() + completed_block.size(), max_chars * 3 / 20) : 0;
+
+    auto fit_tail_rows = [](const std::string& block, size_t budget) -> std::string {
+        std::vector<std::string> rows;
+        size_t start = 0;
+        while (start < block.size()) {
+            size_t end = block.find('\n', start);
+            end = (end == std::string::npos) ? block.size() : end + 1;
+            rows.push_back(block.substr(start, end - start));
+            start = end;
+        }
+        if (rows.empty() || rows.front().size() >= budget)
+            return "";
+        std::string result = rows.front();
+        std::vector<std::string> tail;
+        size_t used = result.size();
+        for (size_t i = rows.size(); i-- > 1;) {
+            if (used + rows[i].size() > budget)
+                break;
+            used += rows[i].size();
+            tail.push_back(rows[i]);
+        }
+        for (auto it = tail.rbegin(); it != tail.rend(); ++it)
+            result += *it;
+        return result;
+    };
+
     auto degrade_block = [&](const char* block_name, size_t available) -> std::string {
+        if (std::strcmp(block_name, "last_success") == 0)
+            return fit_tail_rows(last_success_block, available);
         if (std::strcmp(block_name, "completed") == 0)
             return render_list_fit("Completed", "completed", available);
         if (std::strcmp(block_name, "tried_queries") == 0
@@ -1881,7 +1912,14 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         const bool is_reserved_block = (std::strcmp(block_name, "read_files") == 0
                                          || std::strcmp(block_name, "tried_queries") == 0
                                          || std::strcmp(block_name, "tool_state") == 0);
-        const size_t slot_budget = is_reserved_block ? max_chars : budget_for_high_priority;
+        const bool is_progress_donor = (std::strcmp(block_name, "hard_rules") == 0
+                                        || std::strcmp(block_name, "pending_refs") == 0
+                                        || std::strcmp(block_name, "recovery_ledger") == 0);
+        const size_t donor_budget = std::max(
+            (budget_for_high_priority > progress_reserve) ? budget_for_high_priority - progress_reserve : size_t(0),
+            budget_for_high_priority / 2);
+        const size_t slot_budget = is_reserved_block ? max_chars
+            : (is_progress_donor ? donor_budget : budget_for_high_priority);
 
         std::string candidate = block;
         if (max_chars > 0 && out_used + block.size() > slot_budget) {

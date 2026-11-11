@@ -1731,6 +1731,8 @@ bool ModelManager::InitializeConfig()
                                 rf.value("tag_weight", (size_t) 2);
                         prompt_optimization_config_.relevance_filter.anchor_first_user_message =
                                 rf.value("anchor_first_user_message", true);
+                        prompt_optimization_config_.relevance_filter.session_stable =
+                                rf.value("session_stable", true);
                         prompt_optimization_config_.relevance_filter.keep_all_tools_ratio =
                                 rf.value("keep_all_tools_ratio", 0.15);
                         prompt_optimization_config_.relevance_filter.protect_core_capability_tools =
@@ -1756,6 +1758,7 @@ bool ModelManager::InitializeConfig()
                                  << ", intent_aliases_enabled=" << prompt_optimization_config_.relevance_filter.intent_aliases_enabled
                                  << ", tag_weight=" << prompt_optimization_config_.relevance_filter.tag_weight
                                  << ", anchor_first_user_message=" << prompt_optimization_config_.relevance_filter.anchor_first_user_message
+                                 << ", session_stable=" << prompt_optimization_config_.relevance_filter.session_stable
                                  << ", protect_core_capability_tools=" << prompt_optimization_config_.relevance_filter.protect_core_capability_tools
                                  << ", core_capability_keywords_count=" << prompt_optimization_config_.relevance_filter.core_capability_keywords.size()
                                  << std::endl;

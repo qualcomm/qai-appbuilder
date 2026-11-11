@@ -8,6 +8,7 @@
 
 #include "response_dispatcher.h"
 #include "../chat_request_handler/model_input_builder.h"
+#include "../chat_request_handler/message_pre_filter.h"
 #include "response_tools.h"
 #include "mimicry_recovery.h"
 #include "repeat_gate.h"
@@ -1043,7 +1044,25 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                 {
                     const auto &gate_cfg = model_config_.GetToolCallRepairConfig().redundant_call_guard;
                     auto &gate_store = ToolCallRepetitionStore::GetInstance();
-                    const int gate_total = gate_store.PeekTotalCount(repetition_key, gate_signature);
+                    const int ledger_total = gate_store.PeekTotalCount(repetition_key, gate_signature);
+                    int gate_total = ledger_total;
+                    int gate_visible_total = ledger_total;
+                    bool gate_eviction_known = false;
+                    if (!think_session_key.empty() && retry_request_data_.contains("messages")
+                        && retry_request_data_["messages"].is_array())
+                    {
+                        std::vector<size_t> gate_dropped_raw;
+                        if (MessagePreFilter::GetDroppedRawIndices(think_session_key,
+                                retry_request_data_["messages"], gate_dropped_raw))
+                        {
+                            gate_eviction_known = true;
+                            const auto gate_executed_history =
+                                RepeatGateLogic::CollectExecutedOutcomes(retry_request_data_["messages"]);
+                            gate_visible_total = static_cast<int>(RepeatGateLogic::CountVisibleExecutions(
+                                gate_executed_history, gate_signature, gate_dropped_raw)) + 1;
+                            gate_total = std::min(ledger_total, gate_visible_total);
+                        }
+                    }
                     const size_t gate_distinct =
                         static_cast<size_t>(gate_store.PeekDistinctDigestCount(repetition_key, gate_signature));
 
@@ -1074,9 +1093,81 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                             << " time(s) with an unchanged result (total=" << gate_total
                             << ", distinct_digests=" << gate_distinct
                             << ", blocked_count=" << gate_blocked
+                            << ", visible_total=" << gate_visible_total << ", ledger_total=" << ledger_total
+                            << ", eviction_known=" << (gate_eviction_known ? 1 : 0)
                             << "); the call is NOT forwarded to the client. Downgrading to plain text with "
                                "finish_reason=\"" << finishReason << "\"" << (gate_final ? " (final stop)" : "")
                             << ". Generated tail: " << TailBytes(response_buffer, 200) << std::endl;
+
+                        try
+                        {
+                            int tail_identical_calls = 0;
+                            size_t history_msgs = 0;
+                            std::string last_role;
+                            bool last_is_system_nudge = false;
+                            if (retry_request_data_.contains("messages") && retry_request_data_["messages"].is_array())
+                            {
+                                const auto &hist = retry_request_data_["messages"];
+                                history_msgs = hist.size();
+                                if (!hist.empty() && hist.back().is_object())
+                                {
+                                    const auto &last_msg = hist.back();
+                                    last_role = last_msg.value("role", std::string());
+                                    std::string last_text;
+                                    if (last_msg.contains("content") && last_msg["content"].is_string())
+                                        last_text = last_msg["content"].get<std::string>();
+                                    else if (last_msg.contains("content") && last_msg["content"].is_array())
+                                    {
+                                        for (const auto &part : last_msg["content"])
+                                        {
+                                            if (part.is_object() && part.contains("text") && part["text"].is_string())
+                                            {
+                                                last_text = part["text"].get<std::string>();
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    last_is_system_nudge = last_role == "user" && last_text.rfind("[SYSTEM]", 0) == 0;
+                                }
+                                for (auto it = hist.rbegin(); it != hist.rend(); ++it)
+                                {
+                                    if (!it->is_object() || it->value("role", std::string()) != "assistant"
+                                        || !it->contains("tool_calls") || !(*it)["tool_calls"].is_array()
+                                        || (*it)["tool_calls"].empty() || !(*it)["tool_calls"][0].is_object()
+                                        || !(*it)["tool_calls"][0].contains("function"))
+                                        continue;
+                                    const auto &fn = (*it)["tool_calls"][0]["function"];
+                                    std::string hist_args = "{}";
+                                    if (fn.contains("arguments") && fn["arguments"].is_string())
+                                    {
+                                        const json parsed_args = json::parse(fn["arguments"].get<std::string>(), nullptr, false);
+                                        if (!parsed_args.is_discarded())
+                                            hist_args = parsed_args.dump();
+                                    }
+                                    else if (fn.contains("arguments") && fn["arguments"].is_object())
+                                        hist_args = fn["arguments"].dump();
+                                    if (fn.value("name", std::string()) + "|" + hist_args != gate_signature)
+                                        break;
+                                    ++tail_identical_calls;
+                                }
+                            }
+                            const size_t think_end = response_buffer.find("</think>");
+                            const size_t think_begin = response_buffer.find("<think>");
+                            const long long think_chars = think_end == std::string::npos ? -1
+                                : static_cast<long long>(think_end) - (think_begin == std::string::npos ? 0 : static_cast<long long>(think_begin + 7));
+                            const size_t think_conclusion_chars = TaskMemoBuilder::ExtractThinkConclusion(response_buffer).size();
+                            const size_t call_pos = response_buffer.find("<tool_call>");
+                            My_Log{My_Log::Level::kWarning}
+                                << "[ToolCallRepair][Layer2b] DIAG: tail_identical_calls=" << tail_identical_calls
+                                << ", history_msgs=" << history_msgs
+                                << ", last_msg_role=" << (last_role.empty() ? "?" : last_role)
+                                << ", last_msg_is_system_nudge=" << (last_is_system_nudge ? 1 : 0)
+                                << ", think_chars=" << think_chars
+                                << ", think_conclusion_chars=" << think_conclusion_chars
+                                << ", chars_before_call=" << (call_pos == std::string::npos ? -1LL : static_cast<long long>(call_pos))
+                                << ", generated_chars=" << response_buffer.size() << std::endl;
+                        }
+                        catch (...) {}
                     }
                 }
 
