@@ -1473,12 +1473,15 @@ def _find_inception_artifacts(workspace_root, task_started_ts):
 # ============================================================================
 # Token 生成速度统计（从 _ServiceLogTail 采集到的 GenieAPIService 完整 stdout 中解析）
 # ============================================================================
-# 后端无关行：response_dispatcher.cpp::PrintProfile()（主推理路径）与
-# model_input_builder.h 的摘要推理路径，均在每次查询完成后无条件打印这一行；
+# 后端无关行：response_dispatcher_aux.cpp::PrintProfile()（主推理路径）与
+# model_input_builder.h 的摘要推理路径，均在每次查询完成后无条件打印 Token Summary 表
+# （Generation 行的 Rate 列；旧版服务打印的是 "Token Generation Rate: x toks/sec" 文本行，
+# 两种形态都要解析）；
 # QNN/GGUF/MNN 三后端的 HandleProfile() 都统一填充同名 token_generation_rate 字段，
-# 格式逐字相同，故一条正则即可覆盖全部后端——这是本次任务实际驱动的 qwen3-8b-8480
+# 格式逐字相同，故同一组正则即可覆盖全部后端——这是本次任务实际驱动的 qwen3-8b-8480
 # （QNN 后端）唯一会产生样本的来源。
 _TOKEN_GEN_RATE_RE_GENERIC = re.compile(r"Token Generation Rate:\s*([\d.]+)\s*toks/sec")
+_TOKEN_GEN_RATE_RE_TABLE = re.compile(r"\|\s*Generation\s*\|(?:[^|\n]*\|){3}\s*([\d.]+)\s*\|")
 # GGUF/llama.cpp 专属行：llama_cpp.cpp::Impl::Query() 完成时额外打印的内部诊断
 # （含投机解码细节）。与上面那行是两条独立日志，QNN/MNN 后端不会出现它；仅在
 # 本脚本未来被用于驱动 GGUF 模型时才会产生样本，这里一并解析是为了不让该场景
@@ -1507,6 +1510,7 @@ def _summarize_token_generation_rates(log_text):
     （同一条真实查询在 GGUF 投机模式下两边数值口径不同，混在一起会掩盖哪一组
     更可信），调用方按实际驱动的后端自行判断该看哪一组。"""
     generic_rates = [float(m.group(1)) for m in _TOKEN_GEN_RATE_RE_GENERIC.finditer(log_text or "")]
+    generic_rates += [float(m.group(1)) for m in _TOKEN_GEN_RATE_RE_TABLE.finditer(log_text or "")]
     llamacpp_rates = [float(m.group(1)) for m in _TOKEN_GEN_RATE_RE_LLAMACPP.finditer(log_text or "")]
     return {
         "generic_backend_agnostic": _rate_stats(generic_rates),

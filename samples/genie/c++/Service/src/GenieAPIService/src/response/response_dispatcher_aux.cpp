@@ -9,9 +9,9 @@
 #include "response_dispatcher.h"
 
 #include "log.h"
+#include "log_table.h"
 
 #include <cstdint>
-#include <iomanip>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -52,20 +52,24 @@ void ResponseDispatcher::PrintProfile()
         std::lock_guard<std::mutex> lk(totals.mtx);
         round = ++totals.slots[slot_name].rounds;
     }
-    My_Log{} << "--- Token Summary Start [slot: " << slot_label << "] Round " << round << " ---" << std::endl;
+    const std::string title = "Token Summary [slot: " + slot_label + "] Round " + std::to_string(round);
+    LogTable table{title};
 
     auto handle = GetEffectiveHandle();
     if (!handle)
     {
         My_Log{My_Log::Level::kWarning}
             << "[PrintProfile] Model handle is null, skip profile summary." << std::endl;
-        My_Log{} << "--- Token Summary End [slot: " << slot_label << "] ---\n";
+        table.SetTitle(title + " - profile unavailable");
+        My_Log{}.original() << table.Str() << std::flush;
         return;
     }
     auto json_str = handle->HandleProfile();
     if (json_str.empty())
     {
-        goto done;
+        table.SetTitle(title + " - no profile data");
+        My_Log{}.original() << table.Str() << std::flush;
+        return;
     }
 
     try
@@ -86,49 +90,34 @@ void ResponseDispatcher::PrintProfile()
             tg_avg = slot_totals.tg_rate_sum / static_cast<double>(samples);
         }
 
-        My_Log{}.original() << "Time to First Token: "
-                 << std::fixed
-                 << std::setprecision(2)
-                 << json_str.at("time_to_first_token").get<std::string>()
-                 << " s" << std::endl;
+        const std::vector<std::string> prompt_row{
+            "Prompt (TTFT)",
+            LogTable::JsonText(json_str.at("num_prompt_tokens")),
+            std::to_string(model_input_.text_.length()),
+            json_str.at("time_to_first_token").get<std::string>(),
+            json_str.at("prompt_processing_rate").get<std::string>(),
+            LogTable::Fixed(pp_avg)};
+        const std::vector<std::string> generation_row{
+            "Generation",
+            LogTable::JsonText(json_str.at("num_generated_tokens")),
+            std::to_string(response_buffer.length()),
+            json_str.at("token_generation_time").get<std::string>(),
+            json_str.at("token_generation_rate").get<std::string>(),
+            LogTable::Fixed(tg_avg)};
 
-        My_Log{}.original() << "Token Generation Time: "
-                 << std::fixed
-                 << std::setprecision(2)
-                 << json_str.at("token_generation_time").get<std::string>()
-                 << " s" << std::endl;
-
-        My_Log{}.original() << "Num Prompt Tokens: "
-                 << json_str.at("num_prompt_tokens")
-                 << ", Text Length: " << model_input_.text_.length()
-                 << std::endl;
-
-        My_Log{}.original() << "Prompt Processing Rate: "
-                 << std::fixed
-                 << std::setprecision(2)
-                 << json_str.at("prompt_processing_rate").get<std::string>()
-                 << " toks/sec (slot avg of " << samples << " rounds: "
-                 << pp_avg << " toks/sec)" << std::endl;
-
-        My_Log{}.original() << "Num Generated Tokens: "
-                 << json_str.at("num_generated_tokens")
-                 << ", Text Length: " << response_buffer.length()
-                 << std::endl;
-
-        My_Log{}.original() << "Token Generation Rate: "
-                 << std::fixed
-                 << std::setprecision(2)
-                 << json_str.at("token_generation_rate").get<std::string>()
-                 << " toks/sec (slot avg of " << samples << " rounds: "
-                 << tg_avg << " toks/sec)" << std::endl;
+        table.SetTitle(title + ", slot avg of " + std::to_string(samples) + " rounds");
+        table.SetHeader({"Phase", "Tokens", "Text Length", "Time (s)", "Rate (toks/s)", "Slot Avg (toks/s)"},
+                        {LogTable::Align::kLeft, LogTable::Align::kRight, LogTable::Align::kRight,
+                         LogTable::Align::kRight, LogTable::Align::kRight, LogTable::Align::kRight});
+        table.AddRow(prompt_row).AddRow(generation_row);
     }
     catch (std::exception &e)
     {
         My_Log{My_Log::Level::kError} << "profile print failed:" << e.what() << std::endl;
+        table.SetTitle(title + " - profile unavailable");
     }
 
-    done:
-    My_Log{} << "--- Token Summary End [slot: " << slot_label << "] ---\n";
+    My_Log{}.original() << table.Str() << std::flush;
 }
 
 std::pair<std::string, std::string> ResponseDispatcher::GetToolCallStatusByName(const std::string &tool_name)

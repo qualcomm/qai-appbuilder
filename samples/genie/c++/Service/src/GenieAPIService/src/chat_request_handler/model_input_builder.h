@@ -15,6 +15,7 @@
 #include <nlohmann/json.hpp>
 #include "prompt_optimizer.h"
 #include "prompt_stats_helper.h"
+#include "log_table.h"
 #include "message_pre_filter.h"
 #include "long_text_summarizer.h"
 #include "summary_cache.h"
@@ -2455,42 +2456,42 @@ private:
         }
 
         {
-            My_Log{} << "--- [Summarization] Token Summary Start ---" << std::endl;
+            LogTable table{"Token Summary [Summarization]"};
             auto profile = context_->HandleProfile();
             if (!profile.empty())
             {
                 try
                 {
-                    My_Log{} << "Time to First Token: "
-                             << std::fixed << std::setprecision(2)
-                             << profile.at("time_to_first_token").get<std::string>()
-                             << " s" << std::endl;
-                    My_Log{} << "Token Generation Time: "
-                             << std::fixed << std::setprecision(2)
-                             << profile.at("token_generation_time").get<std::string>()
-                             << " s" << std::endl;
-                    My_Log{} << "Num Prompt Tokens: "
-                             << profile.at("num_prompt_tokens")
-                             << ", Prompt Length: " << prompt.size() << " chars" << std::endl;
-                    My_Log{} << "Prompt Processing Rate: "
-                             << std::fixed << std::setprecision(2)
-                             << profile.at("prompt_processing_rate").get<std::string>()
-                             << " toks/sec" << std::endl;
-                    My_Log{} << "Num Generated Tokens: "
-                             << profile.at("num_generated_tokens")
-                             << ", Summary Length: " << result.size() << " chars" << std::endl;
-                    My_Log{} << "Token Generation Rate: "
-                             << std::fixed << std::setprecision(2)
-                             << profile.at("token_generation_rate").get<std::string>()
-                             << " toks/sec" << std::endl;
+                    const std::vector<std::string> prompt_row{
+                        "Prompt (TTFT)",
+                        LogTable::JsonText(profile.at("num_prompt_tokens")),
+                        std::to_string(prompt.size()),
+                        profile.at("time_to_first_token").get<std::string>(),
+                        profile.at("prompt_processing_rate").get<std::string>()};
+                    const std::vector<std::string> generation_row{
+                        "Generation",
+                        LogTable::JsonText(profile.at("num_generated_tokens")),
+                        std::to_string(result.size()),
+                        profile.at("token_generation_time").get<std::string>(),
+                        profile.at("token_generation_rate").get<std::string>()};
+
+                    table.SetHeader({"Phase", "Tokens", "Text Length", "Time (s)", "Rate (toks/s)"},
+                                    {LogTable::Align::kLeft, LogTable::Align::kRight, LogTable::Align::kRight,
+                                     LogTable::Align::kRight, LogTable::Align::kRight});
+                    table.AddRow(prompt_row).AddRow(generation_row);
                 }
                 catch (const std::exception& e)
                 {
                     My_Log{My_Log::Level::kWarning}
                         << "[RunSummarizationInference] PrintProfile failed: " << e.what() << std::endl;
+                    table.SetTitle("Token Summary [Summarization] - profile unavailable");
                 }
             }
-            My_Log{} << "--- [Summarization] Token Summary End ---" << std::endl;
+            else
+            {
+                table.SetTitle("Token Summary [Summarization] - no profile data");
+            }
+            My_Log{}.original() << table.Str() << std::flush;
         }
 
         if (timed_out)

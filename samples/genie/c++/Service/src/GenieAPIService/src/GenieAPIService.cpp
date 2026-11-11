@@ -14,6 +14,7 @@
 #include <iostream>
 #include <string>
 #include <log.h>
+#include <log_table.h>
 #include <utils.h>
 #include "config.h"
 #include "chat_request_handler/chat_request_handler.h"
@@ -383,11 +384,16 @@ void GenieService::setupHttpServer()
 
     svr.set_pre_routing_handler([](const httplib::Request &req, httplib::Response &) -> httplib::Server::HandlerResponse
     {
-        std::string block = "---------------------------------------------------\n";
-        block += "Time: " + My_Log::GetTimeString() + "\n";
-        block += "Path: " + req.path + "\n";
-        block += "Method: " + req.method + " Target: " + req.target + "\n";
-        block += "From: " + req.remote_addr + ":" + std::to_string(req.remote_port) + "\n";
+        if (My_Log::Level_ < My_Log::Level::kDebug)
+        {
+            return httplib::Server::HandlerResponse::Unhandled;
+        }
+        LogTable table{"HTTP Request"};
+        table.AddRow({"Time", My_Log::GetTimeString()});
+        table.AddRow({"Path", req.path});
+        table.AddRow({"Method", req.method});
+        table.AddRow({"Target", req.target});
+        table.AddRow({"From", req.remote_addr + ":" + std::to_string(req.remote_port)});
         static constexpr const char *kLoggedHeaders[] = {
                 "Origin", "Content-Type", "Content-Length", "User-Agent",
                 "Access-Control-Request-Method", "Access-Control-Request-Headers"};
@@ -395,10 +401,10 @@ void GenieService::setupHttpServer()
         {
             if (req.has_header(name))
             {
-                block += std::string(name) + ": " + req.get_header_value(name) + "\n";
+                table.AddRow({name, req.get_header_value(name)});
             }
         }
-        My_Log{} << block << std::endl;
+        My_Log{My_Log::Level::kDebug}.original() << table.Str() << std::endl;
         return httplib::Server::HandlerResponse::Unhandled;
     });
 
@@ -421,8 +427,8 @@ void GenieService::setupHttpServer()
                                line += "route " + req.matched_route;
                            }
                            line += " handling is done";
-                           My_Log{} << line;
-                           My_Log{}.original(true) << "\n\n";
+                           My_Log{My_Log::Level::kDebug} << line;
+                           My_Log{My_Log::Level::kDebug}.original(true) << "\n\n";
                        }
                    });
 
