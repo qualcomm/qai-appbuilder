@@ -1733,7 +1733,10 @@ std::string PromptOptimizer::OptimizeToolResponse(
     trimmed = std::regex_replace(trimmed, std::regex(R"(^(\s*\n)+)"), "");
     trimmed = std::regex_replace(trimmed, std::regex(R"((\s*\n)+$)"), "");
 
-    trimmed = InjectSpawnGuard(trimmed);
+    if (trimmed.find_first_not_of(" \t\r\n") == std::string::npos)
+        trimmed = "[empty result: the tool returned no text; success or failure is not shown]";
+    else
+        trimmed = InjectSpawnGuard(trimmed);
 
     return "<tool_response>\n" + trimmed + "\n</tool_response>\n";
 }

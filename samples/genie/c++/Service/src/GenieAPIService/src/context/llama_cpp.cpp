@@ -317,6 +317,12 @@ public:
         if (!is_aux_inference)
         {
             const auto &sampling_params = params_.sampling;
+            std::string draft_fields;
+            if (is_speculative_)
+            {
+                draft_fields = " | draft_n_max=" + std::to_string(params_.speculative.draft.n_max)
+                             + " | draft_p_min=" + std::to_string(params_.speculative.draft.p_min);
+            }
             My_Log{} << "[LLAMACpp] " << query_type << " Sampler"
                      << " | temp=" << sampling_params.temp
                      << " | top_k=" << sampling_params.top_k
@@ -325,7 +331,8 @@ public:
                      << " | penalty_repeat=" << sampling_params.penalty_repeat
                      << " | penalty_last_n=" << sampling_params.penalty_last_n
                      << " | seed=" << sampling_params.seed
-                     << " | speculative=" << (is_speculative_ ? 1 : 0) << "\n";
+                     << " | speculative=" << (is_speculative_ ? 1 : 0)
+                     << draft_fields << "\n";
         }
 
         {
@@ -1704,21 +1711,21 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
         {
             arg_strings.insert(arg_strings.end(), {"-fitt", std::to_string(fit_target_mib)});
         }
-        if (!draft_config.samplers.empty())
+        if (!draft_config.target_samplers.empty())
         {
-            arg_strings.insert(arg_strings.end(), {"--samplers", draft_config.samplers});
+            arg_strings.insert(arg_strings.end(), {"--samplers", draft_config.target_samplers});
         }
-        if (draft_config.temp >= 0.0f)
+        if (draft_config.target_temp >= 0.0f)
         {
-            arg_strings.insert(arg_strings.end(), {"--temp", std::to_string(draft_config.temp)});
+            arg_strings.insert(arg_strings.end(), {"--temp", std::to_string(draft_config.target_temp)});
         }
-        if (draft_config.top_k >= 0)
+        if (draft_config.target_top_k >= 0)
         {
-            arg_strings.insert(arg_strings.end(), {"--top-k", std::to_string(draft_config.top_k)});
+            arg_strings.insert(arg_strings.end(), {"--top-k", std::to_string(draft_config.target_top_k)});
         }
-        if (draft_config.top_p >= 0.0f)
+        if (draft_config.target_top_p >= 0.0f)
         {
-            arg_strings.insert(arg_strings.end(), {"--top-p", std::to_string(draft_config.top_p)});
+            arg_strings.insert(arg_strings.end(), {"--top-p", std::to_string(draft_config.target_top_p)});
         }
         if (draft_config.ngram_mod_n_min >= 0)
         {

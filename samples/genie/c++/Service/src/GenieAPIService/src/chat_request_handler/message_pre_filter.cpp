@@ -402,7 +402,7 @@ void StripRawIdx(json& messages)
 
 const char kRepeatStubPrefix[] = "[Note: this ";
 const char kRepeatStubSuffix[] =
-    " call returned exactly the same result as the earlier identical call, which is still shown above; "
+    " call returned the same result as the earlier identical call (only numbers or temp paths may differ), which is still shown above; "
     "calling it again will not return anything new. Use that result or change approach.";
 const char kRepeatStubTailHeader[] = "\nIts last lines:\n";
 const char kRepeatStubFullHeader[] = "\nIts full result:\n";
@@ -512,7 +512,7 @@ void ApplyRepeatResultStubs(json& msg, const std::string& key, const void* model
         if (ck.empty()) continue;
 
         const std::string content = m["content"].get<std::string>();
-        const size_t h = std::hash<std::string>()(content);
+        const size_t h = static_cast<size_t>(ToolCallRepetitionStore::ResultDigest(content));
         KeyHistory& kh = history[ck];
         const bool has_earlier_full = (kh.full_idx != SIZE_MAX && kh.full_hash == h);
 
@@ -560,13 +560,12 @@ void ApplyRepeatResultStubs(json& msg, const std::string& key, const void* model
         }
 
         if (stub) {
-            const std::string original = msg[kh.full_idx].value("content", std::string());
             std::string note = std::string(kRepeatStubPrefix) + nm + kRepeatStubSuffix;
-            const size_t trimmed_end = original.find_last_not_of(" \t\r\n");
+            const size_t trimmed_end = content.find_last_not_of(" \t\r\n");
             if (trimmed_end != std::string::npos && trimmed_end + 1 <= kRepeatStubFullInlineMaxBytes) {
-                note += kRepeatStubFullHeader + original.substr(0, trimmed_end + 1);
+                note += kRepeatStubFullHeader + content.substr(0, trimmed_end + 1);
             } else {
-                const std::string tail = LastLines(original, kRepeatStubTailLines, kRepeatStubTailMaxBytes);
+                const std::string tail = LastLines(content, kRepeatStubTailLines, kRepeatStubTailMaxBytes);
                 if (!tail.empty()) note += kRepeatStubTailHeader + tail;
             }
             m["content"] = note + "]";

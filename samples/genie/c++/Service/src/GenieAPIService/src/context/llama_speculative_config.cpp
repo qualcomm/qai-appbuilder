@@ -148,22 +148,47 @@ DraftModelConfig DraftModelConfig::ParseFrom(const json &model_config_json)
 
     if (block.contains("samplers") && block["samplers"].is_string())
     {
-        result.samplers = block["samplers"].get<std::string>();
+        result.target_samplers = block["samplers"].get<std::string>();
     }
 
     if (block.contains("temp") && block["temp"].is_number())
     {
-        result.temp = block["temp"].get<float>();
+        result.target_temp = block["temp"].get<float>();
     }
 
     if (block.contains("top_k") && block["top_k"].is_number_integer())
     {
-        result.top_k = block["top_k"].get<int>();
+        result.target_top_k = block["top_k"].get<int>();
     }
 
     if (block.contains("top_p") && block["top_p"].is_number())
     {
-        result.top_p = block["top_p"].get<float>();
+        result.target_top_p = block["top_p"].get<float>();
+    }
+
+    if (block.contains("target_sampling") && block["target_sampling"].is_object())
+    {
+        const json &sampling = block["target_sampling"];
+
+        if (sampling.contains("samplers") && sampling["samplers"].is_string())
+        {
+            result.target_samplers = sampling["samplers"].get<std::string>();
+        }
+
+        if (sampling.contains("temp") && sampling["temp"].is_number())
+        {
+            result.target_temp = sampling["temp"].get<float>();
+        }
+
+        if (sampling.contains("top_k") && sampling["top_k"].is_number_integer())
+        {
+            result.target_top_k = sampling["top_k"].get<int>();
+        }
+
+        if (sampling.contains("top_p") && sampling["top_p"].is_number())
+        {
+            result.target_top_p = sampling["top_p"].get<float>();
+        }
     }
 
     if (block.contains("ngram_mod_n_min") && block["ngram_mod_n_min"].is_number_integer())
