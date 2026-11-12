@@ -115,7 +115,7 @@ _MODEL_FAMILIES: list[dict[str, Any]] = [
     # Regex: gpt-5, gpt5, gpt-5.5, o1, o3-mini, o4-preview etc.
     {
         "name": "gpt_5",
-        "pattern": re.compile(r"gpt-?5(?:\.\d+)?|(?:^|[^a-zA-Z])o[1-9]\b", re.IGNORECASE),
+        "pattern": re.compile(r"gpt-?5(?:\.\d+)?|(?:^|[/:])o[1-9](?:[-.]|$)", re.IGNORECASE),
         "max_tokens_max": 32768,
         "max_tokens_default": 8192,
         "tool_result_max_chars": 25_000,
@@ -148,7 +148,7 @@ _MODEL_FAMILIES: list[dict[str, Any]] = [
     # ── 7. ByteDance Doubao / Volcano Ark ────────────────────────────────────
     {
         "name": "doubao",
-        "pattern": re.compile(r"doubao|volc|ark", re.IGNORECASE),
+        "pattern": re.compile(r"doubao|volc(?:engine)?|(?:^|[^a-z])ark(?:[^a-z]|$)", re.IGNORECASE),
         "max_tokens_max": 131072,
         "max_tokens_default": 16384,
         "tool_result_max_chars": 25_000,
@@ -517,11 +517,18 @@ def get_model_profile(
     context_length: int = 0,
     explicit_params: dict[str, Any] | None = None,
     family_overrides: dict[str, Any] | None = None,
+    api_model_id: str | None = None,
 ) -> ModelProfile:
     """Get the resolved runtime profile for a model.
 
     Args:
         model_id: Model identifier (e.g. "doubao-seed-2.0-code").
+        api_model_id: The upstream *wire* id when it differs from the display
+            ``model_id`` (an alias such as ``my-reasoner`` -> ``gpt-5``). The
+            wire id is what the provider actually sees, so when it is a known
+            family it decides the profile - otherwise an alias of a locked
+            reasoning model would be treated as "unknown" and sent a
+            ``temperature`` the API rejects. Falls back to ``model_id``.
         context_length: Context window size from model catalog.
         explicit_params: Override params from model config JSON,
             e.g. {"supported": true, "max": 131072, "default": 16384}.
@@ -543,6 +550,10 @@ def get_model_profile(
         ModelProfile with all override layers merged.
     """
     family = _match_family(model_id or "")
+    if api_model_id and api_model_id != model_id:
+        wire_family = _match_family(api_model_id)
+        if wire_family["name"] != "unknown":
+            family = wire_family
     explicit_params = explicit_params or {}
 
     overrides: dict[str, Any] = {}

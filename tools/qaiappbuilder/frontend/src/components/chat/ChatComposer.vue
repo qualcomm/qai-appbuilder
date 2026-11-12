@@ -75,6 +75,7 @@ import PromptEnhanceBtn from "./PromptEnhanceBtn.vue";
 import VoiceInputBtn from "./VoiceInputBtn.vue";
 import ModelDropdown from "./ModelDropdown.vue";
 import ModelParamsPopover from "./ModelParamsPopover.vue";
+import { SHOW_SAMPLING_PARAMS } from "@/constants/samplingParams";
 import WhisperEnginePopover from "./WhisperEnginePopover.vue";
 import PromptHistoryPopover from "./PromptHistoryPopover.vue";
 import SessionToolsPopover from "./SessionToolsPopover.vue";
@@ -1369,7 +1370,10 @@ const {
           @close="modelDropdownOpen = false"
         />
       </div>
-      <div class="model-params-wrap">
+      <div
+        v-if="SHOW_SAMPLING_PARAMS"
+        class="model-params-wrap"
+      >
         <button
           type="button"
           class="toolbar-pill"

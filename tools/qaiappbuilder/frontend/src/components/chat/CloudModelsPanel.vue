@@ -41,6 +41,7 @@ import ToggleSwitch from "@/components/chat/service-config/ToggleSwitch.vue";
 // Docs live under `frontend/src/help-content/cloud-models.<locale>.md`.
 import HelpButton from "@/components/common/HelpButton.vue";
 import QaiServiceGatewayCard from "@/components/chat/QaiServiceGatewayCard.vue";
+import { SHOW_SAMPLING_PARAMS } from "@/constants/samplingParams";
 import CloudModelQuickAdd from "@/components/chat/CloudModelQuickAdd.vue";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -991,6 +992,7 @@ function onGlobalKeydown(event: KeyboardEvent): void {
                params this model accepts, so an unsupported one is dropped
                from the wire instead of triggering an upstream 400. -->
           <div class="config-field cloud-model-params">
+            <template v-if="SHOW_SAMPLING_PARAMS">
             <label class="config-label">{{ t("cloudModels.paramsTitle") }}</label>
             <div class="config-comment" style="margin-bottom:8px">
               {{ t("cloudModels.paramsDesc") }}
@@ -1016,6 +1018,7 @@ function onGlobalKeydown(event: KeyboardEvent): void {
                 aria-label="max_tokens"
               />
             </label>
+            </template>
             <label class="cloud-model-param-row">
               <span class="cloud-model-param-name">
                 thought_signature

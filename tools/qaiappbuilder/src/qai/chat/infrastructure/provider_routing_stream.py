@@ -227,6 +227,7 @@ def _inject_family_sampling_defaults(
     is_local: bool,
     explicit_params: dict[str, Any] | None = None,
     family_overrides: dict[str, Any] | None = None,
+    api_model_id: str | None = None,
 ) -> None:
     """Backfill the family **lock / default** sampling params in place.
 
@@ -294,6 +295,7 @@ def _inject_family_sampling_defaults(
             model_id or "",
             explicit_params=explicit_params,
             family_overrides=family_overrides,
+            api_model_id=api_model_id,
         )
     except Exception as exc:  # noqa: BLE001 — a profile lookup never breaks a turn
         _log.warning("chat.sampling_profile_failed", error=str(exc))
@@ -650,6 +652,7 @@ class ProviderRoutingLLMStream:
             is_local=bool(resolved.is_local),
             explicit_params=model_params,
             family_overrides=self._family_max_tokens_overrides,
+            api_model_id=resolved.api_model_id,
         )
         effective_request = LLMStreamRequest(
             conversation_id=request.conversation_id,

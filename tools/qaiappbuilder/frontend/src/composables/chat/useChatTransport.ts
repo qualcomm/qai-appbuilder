@@ -50,6 +50,7 @@ import { attachActiveChatRun } from "./useActiveChatRunAttach";
 import { useConversationsStore } from "@/stores/conversations";
 import { useUiStore } from "@/stores/ui";
 import { gomasterMode } from "@/composables/useForgeConfig";
+import { SHOW_SAMPLING_PARAMS } from "@/constants/samplingParams";
 
 export type TransportKind = "ws" | "sse";
 
@@ -1051,7 +1052,7 @@ export function useChatTransport(
       const selfAllowSpawn = isSubAgent && tab?.selfAllowSpawn === true;
       const mp = tab?.modelParams;
       const sampling =
-        mp !== undefined && !mp.useDefaults
+        SHOW_SAMPLING_PARAMS && mp !== undefined && !mp.useDefaults
           ? {
               temperature: mp.temperature,
               topP: mp.topP,
@@ -1398,7 +1399,7 @@ export function useChatTransport(
       );
     }
     const mp = tabSnapshot?.modelParams;
-    if (mp !== undefined && !mp.useDefaults) {
+    if (SHOW_SAMPLING_PARAMS && mp !== undefined && !mp.useDefaults) {
       qs.push(`temperature=${encodeURIComponent(String(mp.temperature))}`);
       qs.push(`top_p=${encodeURIComponent(String(mp.topP))}`);
       if (mp.maxTokens > 0) {
