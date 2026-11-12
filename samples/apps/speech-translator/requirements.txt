@@ -1,0 +1,25 @@
+# Speech Translator - Python dependencies
+# Install QAI AppBuilder / QNN runtime first: see docs/python.md
+# Common (both directions: zh2en, en2zh)
+qai_appbuilder
+numpy
+scipy
+soundfile
+sounddevice
+requests
+tqdm
+transformers
+sentencepiece
+
+# zh2en: PiperTTS-EN G2P
+gruut
+
+# Optional (recommended)
+# kaldi_native_fbank   # reference-quality ASR features (numpy fallback otherwise)
+# g2p_en               # phonetic repair of the English ASR transcript (en2zh)
+# ffmpeg (on PATH)     # silence-based VAD for --audio files (not a pip package)
+
+# en2zh additionally needs PyTorch (CPU build) and the patched `melotts` package.
+# Do NOT `pip install melotts` directly; set it up with
+# samples/models/audio/audio_generation/melotts_zh (setup_env.bat), see
+# apps/speech-translator/README.md#requirements.
