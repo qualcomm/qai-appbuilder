@@ -77,7 +77,10 @@ __all__ = [
     "ExchangeError",
     "clear_service_jwt",
     "exchange_id_token",
+    "get_gateway_url",
     "get_service_jwt",
+    "normalize_gateway_url",
+    "set_gateway_url",
     "set_secret_store",
     "store_service_jwt",
 ]
@@ -116,6 +119,50 @@ _secret_store: "SecretStore | None" = None
 #: True once we have attempted to hydrate ``_token`` from the store, so the
 #: keyring is read at most once per process (the hot path stays in memory).
 _hydrated = False
+
+
+#: Process-wide gateway origin (no trailing ``/v1``). ``None`` = "never set":
+#: ``_resolve_qai_service_config`` then falls back to the deployment TOML.
+#: ``""`` = explicitly "no gateway". It is filled at startup from the
+#: ``qai-service`` provider entry and updated by ``/api/qai-service/*`` -- the
+#: provider entry is the single persisted source of truth for the address.
+_gateway_url: str | None = None
+
+
+def normalize_gateway_url(raw: str) -> str:
+    """Return the gateway origin for a user-typed address, or ``""`` if invalid.
+
+    Accepts ``http(s)://host[:port][/...]``; a trailing ``/`` and a trailing
+    ``/v1`` are dropped (the OpenAI-compatible path is appended elsewhere).
+    Anything else (no scheme, other scheme, no host) yields ``""``.
+    """
+    from urllib.parse import urlsplit  # noqa: PLC0415
+
+    text = (raw or "").strip().rstrip("/")
+    if text.lower().endswith("/v1"):
+        text = text[:-3].rstrip("/")
+    try:
+        parts = urlsplit(text)
+    except ValueError:
+        return ""
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return ""
+    if parts.query or parts.fragment:
+        return ""
+    return text
+
+
+def set_gateway_url(url: str | None) -> None:
+    """Set (or with ``None`` unset) the process-wide gateway origin."""
+    global _gateway_url
+    with _lock:
+        _gateway_url = None if url is None else url.strip().rstrip("/")
+
+
+def get_gateway_url() -> str | None:
+    """Return the held gateway origin (``None`` = never set, ``""`` = none)."""
+    with _lock:
+        return _gateway_url
 
 
 def set_secret_store(store: "SecretStore | None") -> None:

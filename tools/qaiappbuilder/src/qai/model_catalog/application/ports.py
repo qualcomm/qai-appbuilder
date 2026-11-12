@@ -152,6 +152,10 @@ class ProviderRegistryPort(Protocol):
     ) -> None:
         ...
 
+    async def delete_provider_config(self, provider_id: str) -> None:
+        """Remove the stored config for *provider_id* (no-op when absent)."""
+        ...
+
 
 # ===========================================================================
 # DownloadEngine -- the abstraction that breaks the legacy cycle.

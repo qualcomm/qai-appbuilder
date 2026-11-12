@@ -40,6 +40,7 @@ import ToggleSwitch from "@/components/chat/service-config/ToggleSwitch.vue";
 // Shared help-manual affordance — see components/common/HelpButton.vue.
 // Docs live under `frontend/src/help-content/cloud-models.<locale>.md`.
 import HelpButton from "@/components/common/HelpButton.vue";
+import QaiServiceGatewayCard from "@/components/chat/QaiServiceGatewayCard.vue";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -652,6 +653,9 @@ function onGlobalKeydown(event: KeyboardEvent): void {
 
 <template>
   <div class="cloud-models-panel">
+    <!-- Opt-in enterprise gateway (QAI Service): off until the user saves an address. -->
+    <QaiServiceGatewayCard @changed="fetchProviders" />
+
     <!-- Toolbar: Add + search (full width, above the two-column layout) -->
     <div class="cloud-models-toolbar">
       <button

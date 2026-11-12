@@ -144,6 +144,26 @@ class SqliteProviderRegistry:
                 cause=exc,
             ) from exc
 
+    async def delete_provider_config(self, provider_id: str) -> None:
+        try:
+            async with self._db.connection() as conn:
+                try:
+                    await conn.execute(
+                        "DELETE FROM kv_user_prefs WHERE key = ?",
+                        (_KEY_PREFIX + provider_id,),
+                    )
+                    await conn.commit()
+                except Exception:
+                    await conn.rollback()
+                    raise
+        except Exception as exc:  # noqa: BLE001
+            raise PersistenceError(
+                "model_catalog.provider.delete_failed",
+                f"failed to delete provider {provider_id!r}: {exc}",
+                operation="provider.delete",
+                cause=exc,
+            ) from exc
+
     @staticmethod
     def _decode_config(provider_id: str, value_text: str) -> dict[str, Any]:
         try:

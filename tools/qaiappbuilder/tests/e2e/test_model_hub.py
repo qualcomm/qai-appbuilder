@@ -23,8 +23,8 @@ NOT covered (deliberately):
 * **The qgenie / query-service paths on an INTERNAL edition** - this checkout is the external edition.
 
 Isolation (verified): every row lives in the throw-away ``<data_dir>/db/qai.db``
-(``model_catalog_*`` tables and ``kv_user_prefs``); the real data dir was untouched. Startup may
-seed a ``qai-service::route-1`` entry and spawns a best-effort background model-roster sync, so no
+(``model_catalog_*`` tables and ``kv_user_prefs``); the real data dir was untouched. Startup
+spawns a best-effort background model-roster sync (inert without a QAI Service address), so no
 test assumes a list is empty - each one filters by its own ``e2e``-prefixed ids.
 
 Observed behaviour worth pinning (it differs from what one might assume):

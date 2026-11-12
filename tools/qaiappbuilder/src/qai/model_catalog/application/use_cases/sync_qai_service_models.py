@@ -5,55 +5,35 @@
 
 """``SyncQaiServiceModelsUseCase`` — keep qai-service's model roster live.
 
-Motivation
-----------
-``qai-service`` ships with exactly one configured model, the pseudo-model
-``route-1`` (server-side "smart routing" — the broker itself picks the
-underlying model). The broker also exposes its real, named models via a
-standard OpenAI-compatible ``GET /v1/models``. This use case probes that
-endpoint on every boot and folds any real models it finds into the
+QAI Service is opt-in: nothing is shipped. Once the user has entered the
+gateway address (which creates an empty ``qai-service`` provider entry) and
+signed in again (which mints the JWT), this use case probes the broker's
+OpenAI-compatible ``GET /v1/models`` and folds what it returns into the
 provider's stored ``models[]`` list, so the chat model dropdown can offer
-them — WITHOUT ever hardcoding a model list in source.
+them -- WITHOUT hardcoding a model list in source.
 
 Design
 ------
-* **route-1 is sacred** — always kept, always first. The live
-  ``/v1/models`` response may or may not even list ``route-1`` itself (it
-  is a client-side convention for "let the broker choose", not necessarily
-  a model the broker's own catalog advertises), so this is handled as an
-  explicit special case rather than falling out of the general
-  keep-if-still-returned rule.
-* **Dead models are removed** — any previously-stored model (other than
-  route-1) that the live probe no longer returns is dropped on the next
-  sync. Models the user may have hand-edited (any field other than the
-  identifying triplet) are only touched if removed entirely; a model that
-  is both already-stored AND still returned keeps 100% of its existing
-  fields untouched.
-* **New models borrow route-1's effective parameters verbatim** — the
-  ``/v1/models`` response only ever gives us an id, never a context
-  window or sampling policy. Context length / supports_streaming are
-  copied from route-1's own stored values. An explicit ``params`` override
-  is ALSO attached (something route-1 itself does not carry — it does not
-  need to, because its literal name "route-1" never collides with any
-  ``qai.chat.domain.model_profiles`` family regex). A newly-discovered
-  model's real name (e.g. "qwen3.8-max") very much CAN collide with one of
-  those family patterns and inherit a materially different (usually
-  lower) max_tokens ceiling purely by coincidence of spelling — the
-  explicit override exists to pin sampling behaviour to what route-1
-  already gets, regardless of what the model happens to be named.
-* **Best-effort, never raises** — every failure path (no JWT yet, no
-  provider configured, probe failure) degrades to "do nothing, keep
-  today's state" so this is safe to fire from ``lifespan`` without any
-  risk of blocking or crashing startup.
+* **The gateway is the only source of truth.** There is no built-in default
+  model: a model is stored iff the live response lists it.
+* **Dead models are removed** -- any stored model the live probe no longer
+  returns is dropped on the next sync. A model that is both already stored AND
+  still returned keeps 100% of its existing fields untouched.
+* **New models get a minimal entry** -- the ``/v1/models`` response only ever
+  gives an id, never a context window or sampling policy, so new entries use
+  ``_DEFAULT_CONTEXT_LENGTH`` and an explicit unconstrained ``params``
+  override (a model's real name, e.g. "qwen3.8-max", can collide with a family
+  regex in ``qai.chat.domain.model_profiles`` and inherit an unrelated, usually
+  lower, ``max_tokens`` ceiling purely by spelling).
+* **Best-effort, never raises** -- every failure path (no JWT yet, no
+  provider configured, probe failure) degrades to "do nothing, keep today's
+  state".
 
 Layer discipline
 ----------------
-Stays in the *application* layer like its sibling
-``probe_cloud_model_permissions.py``: imports only ports
-(``ProviderRegistryPort`` / ``ProviderProbePort``) plus stdlib. The JWT
-getter is injected as a plain callable so this module never reaches into
-``interfaces.http.auth`` directly — the composition root
-(``apps/api/_model_catalog_di.py``) wires that callable.
+Stays in the *application* layer: imports only ports plus stdlib. The JWT
+getter is injected as a plain callable; the composition root
+(``apps/api/_model_catalog_di.py``) wires it.
 """
 
 from __future__ import annotations
@@ -72,21 +52,9 @@ from qai.model_catalog.application.use_cases.list_provider_configs import (
 
 __all__ = ["SyncQaiServiceModelsResult", "SyncQaiServiceModelsUseCase"]
 
-#: The pseudo-model that must always survive a sync, regardless of whether
-#: the live probe happens to list it.
-_ROUTE1_API_MODEL_ID = "route-1"
-
-#: Fallback shape for route-1 if it is ever missing from the stored config
-#: (should not happen in practice — factory-seeded on every install — but a
-#: sync must not be the thing that loses the default model).
-_ROUTE1_FALLBACK_ENTRY: dict[str, Any] = {
-    "model_id": "qai-service::route-1",
-    "name": "Route 1",
-    "api_model_id": "route-1",
-    "context_length": 1_000_000,
-    "description": "QAI Service 智能路由（自动选择底层模型）",
-    "supports_streaming": True,
-}
+#: Context window assumed for a model discovered via ``/v1/models`` (the
+#: response carries none).
+_DEFAULT_CONTEXT_LENGTH = 1_000_000
 
 #: Sampling-parameter override attached to every newly-discovered model so
 #: its behaviour matches route-1's (unconstrained) effective behaviour
@@ -190,13 +158,10 @@ class SyncQaiServiceModelsUseCase:
     ) -> tuple[list[dict[str, Any]], list[str], list[str]]:
         """Return (new_models, added_ids, removed_ids).
 
-        route-1 is always kept first, regardless of ``live_ids``. Every
-        other existing entry survives only if its ``api_model_id`` is still
-        in ``live_ids``; every id in ``live_ids`` not yet represented
-        (and not "route-1") becomes a new minimal entry cloning route-1's
-        context_length / supports_streaming / params.
+        An existing entry survives only if its ``api_model_id`` is still in
+        ``live_ids``; every id in ``live_ids`` not yet represented becomes a
+        new minimal entry.
         """
-        route1_entry: dict[str, Any] | None = None
         kept: list[dict[str, Any]] = []
         removed: list[str] = []
         existing_by_api_id: dict[str, dict[str, Any]] = {}
@@ -207,37 +172,28 @@ class SyncQaiServiceModelsUseCase:
             api_model_id = raw.get("api_model_id")
             if not isinstance(api_model_id, str) or not api_model_id:
                 continue
-            if api_model_id == _ROUTE1_API_MODEL_ID:
-                route1_entry = raw
-                continue
             existing_by_api_id[api_model_id] = raw
             if api_model_id in live_ids:
                 kept.append(raw)
             else:
                 removed.append(api_model_id)
 
-        if route1_entry is None:
-            route1_entry = dict(_ROUTE1_FALLBACK_ENTRY)
-
         added: list[str] = []
         new_entries: list[dict[str, Any]] = []
         for raw_id in live_ids:
-            if raw_id == _ROUTE1_API_MODEL_ID or raw_id in existing_by_api_id:
+            if raw_id in existing_by_api_id:
                 continue
             new_entries.append(
                 {
                     "model_id": f"{QAI_SERVICE_PROVIDER_ID}::{raw_id}",
                     "name": raw_id,
                     "api_model_id": raw_id,
-                    "context_length": route1_entry.get("context_length", 1_000_000),
-                    "description": route1_entry.get("description", ""),
-                    "supports_streaming": route1_entry.get(
-                        "supports_streaming", True
-                    ),
+                    "context_length": _DEFAULT_CONTEXT_LENGTH,
+                    "description": "",
+                    "supports_streaming": True,
                     "params": dict(_UNCONSTRAINED_PARAMS),
                 }
             )
             added.append(raw_id)
 
-        new_models = [route1_entry, *kept, *new_entries]
-        return new_models, added, removed
+        return [*kept, *new_entries], added, removed

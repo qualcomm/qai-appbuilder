@@ -94,6 +94,36 @@ const cloudModels = {
     "若該模型不支援某個參數（傳送會導致請求失敗），請將其關閉。聊天取樣面板仍會顯示對應控制項，但不支援的參數會在請求傳送前被自動剔除。",
   paramThoughtSigHint:
     "僅在需要回傳思考簽章的 Vertex AI 思考模型（如 Gemini）上開啟。",
+  gateway: {
+    title: "企業閘道（QAI Service）",
+    desc: "選用功能，僅適用於擁有公司 QAI Service 位址的使用者。模型由閘道在您使用公司 SSO 登入後提供；在您儲存位址並確認之前，不會啟用任何內容。",
+    urlPlaceholder: "https://qai-service.example.com:8012",
+    urlInvalid: "請輸入以 http:// 或 https:// 開頭的完整位址",
+    emptyHint: "如需關閉，請清空位址後點擊「中斷連線」。",
+    saveBtn: "儲存並連線",
+    retryBtn: "重新登入並同步",
+    disconnectBtn: "中斷連線",
+    stateOff: "未連線",
+    stateNeedLogin: "位址已儲存，需要登入",
+    stateOn: "已連線，{n} 個模型",
+    phase: {
+      saving: "正在儲存…",
+      login: "正在透過公司 SSO 登入…",
+      syncing: "正在同步模型…",
+    },
+    confirmTitle: "連線到 QAI Service？",
+    confirmMsg:
+      "位址：{url}\n\n接下來會發生：\n1. 位址儲存在本機。\n2. 需要再用公司 SSO 登入一次（可能會彈出視窗）。\n3. 從閘道取得模型清單，並顯示在模型選擇器中。\n\n如有失敗，可再次點擊按鈕重試。",
+    confirmBtn: "儲存並連線",
+    disconnectTitle: "中斷 QAI Service 連線？",
+    disconnectMsg:
+      "將從本機移除已儲存的位址、閘道提供的模型以及對應的登入權杖。公司 SSO 登入本身不受影響。",
+    connected: "QAI Service 已連線（{n} 個模型）",
+    errSave: "儲存位址失敗，請重試。",
+    errLogin: "登入未完成（視窗被關閉或被攔截）。位址已儲存，點擊按鈕可重試。",
+    errNoToken: "登入已完成，但閘道沒有簽發權杖。請檢查位址與帳號後重試。",
+    errSyncFailed: "無法從閘道取得模型清單。請檢查位址與網路後重試。",
+  },
   title: "雲端模型",
   unpin: "取消置頂",
 };

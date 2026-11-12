@@ -96,6 +96,36 @@ const cloudModels = {
     "Turn a parameter off when this model rejects it (the request would otherwise fail). The chat sampling panel still shows the control, but unsupported parameters are dropped before the request is sent.",
   paramThoughtSigHint:
     "Enable only for Vertex AI thinking models (e.g. Gemini) that require the thought signature to be echoed back.",
+  gateway: {
+    title: "Enterprise gateway (QAI Service)",
+    desc: "Optional. Only for people who have a company QAI Service address. Models are provided by the gateway after you sign in with company SSO; nothing is enabled until you save an address and confirm.",
+    urlPlaceholder: "https://qai-service.example.com:8012",
+    urlInvalid: "Enter a full address starting with http:// or https://",
+    emptyHint: "To turn it off, clear the address and press Disconnect.",
+    saveBtn: "Save and connect",
+    retryBtn: "Sign in and sync again",
+    disconnectBtn: "Disconnect",
+    stateOff: "Not connected",
+    stateNeedLogin: "Address saved - sign-in needed",
+    stateOn: "Connected - {n} models",
+    phase: {
+      saving: "Saving...",
+      login: "Signing in with company SSO...",
+      syncing: "Syncing models...",
+    },
+    confirmTitle: "Connect to QAI Service?",
+    confirmMsg:
+      "Address: {url}\n\nWhat will happen:\n1. The address is saved on this computer.\n2. You will be signed in with company SSO once more (a window may open).\n3. The model list is fetched from the gateway and appears in the model picker.\n\nIf anything fails you can press the button again.",
+    confirmBtn: "Save and connect",
+    disconnectTitle: "Disconnect QAI Service?",
+    disconnectMsg:
+      "The saved address, the gateway's models and the sign-in token for it will be removed from this computer. Company SSO login itself is not affected.",
+    connected: "QAI Service connected ({n} models)",
+    errSave: "Could not save the address. Please try again.",
+    errLogin: "Sign-in was not completed (window closed or blocked). The address is saved; press the button to try again.",
+    errNoToken: "Sign-in finished but the gateway did not issue a token. Check the address and your account, then try again.",
+    errSyncFailed: "Could not fetch the model list from the gateway. Check the address and network, then try again.",
+  },
   title: "Cloud Models",
   unpin: "Unpin",
 };

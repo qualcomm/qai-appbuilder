@@ -94,6 +94,36 @@ const cloudModels = {
     "若该模型不支持某个参数（发送会导致请求失败），请将其关闭。聊天采样面板仍会显示对应控件，但不支持的参数会在请求发送前被自动剔除。",
   paramThoughtSigHint:
     "仅在需要回传思考签名的 Vertex AI 思考模型（如 Gemini）上开启。",
+  gateway: {
+    title: "企业网关（QAI Service）",
+    desc: "可选功能，仅适用于拥有公司 QAI Service 地址的用户。模型由网关在您使用公司 SSO 登录后提供；在您保存地址并确认之前，不会启用任何内容。",
+    urlPlaceholder: "https://qai-service.example.com:8012",
+    urlInvalid: "请输入以 http:// 或 https:// 开头的完整地址",
+    emptyHint: "如需关闭，请清空地址后点击“断开”。",
+    saveBtn: "保存并连接",
+    retryBtn: "重新登录并同步",
+    disconnectBtn: "断开",
+    stateOff: "未连接",
+    stateNeedLogin: "地址已保存，需要登录",
+    stateOn: "已连接，{n} 个模型",
+    phase: {
+      saving: "正在保存…",
+      login: "正在通过公司 SSO 登录…",
+      syncing: "正在同步模型…",
+    },
+    confirmTitle: "连接 QAI Service？",
+    confirmMsg:
+      "地址：{url}\n\n接下来会发生：\n1. 地址保存在本机。\n2. 需要再用公司 SSO 登录一次（可能会弹出窗口）。\n3. 从网关获取模型列表，并显示在模型选择器中。\n\n如有失败，可再次点击按钮重试。",
+    confirmBtn: "保存并连接",
+    disconnectTitle: "断开 QAI Service？",
+    disconnectMsg:
+      "将从本机移除已保存的地址、网关提供的模型以及对应的登录令牌。公司 SSO 登录本身不受影响。",
+    connected: "QAI Service 已连接（{n} 个模型）",
+    errSave: "保存地址失败，请重试。",
+    errLogin: "登录未完成（窗口被关闭或被拦截）。地址已保存，点击按钮可重试。",
+    errNoToken: "登录已完成，但网关没有签发令牌。请检查地址与账号后重试。",
+    errSyncFailed: "无法从网关获取模型列表。请检查地址与网络后重试。",
+  },
   title: "云端模型",
   unpin: "取消置顶",
 };

@@ -215,9 +215,11 @@ export function silentLogin(
  *
  * Fallback: if popup is blocked, caller can choose to `redirectToLogin()`.
  */
-export function popupLogin(): Promise<void> {
+export function popupLogin(opts: { reexchange?: boolean } = {}): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    const loginUrl = `/auth/login?next=${encodeURIComponent("/auth/popup-done")}`;
+    const loginUrl =
+      `/auth/login?next=${encodeURIComponent("/auth/popup-done")}` +
+      (opts.reexchange === true ? "&reexchange=1" : "");
 
     // Open popup SYNCHRONOUSLY in the user-click context to avoid blockers.
     const popup = window.open(

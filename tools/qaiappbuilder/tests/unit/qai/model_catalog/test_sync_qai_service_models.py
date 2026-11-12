@@ -14,18 +14,18 @@ from qai.model_catalog.application.use_cases.sync_qai_service_models import (
     SyncQaiServiceModelsUseCase,
 )
 
-_ROUTE1_ENTRY: dict[str, Any] = {
-    "model_id": "qai-service::route-1",
-    "name": "Route 1",
-    "api_model_id": "route-1",
-    "context_length": 1_000_000,
-    "description": "QAI Service 智能路由（自动选择底层模型）",
+_STORED_ENTRY: dict[str, Any] = {
+    "model_id": "qai-service::stored-model",
+    "name": "Stored Model",
+    "api_model_id": "stored-model",
+    "context_length": 128_000,
+    "description": "previously synced",
     "supports_streaming": True,
 }
 
 _BASE_CONFIG: dict[str, Any] = {
-    "base_url": "http://qai-service.qualcomm.com:8012/v1",
-    "models": [dict(_ROUTE1_ENTRY)],
+    "base_url": "http://gateway.example.test:8012/v1",
+    "models": [],
     "pinned": False,
 }
 
@@ -71,7 +71,7 @@ def _config_with(models: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 async def test_no_jwt_is_noop() -> None:
-    registry = _FakeRegistry(_config_with([dict(_ROUTE1_ENTRY)]))
+    registry = _FakeRegistry(_config_with([dict(_STORED_ENTRY)]))
     probe = _FakeProbe(ProviderProbeResult(ok=True, model_ids=("qwen3.8-max",)))
     use_case = SyncQaiServiceModelsUseCase(
         registry=registry, probe=probe, get_jwt=lambda: None
@@ -86,7 +86,7 @@ async def test_no_jwt_is_noop() -> None:
 
 
 async def test_probe_failure_keeps_existing_config() -> None:
-    registry = _FakeRegistry(_config_with([dict(_ROUTE1_ENTRY)]))
+    registry = _FakeRegistry(_config_with([dict(_STORED_ENTRY)]))
     probe = _FakeProbe(ProviderProbeResult(ok=False, error="HTTP 401"))
     use_case = SyncQaiServiceModelsUseCase(
         registry=registry, probe=probe, get_jwt=lambda: "jwt-token"
@@ -97,11 +97,11 @@ async def test_probe_failure_keeps_existing_config() -> None:
     assert result.skipped_reason == "probe_failed"
     assert registry.saved is None
     assert registry.config is not None
-    assert registry.config["models"] == [dict(_ROUTE1_ENTRY)]
+    assert registry.config["models"] == [dict(_STORED_ENTRY)]
 
 
-async def test_route1_survives_even_when_not_in_live_response() -> None:
-    registry = _FakeRegistry(_config_with([dict(_ROUTE1_ENTRY)]))
+async def test_empty_provider_gets_only_live_models_and_no_route1() -> None:
+    registry = _FakeRegistry(_config_with([]))
     probe = _FakeProbe(
         ProviderProbeResult(ok=True, model_ids=("qwen3.8-max",))
     )
@@ -113,13 +113,12 @@ async def test_route1_survives_even_when_not_in_live_response() -> None:
 
     assert result.added == ("qwen3.8-max",)
     assert registry.saved is not None
-    models = registry.saved["models"]
-    assert models[0]["api_model_id"] == "route-1"
-    assert models[0] == _ROUTE1_ENTRY
+    ids = [m["api_model_id"] for m in registry.saved["models"]]
+    assert ids == ["qwen3.8-max"]  # nothing is injected beyond the live roster
 
 
-async def test_new_model_clones_route1_effective_params() -> None:
-    registry = _FakeRegistry(_config_with([dict(_ROUTE1_ENTRY)]))
+async def test_new_model_gets_minimal_entry_with_unconstrained_params() -> None:
+    registry = _FakeRegistry(_config_with([]))
     probe = _FakeProbe(
         ProviderProbeResult(ok=True, model_ids=("qwen3.8-max",))
     )
@@ -129,17 +128,36 @@ async def test_new_model_clones_route1_effective_params() -> None:
 
     await use_case.execute()
 
-    new_entry = registry.saved["models"][1]
+    new_entry = registry.saved["models"][0]
     assert new_entry["model_id"] == "qai-service::qwen3.8-max"
     assert new_entry["api_model_id"] == "qwen3.8-max"
     assert new_entry["name"] == "qwen3.8-max"
-    assert new_entry["context_length"] == _ROUTE1_ENTRY["context_length"]
-    assert new_entry["supports_streaming"] == _ROUTE1_ENTRY["supports_streaming"]
+    assert new_entry["context_length"] == 1_000_000
+    assert new_entry["supports_streaming"] is True
     assert new_entry["params"] == {
         "temperature": {"supported": True},
         "top_p": {"supported": True},
         "max_tokens": {"supported": True, "max": 1_000_000},
     }
+
+
+async def test_route1_is_an_ordinary_model_dropped_when_not_live() -> None:
+    route1 = {
+        "model_id": "qai-service::route-1",
+        "name": "Route 1",
+        "api_model_id": "route-1",
+        "context_length": 1_000_000,
+    }
+    registry = _FakeRegistry(_config_with([route1]))
+    probe = _FakeProbe(ProviderProbeResult(ok=True, model_ids=("qwen3.8-max",)))
+    use_case = SyncQaiServiceModelsUseCase(
+        registry=registry, probe=probe, get_jwt=lambda: "jwt-token"
+    )
+
+    result = await use_case.execute()
+
+    assert result.removed == ("route-1",)
+    assert [m["api_model_id"] for m in registry.saved["models"]] == ["qwen3.8-max"]
 
 
 async def test_vanished_model_is_removed() -> None:
@@ -151,9 +169,7 @@ async def test_vanished_model_is_removed() -> None:
         "supports_streaming": True,
         "params": {"temperature": {"supported": True}},
     }
-    registry = _FakeRegistry(
-        _config_with([dict(_ROUTE1_ENTRY), dict(stale_entry)])
-    )
+    registry = _FakeRegistry(_config_with([dict(stale_entry)]))
     probe = _FakeProbe(ProviderProbeResult(ok=True, model_ids=()))
     use_case = SyncQaiServiceModelsUseCase(
         registry=registry, probe=probe, get_jwt=lambda: "jwt-token"
@@ -161,8 +177,8 @@ async def test_vanished_model_is_removed() -> None:
 
     result = await use_case.execute()
 
-    assert result.removed == ("old-model",)
-    assert registry.saved["models"] == [dict(_ROUTE1_ENTRY)]
+    assert result.removed == ("old-model",)  # sole stored model, not live
+    assert registry.saved["models"] == []
 
 
 async def test_kept_model_fields_are_preserved_untouched() -> None:
@@ -175,9 +191,7 @@ async def test_kept_model_fields_are_preserved_untouched() -> None:
         "supports_streaming": True,
         "params": {"temperature": {"supported": False}},
     }
-    registry = _FakeRegistry(
-        _config_with([dict(_ROUTE1_ENTRY), dict(hand_tuned_entry)])
-    )
+    registry = _FakeRegistry(_config_with([dict(hand_tuned_entry)]))
     probe = _FakeProbe(
         ProviderProbeResult(ok=True, model_ids=("qwen3.8-max",))
     )
@@ -189,7 +203,7 @@ async def test_kept_model_fields_are_preserved_untouched() -> None:
 
     assert result.is_noop()
     assert registry.saved is None
-    assert registry.config["models"] == [dict(_ROUTE1_ENTRY), dict(hand_tuned_entry)]
+    assert registry.config["models"] == [dict(hand_tuned_entry)]
 
 
 async def test_missing_provider_config_is_noop() -> None:
@@ -203,15 +217,3 @@ async def test_missing_provider_config_is_noop() -> None:
 
     assert result.skipped_reason == "provider_not_configured"
     assert not probe.calls
-
-
-async def test_missing_route1_entry_falls_back_to_canonical_shape() -> None:
-    registry = _FakeRegistry(_config_with([]))
-    probe = _FakeProbe(ProviderProbeResult(ok=True, model_ids=("qwen3.8-max",)))
-    use_case = SyncQaiServiceModelsUseCase(
-        registry=registry, probe=probe, get_jwt=lambda: "jwt-token"
-    )
-
-    await use_case.execute()
-
-    assert registry.saved["models"][0] == _ROUTE1_ENTRY

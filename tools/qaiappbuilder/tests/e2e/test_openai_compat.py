@@ -28,7 +28,7 @@ catalog entries it registers (no URL fetched) are removed at the end of each tes
 Observed behaviour worth pinning:
 
 * ``/v1/models`` is the model catalog's entries plus two built-in seed names (``qai-default``, ``qai-fast``) - not the chat
-  provider models - and ``qai-service::route-1`` seeded by the factory. ``created`` is the request time, so it changes each call.
+  provider models. Nothing else is seeded (QAI Service is opt-in, so no ``qai-service::route-1``). ``created`` is the request time, so it changes each call.
 * The guard answers **403** (not 401) with ``openai_compat.unauthorized``, requires exactly ``Bearer <key>`` (case-sensitive), and
   protects all three routes. Everything else under ``/api`` is unaffected by it.
 * An invalid body is a **400** in the project's error envelope - not OpenAI's ``{"error": {...}}`` shape. A client that parses
@@ -55,7 +55,7 @@ KEY = "e2e-v1-secret"
 OK = {"Authorization": f"Bearer {KEY}"}
 V = "/v1"
 MSG = {"model": "m", "messages": [{"role": "user", "content": "x"}]}
-SEED = ["qai-service::route-1", "qai-default", "qai-fast"]
+SEED = ["qai-default", "qai-fast"]
 _START = _keyring_cloud_state()
 
 
@@ -160,17 +160,17 @@ def test_registered_catalog_entries_are_listed_by_id_before_the_seed_names_and_d
     for mid in ("e2e-v1-b", "e2e-v1-a"):
         entry(mid)
     ids = _ids(guarded)
-    assert ids == ["qai-service::route-1", "e2e-v1-a", "e2e-v1-b", "qai-default", "qai-fast"], "catalog entries sorted by id, then the built-in seed names"
+    assert ids == ["e2e-v1-a", "e2e-v1-b", "qai-default", "qai-fast"], "catalog entries sorted by id, then the built-in seed names"
     assert _ids(guarded) == ids, "the order is stable"
     assert guarded.delete("/api/model-catalog/entries/e2e-v1-a").status_code == 204
-    assert _ids(guarded) == ["qai-service::route-1", "e2e-v1-b", "qai-default", "qai-fast"]
+    assert _ids(guarded) == ["e2e-v1-b", "qai-default", "qai-fast"]
 
 
 def test_a_catalog_entry_named_like_a_seed_model_is_not_listed_twice(guarded: httpx.Client, entry) -> None:
     entry("qai-default")
     ids = _ids(guarded)
     assert ids.count("qai-default") == 1 and ids.count("qai-fast") == 1
-    assert ids == ["qai-service::route-1", "qai-default", "qai-fast"], "same set as a fresh install: the real entry replaces the seed one"
+    assert ids == ["qai-default", "qai-fast"], "same set as a fresh install: the real entry replaces the seed one"
 
 def test_the_provider_models_the_chat_ui_offers_are_not_listed(guarded: httpx.Client) -> None:
     """KNOWN GAP / DESIGN QUESTION (current behaviour, pinned) - CHAT-ISS-03: a model that exists only in a registered provider
@@ -191,9 +191,10 @@ def test_a_single_model_has_the_openai_shape(guarded: httpx.Client) -> None:
     assert sorted(m) == ["created", "id", "object", "owned_by"] and (m["id"], m["object"], m["owned_by"]) == ("qai-fast", "model", "qai")
 
 
-def test_an_id_containing_colons_and_slashes_resolves(guarded: httpx.Client) -> None:
+def test_an_id_containing_colons_and_slashes_resolves(guarded: httpx.Client, entry) -> None:
     """The route is ``{model_id:path}``, so ids such as ``provider::model`` work."""
-    assert guarded.get(f"{V}/models/qai-service::route-1", headers=OK).json()["id"] == "qai-service::route-1"
+    entry("e2e-v1::colon-id")
+    assert guarded.get(f"{V}/models/e2e-v1::colon-id", headers=OK).json()["id"] == "e2e-v1::colon-id"
 
 
 @pytest.mark.parametrize("mid", ["nope", "QAI-DEFAULT", "qai-default/", "%20", "a/b/c"])

@@ -819,10 +819,22 @@ def make_lifespan(
                 exc_info=True,
             )
 
+        # QAI Service is opt-in: load the user's gateway address (stored in the
+        # ``qai-service`` provider entry) into the process-wide holder BEFORE
+        # anything reads it. No entry => holder empty => exchange/quota/sync inert.
+        try:
+            from interfaces.http.routes.qai_service import (  # noqa: PLC0415
+                hydrate_gateway_url,
+            )
+
+            await hydrate_gateway_url(container)
+        except Exception:  # noqa: BLE001 - never abort startup
+            _log.warning("lifespan.qai_service_hydrate_failed", exc_info=True)
+
         # qai-service model-roster sync — one GET /v1/models against the
-        # live broker, folding any real models it returns into the stored
-        # provider config alongside the route-1 pseudo-model (which always
-        # stays first / the default). Best-effort + non-blocking, same
+        # live broker, folding the models it returns into the stored
+        # provider config (no built-in default model). Best-effort +
+        # non-blocking, same
         # shape as the permission scan above: no JWT yet (fresh install /
         # never logged in) degrades to a clean no-op, never raises, never
         # delays "ready to serve".

@@ -130,7 +130,25 @@ def _resolve_ldap_validate_url() -> str:
 
 
 def _resolve_qai_service_config() -> "QaiServiceSettings":
-    """Return the effective QAI Service config (typed defaults + deployment).
+    """Return the effective QAI Service config, honouring the user's address.
+
+    The gateway address is entered by the user (Settings -> Cloud Models) and
+    held by ``qai_service_token.get_gateway_url``; when that holder has been
+    set it OVERRIDES any ``base_url`` from the TOML (``""`` = no gateway, so
+    every caller no-ops). The TOML remains the fallback only while the holder
+    was never set (tests / CLI containers).
+    """
+    from interfaces.http.auth.qai_service_token import get_gateway_url
+
+    cfg = _resolve_qai_service_config_from_toml()
+    held = get_gateway_url()
+    if held is not None:
+        return cfg.model_copy(update={"base_url": held})
+    return cfg
+
+
+def _resolve_qai_service_config_from_toml() -> "QaiServiceSettings":
+    """Return the TOML-derived QAI Service config (typed defaults + deployment).
 
     Two layers, deliberately:
 

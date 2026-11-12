@@ -61,6 +61,7 @@ from interfaces.http.routes.model_catalog import build_router as build_model_cat
 from interfaces.http.routes.security import build_router as build_security_router
 from interfaces.http.routes.system import build_router as build_system_router
 from interfaces.http.routes.user_prefs import build_router as build_user_prefs_router
+from interfaces.http.routes.qai_service import build_router as build_qai_service_router
 from interfaces.http.routes.brokers import build_router as build_brokers_router
 from interfaces.http.routes.model_runtime import build_router as build_model_runtime_router
 from interfaces.http.routes.model_runtime import build_config_router as build_service_config_router
@@ -304,6 +305,7 @@ def create_app(
     app.include_router(build_builder_env_router(container=container))
     app.include_router(build_security_router(container=container))
     app.include_router(build_model_catalog_router(container=container))
+    app.include_router(build_qai_service_router(container=container))
     app.include_router(build_search_engines_router(container=container))
     app.include_router(build_chat_router(container=container))
     app.include_router(build_app_builder_router(container=container))
