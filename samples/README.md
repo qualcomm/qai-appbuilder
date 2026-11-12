@@ -26,6 +26,7 @@ samples/
 │   ├── generative_ai/        # Generative AI models (Stable Diffusion)
 │   └── multimodal/           # Multimodal models (OCR, translation, CLIP, VLM)
 ├── apps/                     # Complete AI applications
+│   ├── speech-translator/    # On-device zh<->en speech-to-speech translator (CLI)
 │   ├── webui/                # Gradio WebUI applications (image-repair, stable-diffusion, genie-chat)
 │   ├── android/              # Android sample apps (genie-chat, super-resolution, tflite-object-detection)
 │   ├── genie-flet-ui/        # Flet-based desktop UI
@@ -168,6 +169,14 @@ See [shared/python/python_samples_guide.md](shared/python/python_samples_guide.m
 ---
 
 ## 3. Applications (`apps/`)
+
+### 3.0 Speech Translator (`apps/speech-translator/`)
+
+On-device Chinese <-> English speech-to-speech translation (Zipformer ASR -> OpusMT -> PiperTTS-EN / MeloTTS-ZH), all on the NPU. Input from microphone, WAV file or text.
+
+| App | Command | Description |
+|-----|---------|-------------|
+| [SpeechTranslator](apps/speech-translator/) | `python apps\speech-translator\SpeechTranslator.py [--direction zh2en\|en2zh] [--audio [FILE]] [--text TEXT]` | Self-contained CLI app; models auto-download on first run. Not launched via `run_inference.py`. See [README](apps/speech-translator/README.md). |
 
 ### 3.1 WebUI Apps (`apps/webui/`)
 
