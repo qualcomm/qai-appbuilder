@@ -291,6 +291,7 @@ std::string BuildSoftRetryNote(const std::string& outcome_preview, int executed_
     msg += " time(s) in this task and the result did not change. Calling it again returns nothing new.";
     if (!outcome_preview.empty())
         msg += "\nIts earlier result: " + outcome_preview;
+    msg += "\nAn empty or missing part of that result is the answer for that part; repeating the call will not fill it in.";
     msg += "\nUse that result, or call a different tool/arguments to make progress.";
     return msg;
 }

@@ -1552,6 +1552,7 @@ bool ModelManager::InitializeConfig()
                         rg_cfg.hard_block_threshold = rg.value("hard_block_threshold", 3);
                         rg_cfg.hard_block_stop_after = rg.value("hard_block_stop_after", 2);
                         rg_cfg.soft_retry_enabled = rg.value("soft_retry_enabled", false);
+                        rg_cfg.hard_block_retry_enabled = rg.value("hard_block_retry_enabled", true);
                         rg_cfg.max_signatures_per_entry = rg.value("max_signatures_per_entry", 256);
                         rg_cfg.note_min_interval_turns = rg.value("note_min_interval_turns", 4);
                         rg_cfg.overlap_reread_threshold = rg.value("overlap_reread_threshold", 2);
@@ -1580,6 +1581,8 @@ bool ModelManager::InitializeConfig()
                              << tool_call_repair_config_.redundant_call_guard.hard_block_threshold
                              << ", redundant_call_guard.soft_retry_enabled="
                              << tool_call_repair_config_.redundant_call_guard.soft_retry_enabled
+                             << ", redundant_call_guard.hard_block_retry_enabled="
+                             << tool_call_repair_config_.redundant_call_guard.hard_block_retry_enabled
                              << std::endl;
                 }
 

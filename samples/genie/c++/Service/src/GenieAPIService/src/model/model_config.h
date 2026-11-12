@@ -209,6 +209,8 @@ struct ToolCallRepairConfig {
 
         bool soft_retry_enabled = false;
 
+        bool hard_block_retry_enabled = true;
+
         int max_signatures_per_entry = 256;
 
         int note_min_interval_turns = 4;

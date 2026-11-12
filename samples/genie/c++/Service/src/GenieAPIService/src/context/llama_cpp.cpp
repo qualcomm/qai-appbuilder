@@ -439,6 +439,17 @@ public:
         {
             n_reuse = MatchPrefixCache(ctx, ctx_dft, effective_prompt_len - 1);
         }
+        if (skip_checkpoint_save_ && n_reuse == 0)
+        {
+            prefix_cache_valid_ = had_prefix_cache;
+            My_Log{My_Log::Level::kWarning}
+                << "[LLAMACpp] " << query_type
+                << " internal retry found no reusable checkpoint; abandoning it to keep the prefix cache\n";
+            std::lock_guard<std::mutex> lk(m);
+            done = true;
+            cv.notify_one();
+            return false;
+        }
         if (n_reuse == 0)
         {
             prefix_ckpts_.clear();
@@ -499,6 +510,11 @@ public:
         if (ckpt_end > n_reuse)
         {
             ckpt_points.push_back(ckpt_end);
+        }
+        if (skip_checkpoint_save_)
+        {
+            ckpt_points.clear();
+            My_Log{} << "[LLAMACpp] " << query_type << " checkpoint saving skipped for this internal retry\n";
         }
         My_Log{} << "[LLAMACpp] " << query_type
                  << " Prefix cache: enabled=" << prefix_cache_on
@@ -988,7 +1004,8 @@ public:
 
             llama_batch_free(batch_tgt);
 
-            if (!decode_failed && eog_hit && prefix_cache_on && !is_aux_inference && (int) spec_prompt.size() == n_past)
+            if (!decode_failed && eog_hit && prefix_cache_on && !is_aux_inference && !skip_checkpoint_save_
+                && (int) spec_prompt.size() == n_past)
             {
                 SavePrefixCheckpoint(ctx, ctx_dft, n_past, &spec_prompt);
             }
@@ -1201,6 +1218,7 @@ public:
     int think_ctx_reserve_ = 0;
 
     bool think_force_min_floor_ = false;
+    bool skip_checkpoint_save_ = false;
     int64_t aux_ms_accum_ = 0;
     int64_t aux_calls_accum_ = 0;
 
@@ -1985,6 +2003,7 @@ bool LLAMACppBuilder::Query(const ModelInput &model_input, const Callback& callb
     impl_->think_max_tokens_ = model_input.think_max_tokens_;
     impl_->think_ctx_reserve_ = model_input.think_ctx_reserve_;
     impl_->think_force_min_floor_ = model_input.think_force_min_floor_;
+    impl_->skip_checkpoint_save_ = model_input.skip_checkpoint_save_;
     bool result = impl_->Query(prompt, callback, prefill_heartbeat,
                                 query_type_bracketed.c_str(), is_aux_inference,
                                 stop_epoch_, query_scope.epoch());
