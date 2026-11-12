@@ -1,4 +1,3 @@
-{"key": "model_catalog.provider.qai-service", "updated_at": "2026-08-01T13:00:25+00:00", "value_json": "{\"base_url\": \"http://qai-service.qualcomm.com:8012/v1\", \"models\": [{\"api_model_id\": \"route-1\", \"context_length\": 1000000, \"description\": \"QAI Service 智能路由（自动选择底层模型）\", \"model_id\": \"qai-service::route-1\", \"name\": \"Route 1\", \"supports_streaming\": true}], \"pinned\": false}"}
 {"key": "ui.selected_service_model", "updated_at": "2026-08-01T13:00:25+00:00", "value_json": "\"\""}
 {"key": "ui.selected_model_id", "updated_at": "2026-08-01T13:00:25+00:00", "value_json": "\"\""}
 {"key": "ui.toolbar_modules.model_builder.enabled", "updated_at": "2026-08-01T13:00:25+00:00", "value_json": "true"}

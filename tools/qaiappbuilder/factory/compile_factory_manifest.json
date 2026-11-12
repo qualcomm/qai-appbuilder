@@ -15,10 +15,9 @@
     },
     {
       "kind": "kv_user_prefs_jsonl",
-      "row_count": 53,
+      "row_count": 52,
       "sample_keys": [
         "forge.config",
-        "model_catalog.provider.qai-service",
         "ui.code_personas.selected",
         "ui.selected_model_id",
         "ui.selected_model_provider",
@@ -29,13 +28,10 @@
     },
     {
       "kind": "model_catalog_staging_jsonl",
-      "row_count": 6,
+      "row_count": 3,
       "sample_ids": [
         "Qwen2-7B-Instruct-MNN",
         "gpt-oss-20b-GGUF",
-        "qai-service::anthropic::claude-4-6-sonnet",
-        "qai-service::azure::gpt-5.5",
-        "qai-service::vertexai::gemini-3.5-flash",
         "qwen3-8b-8380"
       ]
     },

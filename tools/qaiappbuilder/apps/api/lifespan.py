@@ -307,54 +307,11 @@ def make_lifespan(
                 exc_info=True,
             )
 
-        # One-shot QAI Service data migration, on two independent axes:
-        #
-        #  * model list — the pool collapsed three per-vendor models into a
-        #    single ``route-1`` pseudo-model. Edition-independent; only the
-        #    ``factory/`` seed picked it up, so an existing user who merely
-        #    ``git pull``s keeps three defunct models in ``data/db/qai.db``.
-        #  * host — the INTERNAL deployment moved off its original address
-        #    while the external broker kept it. ``factory/`` necessarily seeds
-        #    the external address (it ships to external), so on the internal
-        #    edition this migrator is also what applies the override — on
-        #    upgrades and fresh installs alike. The intranet address is not
-        #    named here or anywhere else that ships: the migrator reads it from
-        #    the edition-excluded ``internal_config.toml`` behind an
-        #    ``is_internal`` gate, and on external the host steps no-op.
-        #
-        # Stale state from the host move also covers ``data/user_config.toml``
-        # and the old-pool JWT persisted in the SecretStore, against which chat
-        # 401s. This migrator brings all four stores forward in one pass. It is
-        # idempotent (sentinel in ``_qai_data_migrations`` — table created
-        # by schema migration 077) and best-effort — a failure here logs
-        # a warning, does not abort startup, and the next boot retries.
-        try:
-            from scripts.migrate.qai_service_route1 import (
-                migrate_qai_service_route1,
-            )
-
-            _qai_report = await migrate_qai_service_route1(
-                repo_root=container.repo_root,
-                data_paths=container.data_paths,
-                db=container.database,
-            )
-            if not _qai_report.is_noop():
-                _log.info(
-                    "lifespan.qai_service_route1_migrated",
-                    kv_updates=_qai_report.kv_updates,
-                    mc_deletes=_qai_report.mc_deletes,
-                    mc_upserts=_qai_report.mc_upserts,
-                    ui_clears=_qai_report.ui_clears,
-                    toml_rewritten=_qai_report.toml_rewritten,
-                    jwt_cleared=_qai_report.jwt_cleared,
-                    failed_step=_qai_report.failed_step,
-                    applied=_qai_report.applied,
-                )
-        except Exception:  # noqa: BLE001 — migration must never abort startup
-            _log.warning(
-                "lifespan.qai_service_route1_migration_failed",
-                exc_info=True,
-            )
+        # QAI Service data migration (``scripts.migrate.qai_service_route1``) is
+        # intentionally NOT run in this build: it re-seeds the ``qai-service``
+        # provider, its ``route-1`` pseudo-model and the intranet host, which is
+        # exactly what this build removes. QAI Service is opt-in -- it exists only
+        # after the user enters its address in Settings -> Cloud Models.
 
         # App Builder built-in model seed. V1 surfaced the bundled
         # models by scanning ``features/app-builder/models/`` on every

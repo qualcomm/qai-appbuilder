@@ -68,9 +68,6 @@ feishu_auto_start = true
 
 [forge.cloud_providers]
 
-[forge.cloud_providers.qai-service]
-base_url = "http://qai-service.qualcomm.com:8012/v1"
-
 [forge.genie_service]
 root_path = ""
 
@@ -260,9 +257,12 @@ id = "claude-5-opus"
 label = "Opus 5"
 desc = "Most capable · Deep analysis and complex tasks · $15/$75 per Mtok"
 
+# QAI Service is opt-in: an empty base_url keeps the SSO-token exchange and the
+# quota proxy inert. The address is entered by the user in Settings -> Cloud
+# Models and is then stored in the ``qai-service`` provider entry.
 [forge.qai_service]
 enabled = true
-base_url = "http://qai-service.qualcomm.com:8012"
+base_url = ""
 exchange_timeout_seconds = 15
 ssl_verify = false
 
