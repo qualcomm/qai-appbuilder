@@ -214,7 +214,7 @@ class ModelCatalogProviderLookupBridge(ProviderConfigLookupPort, ModelContextWin
     async def context_window(
         self, model_id: str, provider: str | None = None,
     ) -> int:
-        """Return the exact configured model context length."""
+        """Return the configured model context length (family table when unset)."""
         if model_id.startswith("local::"):
             if self._local_models is None:
                 raise MissingModelContextLengthError(model_id)
@@ -271,7 +271,12 @@ class ModelCatalogProviderLookupBridge(ProviderConfigLookupPort, ModelContextWin
         value = matches[0][1]
         if isinstance(value, int) and not isinstance(value, bool) and value > 0:
             return value
-        raise MissingModelContextLengthError(model_id)
+        # The model IS configured but carries no usable ``context_length``
+        # (the user never has to type one): fall back to the family table
+        # instead of failing every turn with ``model_context_length_missing``.
+        from qai.chat.domain.model_profiles import get_context_limit
+
+        return get_context_limit(model_id)
 
     # ------------------------------------------------------------------
     # Internals

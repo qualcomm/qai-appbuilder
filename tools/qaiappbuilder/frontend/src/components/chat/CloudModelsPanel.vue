@@ -41,6 +41,7 @@ import ToggleSwitch from "@/components/chat/service-config/ToggleSwitch.vue";
 // Docs live under `frontend/src/help-content/cloud-models.<locale>.md`.
 import HelpButton from "@/components/common/HelpButton.vue";
 import QaiServiceGatewayCard from "@/components/chat/QaiServiceGatewayCard.vue";
+import CloudModelQuickAdd from "@/components/chat/CloudModelQuickAdd.vue";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -130,6 +131,8 @@ const keyVisible = ref<Record<string, boolean>>({});
 
 // Side-panel edit state (V1 `cloudModelEditKey` / `cloudModelForm`).
 const panelOpen = ref(false);
+// Quick-add (preset -> key -> fetch -> tick) is the default add path.
+const quickOpen = ref(false);
 // { provider, model_id } of the row being edited, or null for add/clone.
 const editKey = ref<{ provider: string; model_id: string } | null>(null);
 const saving = ref(false);
@@ -661,7 +664,7 @@ function onGlobalKeydown(event: KeyboardEvent): void {
       <button
         type="button"
         class="btn btn-primary btn-sm"
-        @click="openAddForm"
+        @click="quickOpen = true"
       >
         + {{ t("cloudModels.add") }}
       </button>
@@ -679,6 +682,14 @@ function onGlobalKeydown(event: KeyboardEvent): void {
         size="sm"
       />
     </div>
+
+    <CloudModelQuickAdd
+      v-if="quickOpen"
+      :providers="providers"
+      @saved="fetchProviders"
+      @close="quickOpen = false"
+      @advanced="quickOpen = false; openAddForm()"
+    />
 
     <div
       class="cloud-models-layout"

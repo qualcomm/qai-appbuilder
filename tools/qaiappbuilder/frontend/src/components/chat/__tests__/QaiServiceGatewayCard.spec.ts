@@ -88,12 +88,12 @@ describe("QaiServiceGatewayCard", () => {
     await w.find("input").setValue("http://gw.test:8012");
     await w.find("button").trigger("click");
     await flushPromises();
-    expect(confirm.mock.calls[0][0].message).toContain("http://gw.test:8012");
+    expect(confirm.mock.calls[0]![0].message).toContain("http://gw.test:8012");
     expect(apiJson.mock.calls[1]).toEqual([
       "POST", "/api/qai-service/connect", { url: "http://gw.test:8012" },
     ]);
     expect(silentLogin).toHaveBeenCalledWith({ reexchange: true, timeoutMs: 15000 });
-    expect(apiJson.mock.calls[2][1]).toBe("/api/qai-service/sync");
+    expect(apiJson.mock.calls[2]![1]).toBe("/api/qai-service/sync");
     expect(w.emitted("changed")).toBeTruthy();
     expect(w.text()).toContain("3 models");
   });
@@ -112,7 +112,7 @@ describe("QaiServiceGatewayCard", () => {
     await w.find("button").trigger("click");
     await flushPromises();
     expect(popupLogin).toHaveBeenCalledWith({ reexchange: true });
-    expect(apiJson.mock.calls[2][1]).toBe("/api/qai-service/sync");
+    expect(apiJson.mock.calls[2]![1]).toBe("/api/qai-service/sync");
   });
 
   it("keeps the address and shows a retry hint when sign-in is abandoned", async () => {

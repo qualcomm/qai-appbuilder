@@ -48,6 +48,8 @@ their own JSON error responses.
 
 from __future__ import annotations
 
+import re
+
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Response, WebSocket, WebSocketDisconnect, status
@@ -317,6 +319,26 @@ class UpdateProviderConfigRequest(BaseModel):
     """Body for ``PUT /api/model-catalog/providers/{provider_id}``."""
 
     config: dict[str, Any]
+
+
+class ProbeProviderRequest(BaseModel):
+    """Body for ``POST /api/model-catalog/providers/probe`` (nothing is saved)."""
+
+    base_url: str
+    api_key: str = ""
+
+
+class ProbeProviderResponse(BaseModel):
+    """Outcome of a connectivity probe; ``code`` is a stable machine reason."""
+
+    ok: bool
+    status: int | None = None
+    #: ``unauthorized`` | ``not_found`` | ``unreachable`` | ``invalid_url`` |
+    #: ``http_error`` | ``None`` when ok.
+    code: str | None = None
+    model_ids: list[str] = Field(default_factory=list)
+    #: model_id -> suggested context window (tokens), for auto-filling the form.
+    context_lengths: dict[str, int] = Field(default_factory=dict)
 
 
 class QGenieCounterDTO(BaseModel):
@@ -814,6 +836,39 @@ def build_router(*, container: "Container") -> APIRouter:
     async def list_providers() -> ProviderConfigsResponse:
         rows = await container.model_catalog.list_provider_configs_use_case.execute()
         return ProviderConfigsResponse(providers=rows)
+
+    @router.post("/providers/probe", response_model=ProbeProviderResponse)
+    async def probe_provider_unsaved(
+        body: ProbeProviderRequest,
+    ) -> ProbeProviderResponse:
+        """Test an UNSAVED ``base_url`` + key by listing its models.
+
+        Always 200; failures are reported in ``ok``/``code``. Nothing is
+        persisted and the key is used for this single request only.
+        """
+        base = body.base_url.strip()
+        if not re.match(r"^https?://[^\s/?#]+", base, re.IGNORECASE):
+            return ProbeProviderResponse(ok=False, code="invalid_url")
+        result = await container.model_catalog.provider_probe.probe(
+            base_url=base, api_key=body.api_key.strip() or None
+        )
+        if result.ok:
+            suggest = container.model_catalog.suggest_context_length
+            return ProbeProviderResponse(
+                ok=True,
+                status=result.status,
+                model_ids=list(result.model_ids),
+                context_lengths={m: suggest(m) for m in result.model_ids},
+            )
+        if result.status in (401, 403):
+            code = "unauthorized"
+        elif result.status == 404:
+            code = "not_found"
+        elif result.status is None:
+            code = "unreachable"
+        else:
+            code = "http_error"
+        return ProbeProviderResponse(ok=False, status=result.status, code=code)
 
     @router.put(
         "/providers/{provider_id}",

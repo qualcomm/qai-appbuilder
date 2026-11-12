@@ -18,6 +18,7 @@ Best-effort + non-raising: any transport / status error is reported as a
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -28,6 +29,8 @@ from qai.model_catalog.application.ports import ProviderProbeResult
 __all__ = ["HttpProviderProbe"]
 
 _DEFAULT_TIMEOUT_S: float = 10.0
+
+_VERSION_SEGMENT = re.compile(r"/v\d+[a-z]*$", re.IGNORECASE)
 
 
 class HttpProviderProbe:
@@ -59,8 +62,11 @@ class HttpProviderProbe:
         # ``/v1`` before appending ``/models`` so a base_url that already
         # carries ``/v1`` doesn't produce ``/v1/v1/models`` (→ 404). Mirrors
         # the CC adapter's ``_get_fetcher`` normalisation (claude_code.py).
+        # A base_url that already ends in a version segment (``/v1``, or e.g.
+        # Zhipu GLM's ``/api/paas/v4``) is used as-is; only a bare origin gets
+        # ``/v1`` appended.
         normalised = base_url.rstrip("/")
-        if not normalised.endswith("/v1"):
+        if not _VERSION_SEGMENT.search(normalised):
             normalised = f"{normalised}/v1"
         url = f"{normalised}/models"
         headers: dict[str, str] = {}

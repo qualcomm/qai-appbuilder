@@ -63,6 +63,7 @@ Top-level adapters import is allowed because the
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from qai.model_catalog.adapters import (
@@ -79,6 +80,7 @@ from qai.model_catalog.application.ports import (
     DownloadJobRepositoryPort,
     ManifestFetcherPort,
     ModelEntryRepositoryPort,
+    ProviderProbePort,
     ProviderRegistryPort,
     SkillRegistryPort,
 )
@@ -179,6 +181,12 @@ class ModelCatalogServices:
     # provider connectivity probe (additive tail field — config wizard /
     # ``qai config provider test``; HTTP+CLI shareable)
     probe_provider_use_case: ProbeProviderUseCase
+    # Raw connectivity probe (additive tail): lets the HTTP layer test an UNSAVED
+    # base_url + key (quick-add flow) without writing anything.
+    provider_probe: ProviderProbePort
+    # model_id -> suggested context window (family table), so the quick-add flow
+    # can fill ``context_length`` instead of asking the user for it.
+    suggest_context_length: Callable[[str], int]
     # Cloud-model permission snapshot (additive tail fields — scanned once
     # from lifespan; the chat dropdown reads the snapshot to hide models
     # the user's API key has no access to. Store is an in-memory dict;
@@ -320,6 +328,16 @@ def build_model_catalog_services(
         secret_store=getattr(container, "secret_store", None),
     )
     list_cloud_models = ListCloudModelsUseCase(registry=provider_registry)
+    def _suggest_context_length(model_id: str) -> int:
+        from qai.chat.domain.model_profiles import (  # noqa: PLC0415
+            get_context_limit,
+        )
+
+        return get_context_limit(model_id)
+
+    raw_provider_probe = HttpProviderProbe(
+        ssl_verify_provider=build_ssl_verify_provider(container)
+    )
     probe_provider = ProbeProviderUseCase(
         registry=provider_registry,
         # 缺口 fix — route the (previously hardcoded verify=False) connectivity
@@ -409,6 +427,8 @@ def build_model_catalog_services(
         update_provider_config_use_case=update_provider,
         list_cloud_models_use_case=list_cloud_models,
         probe_provider_use_case=probe_provider,
+        provider_probe=raw_provider_probe,
+        suggest_context_length=_suggest_context_length,
         permission_snapshot_store=permission_store,
         probe_cloud_model_permissions_use_case=probe_permissions,
         sync_qai_service_models_use_case=sync_qai_service_models,
