@@ -8,7 +8,7 @@
 
 <div align="center">
   <a href="https://github.com/qualcomm/qai-appbuilder"><img src="https://img.shields.io/github/stars/qualcomm/qai-appbuilder" alt="stars"></a>
-  <a href="https://github.com/qualcomm/qai-appbuilder/releases/tag/v3.0.0"><img src="https://img.shields.io/badge/Release-v3.0.0-green" alt="Release"></a>
+  <a href="https://github.com/qualcomm/qai-appbuilder/releases/tag/v3.2.0"><img src="https://img.shields.io/badge/Release-v3.2.0-green" alt="Release"></a>
   <a href="https://opensource.org/license/BSD-3-clause"><img src="https://img.shields.io/badge/License-BSD--3--Clause-blue" alt="License: BSD 3-Clause"></a>
   <a href="https://www.python.org/downloads/windows/"><img src="https://img.shields.io/badge/Python-00599C?logo=Python" alt="Python"></a>
   <a href="https://en.cppreference.com/w/cpp/compiler_support"><img src="https://img.shields.io/badge/C++-999999?logo=c%2B%2B" alt="C++"></a>
@@ -71,7 +71,7 @@ Either way, you never leave the conversation.
 > pre-built package below and you'll have a running, on-device AI app builder in **two commands**.
 
 <div align="center">
-  <a href="https://github.com/qualcomm/qai-appbuilder/releases/download/v3.0.0/qaiappbuilder.zip"><img src="https://img.shields.io/badge/Download-QAI%20AppBuilder%20v3.0.0-2ea44f?style=for-the-badge" alt="Download QAI AppBuilder"></a>
+  <a href="https://github.com/qualcomm/qai-appbuilder/releases/tag/v3.2.0"><img src="https://img.shields.io/badge/Download-QAI%20AppBuilder%20v3.2.0-2ea44f?style=for-the-badge" alt="Download QAI AppBuilder"></a>
   &nbsp;&nbsp;
   <a href="https://github.com/qualcomm/qai-appbuilder/tree/main/tools/qaiappbuilder"><img src="https://img.shields.io/badge/Browse%20Source-tools/qaiappbuilder-24292e?style=for-the-badge&logo=github" alt="Browse QAI AppBuilder source code"></a>
 </div>
