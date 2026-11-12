@@ -570,13 +570,21 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                 first_query_ok = false;
             }
         };
-        if (!first_query_ok && mimicry_soft_stop && !mimicry_soft_retry_used && !connection_broken
+        if (mimicry_soft_stop && !mimicry_soft_retry_used && !connection_broken
             && instance_config_ && !retry_request_data_.is_null()
             && retry_request_data_.contains("messages") && retry_request_data_["messages"].is_array()
             && RepeatGateLogic::TryConsumeExtraRetry(extra_retry_used))
         {
             mimicry_soft_retry_used = true;
             run_soft_landing_retry(MimicryRecovery::BuildCorrectionMessage(), "mimicry");
+        }
+        else if (mimicry_soft_stop && !mimicry_soft_retry_used)
+        {
+            My_Log{My_Log::Level::kWarning}
+                << "[SendResponse] Mimicry soft-landing retry skipped: connection_broken=" << connection_broken
+                << " instance_config=" << (instance_config_ != nullptr)
+                << " retry_data_null=" << retry_request_data_.is_null()
+                << " extra_retry_used=" << extra_retry_used << std::endl;
         }
         if (first_query_ok && handle->was_stopped_by_repeat_guard() && !connection_broken
             && instance_config_ && !retry_request_data_.is_null()
