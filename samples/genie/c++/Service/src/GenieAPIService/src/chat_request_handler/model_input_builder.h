@@ -490,18 +490,7 @@ private:
         }
 
         auto compute_tool_call_signature = [](const json& element) {
-            if (!element.contains("tool_calls") || !element["tool_calls"].is_array()
-                || element["tool_calls"].empty() || !element["tool_calls"][0].contains("function"))
-                return std::string();
-            const auto& fn = element["tool_calls"][0]["function"];
-            std::string args = "{}";
-            try {
-                if (fn.contains("arguments") && fn["arguments"].is_string())
-                    args = json::parse(fn["arguments"].get<std::string>()).dump();
-                else if (fn.contains("arguments") && fn["arguments"].is_object())
-                    args = fn["arguments"].dump();
-            } catch (...) {}
-            return fn.value("name", "") + "|" + args;
+            return TaskMemoBuilder::AssistantToolCallSignature(element);
         };
         const json& raw_messages = request_data_.is_object() && request_data_.contains("messages")
                 && request_data_["messages"].is_array() ? request_data_["messages"] : msg;
@@ -686,11 +675,12 @@ private:
         {
             bool failure_trigger = false;
             bool forced_unblock_trigger = false;
+            bool loop_trigger = false;
             if (instance_config_->getenableThinking())
             {
                 systemDefaultPrompt += "/think";
             }
-            else if (ShouldThinkThisTurn(&failure_trigger, &forced_unblock_trigger))
+            else if (ShouldThinkThisTurn(&failure_trigger, &forced_unblock_trigger, &loop_trigger))
             {
                 const auto &at_cfg = instance_config_->i_model_config_.GetAdaptiveThinkingConfig();
                 systemDefaultPrompt += "/no_think";
@@ -698,7 +688,7 @@ private:
                 if (failure_trigger && at_cfg.goal_reminder_chars > 0)
                     think_goal_reminder = BuildGoalReminder(at_cfg.goal_reminder_chars);
                 model_input_.think_time_budget_s_ = at_cfg.time_budget_s;
-                model_input_.think_min_tokens_ = at_cfg.min_tokens;
+                model_input_.think_min_tokens_ = loop_trigger ? std::max(at_cfg.min_tokens, at_cfg.loop_min_tokens) : at_cfg.min_tokens;
                 model_input_.think_max_tokens_ = at_cfg.max_tokens;
                 model_input_.think_ctx_reserve_ = at_cfg.ctx_reserve_tokens;
                 model_input_.think_force_min_floor_ = forced_unblock_trigger;
@@ -1967,7 +1957,8 @@ private:
         return keys;
     }
 
-    bool ShouldThinkThisTurn(bool *failure_trigger = nullptr, bool *forced_unblock_trigger = nullptr) const
+    bool ShouldThinkThisTurn(bool *failure_trigger = nullptr, bool *forced_unblock_trigger = nullptr,
+                             bool *loop_trigger = nullptr) const
     {
         const auto &at_cfg = instance_config_->i_model_config_.GetAdaptiveThinkingConfig();
         if (!at_cfg.enabled || at_cfg.time_budget_s <= 0)
@@ -2131,6 +2122,8 @@ private:
                 *failure_trigger = candidate.failure;
             if (forced_unblock_trigger)
                 *forced_unblock_trigger = forced_unblock || reserve_unblock;
+            if (loop_trigger)
+                *loop_trigger = !candidate.failure;
             My_Log{} << "[AdaptiveThinking] enabling /think for this turn: " << candidate.reason
                      << " (sig_count=" << sig_count << ", think_turns=" << st.think_turns
                      << "/" << st.tool_turns << ")" << std::endl;

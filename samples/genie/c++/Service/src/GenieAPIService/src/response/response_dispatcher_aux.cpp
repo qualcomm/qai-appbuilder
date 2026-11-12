@@ -25,6 +25,8 @@ namespace
         uint64_t samples{0};
         double pp_rate_sum{0.0};
         double tg_rate_sum{0.0};
+        double prefill_tokens{0.0};
+        double prefill_seconds{0.0};
     };
 
     struct ProfileTotals
@@ -79,6 +81,9 @@ void ResponseDispatcher::PrintProfile()
         uint64_t samples;
         double pp_avg;
         double tg_avg;
+        const bool weighted = json_str.contains("num_prefill_tokens") && json_str.contains("prefill_time");
+        const double prefill_tokens = weighted ? json_str.at("num_prefill_tokens").get<double>() : 0.0;
+        const double prefill_seconds = weighted ? std::stod(json_str.at("prefill_time").get<std::string>()) : 0.0;
         {
             auto &totals = GetProfileTotals();
             std::lock_guard<std::mutex> lk(totals.mtx);
@@ -86,13 +91,23 @@ void ResponseDispatcher::PrintProfile()
             samples = ++slot_totals.samples;
             slot_totals.pp_rate_sum += pp_rate;
             slot_totals.tg_rate_sum += tg_rate;
-            pp_avg = slot_totals.pp_rate_sum / static_cast<double>(samples);
+            if (weighted)
+            {
+                slot_totals.prefill_tokens += prefill_tokens;
+                slot_totals.prefill_seconds += prefill_seconds;
+            }
+            pp_avg = slot_totals.prefill_seconds > 0.0
+                ? slot_totals.prefill_tokens / slot_totals.prefill_seconds
+                : slot_totals.pp_rate_sum / static_cast<double>(samples);
             tg_avg = slot_totals.tg_rate_sum / static_cast<double>(samples);
         }
 
+        const std::string prompt_tokens_text = weighted
+            ? LogTable::JsonText(json_str.at("num_prompt_tokens")) + " (new " + std::to_string(static_cast<long long>(prefill_tokens)) + ")"
+            : LogTable::JsonText(json_str.at("num_prompt_tokens"));
         const std::vector<std::string> prompt_row{
             "Prompt (TTFT)",
-            LogTable::JsonText(json_str.at("num_prompt_tokens")),
+            prompt_tokens_text,
             std::to_string(model_input_.text_.length()),
             json_str.at("time_to_first_token").get<std::string>(),
             json_str.at("prompt_processing_rate").get<std::string>(),

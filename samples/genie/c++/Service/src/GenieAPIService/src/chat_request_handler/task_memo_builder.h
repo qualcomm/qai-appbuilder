@@ -58,6 +58,7 @@ public:
     static bool IsReasoningNoteMimicry(const std::string& content);
     static std::string ExtractToolCallSummary(const std::string& content);
     static std::string ToolCallOrdinalKey(const std::string& call_signature, size_t ordinal);
+    static std::string AssistantToolCallSignature(const json& element);
     static void PinThinkConclusion(const std::string& session_key, const std::string& call_signature,
                                    const std::string& conclusion);
     static std::string LookupPinnedConclusion(const std::string& session_key, const std::string& call_signature);

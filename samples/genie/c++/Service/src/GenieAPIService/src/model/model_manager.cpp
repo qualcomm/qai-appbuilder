@@ -1484,6 +1484,7 @@ bool ModelManager::InitializeConfig()
                     at_cfg.enabled = at.value("enabled", at_cfg.enabled);
                     at_cfg.time_budget_s = at.value("time_budget_s", at_cfg.time_budget_s);
                     at_cfg.min_tokens = at.value("min_tokens", at_cfg.min_tokens);
+                    at_cfg.loop_min_tokens = at.value("loop_min_tokens", at_cfg.loop_min_tokens);
                     at_cfg.max_per_signature = at.value("max_per_signature", at_cfg.max_per_signature);
                     at_cfg.max_think_turn_share = at.value("max_think_turn_share", at_cfg.max_think_turn_share);
                     at_cfg.error_repeat_window = at.value("error_repeat_window", at_cfg.error_repeat_window);

@@ -236,6 +236,7 @@ struct AdaptiveThinkingConfig {
     bool enabled = true;
     int time_budget_s = 15;
     int min_tokens = 320;
+    int loop_min_tokens = 640;
     int max_per_signature = 2;
     double max_think_turn_share = 0.4;
     int error_repeat_window = 4;

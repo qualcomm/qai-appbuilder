@@ -459,13 +459,6 @@ public:
             n_consumed = n_reuse;
             prefix_cache_valid_ = true;
         }
-        int ckpt_target = FindCheckpointPos(effective_prompt_len, n_reuse);
-        std::vector<int> ckpt_points = prefix_cache_on
-                ? FindHeadCheckpointPos(effective_prompt_len, n_reuse, ckpt_target) : std::vector<int>{};
-        if (ckpt_target > 0)
-        {
-            ckpt_points.push_back(ckpt_target);
-        }
         int ckpt_end = prefix_cache_on ? FindCheckpointPos(effective_prompt_len, n_reuse, 1) : -1;
         if (prefix_cache_on) {
             const auto im_end_tokens = common_tokenize(ctx, "<|im_end|>", false, true);
@@ -496,19 +489,21 @@ public:
                     ckpt_end = tail_start;
             }
         }
-        if (ckpt_end > ckpt_target)
-        {
-            ckpt_points.push_back(ckpt_end);
-        }
+        std::vector<int> ckpt_points = prefix_cache_on
+                ? FindHeadCheckpointPos(effective_prompt_len, n_reuse, ckpt_end) : std::vector<int>{};
         std::string head_str;
-        for (size_t i = 0; i + 1 < ckpt_points.size(); ++i)
+        for (size_t i = 0; i < ckpt_points.size(); ++i)
         {
             head_str += (i ? "," : "") + std::to_string(ckpt_points[i]);
+        }
+        if (ckpt_end > n_reuse)
+        {
+            ckpt_points.push_back(ckpt_end);
         }
         My_Log{} << "[LLAMACpp] " << query_type
                  << " Prefix cache: enabled=" << prefix_cache_on
                  << " | reused_tokens=" << n_reuse
-                 << " | checkpoint_at=" << ckpt_target
+                 << " | checkpoint_at=" << ckpt_end
                  << " | head_checkpoints=" << head_str
                  << " | prompt_tokens=" << embd_inp.size() << "\n";
 
@@ -672,7 +667,6 @@ public:
                     llama_memory_seq_rm(mem, 0, n_keep, n_keep + n_discard);
                     llama_memory_seq_add(mem, 0, n_keep + n_discard, n_past, -n_discard);
                     n_past -= n_discard;
-                    ckpt_target = -1;
                     ckpt_points.clear();
                     prefix_cache_valid_ = false;
                     My_Log{My_Log::Level::kWarning}
@@ -1092,6 +1086,7 @@ public:
             aux_calls_accum_ = 0;
             metrics["ttft_ms"] = ttft_ms;
             metrics["prefill_ms"] = prefill_ms;
+            metrics["prefill_tokens"] = total_prefill_tokens;
             metrics["prefill_tok_s"] = prefill_tok_s;
             metrics["decode_ms"] = gen_elapsed_ms;
             metrics["decode_tok_s"] = gen_rate;
@@ -1267,7 +1262,7 @@ public:
                llama_state_seq_set_data_ext(c, buf.data(), buf.size(), 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) > 0;
     }
 
-    int FindCheckpointPos(int effective_prompt_len, int n_reuse, int nth = 2) const
+    int FindCheckpointPos(int effective_prompt_len, int n_reuse, int nth) const
     {
         const llama_token bos = llama_vocab_bos(vocab);
         llama_token msg_start = LLAMA_TOKEN_NULL;
@@ -2106,6 +2101,8 @@ json LLAMACppBuilder::HandleProfile()
         result["prompt_processing_rate"] = FormatFixed2(m.value("prefill_tok_s", 0.0));
         result["token_generation_rate"] = FormatFixed2(m.value("decode_tok_s", 0.0));
         result["num_prompt_tokens"] = m.value("prompt_tokens", 0);
+        result["num_prefill_tokens"] = m.value("prefill_tokens", 0);
+        result["prefill_time"] = FormatFixed2(m.value("prefill_ms", (int64_t) 0) / 1000.0);
         result["num_generated_tokens"] = m.value("gen_tokens", 0);
         return result;
     }

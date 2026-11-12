@@ -160,6 +160,7 @@ namespace {
     constexpr size_t kMaxHardRuleChars = 220;
     constexpr size_t kMaxArtifacts = 8;
     constexpr size_t kMaxLastSuccessChars = 900;
+    constexpr size_t kMaxIntentTrail = 3;
 
     constexpr size_t kMaxTriedQueryResources = 10;
     constexpr size_t kMaxTriedQueriesPerResource = 6;
@@ -925,13 +926,60 @@ std::string TaskMemoBuilder::StripThinkBlock(const std::string& content)
 
 namespace {
     const char kPinPrefix[] = "[reasoning note: ";
+    const char kCutOffMarker[] = " (reasoning was cut off by the thinking budget)";
     std::mutex g_pin_mu;
+
+    bool IsDataLine(const std::string& line)
+    {
+        size_t visible = 0;
+        size_t letters = 0;
+        for (unsigned char c : line) {
+            if (std::isspace(c))
+                continue;
+            ++visible;
+            if (std::isalpha(c) || c >= 0x80)
+                ++letters;
+        }
+        return visible > 0 && letters * 10 < visible * 4;
+    }
+
+    std::string DropTrailingDataLines(std::string body)
+    {
+        for (;;) {
+            while (!body.empty() && std::isspace(static_cast<unsigned char>(body.back())))
+                body.pop_back();
+            const size_t nl = body.find_last_of('\n');
+            const std::string last = nl == std::string::npos ? body : body.substr(nl + 1);
+            if (!IsDataLine(last))
+                return body;
+            if (nl == std::string::npos)
+                return "";
+            body.erase(nl);
+        }
+    }
+
     std::unordered_map<std::string, std::pair<std::string, std::chrono::steady_clock::time_point>> g_pins;
 }
 
 std::string TaskMemoBuilder::ToolCallOrdinalKey(const std::string& call_signature, size_t ordinal)
 {
     return call_signature + "#" + std::to_string(ordinal);
+}
+
+std::string TaskMemoBuilder::AssistantToolCallSignature(const json& element)
+{
+    if (!element.contains("tool_calls") || !element["tool_calls"].is_array()
+        || element["tool_calls"].empty() || !element["tool_calls"][0].contains("function"))
+        return std::string();
+    const auto& fn = element["tool_calls"][0]["function"];
+    std::string args = "{}";
+    try {
+        if (fn.contains("arguments") && fn["arguments"].is_string())
+            args = json::parse(fn["arguments"].get<std::string>()).dump();
+        else if (fn.contains("arguments") && fn["arguments"].is_object())
+            args = fn["arguments"].dump();
+    } catch (...) {}
+    return fn.value("name", "") + "|" + args;
 }
 
 void TaskMemoBuilder::PinThinkConclusion(const std::string& session_key, const std::string& call_signature,
@@ -967,6 +1015,7 @@ bool TaskMemoBuilder::IsReasoningNoteMimicry(const std::string& content)
 std::string TaskMemoBuilder::ExtractThinkConclusion(const std::string& content)
 {
     std::string body;
+    bool cut_off = false;
     if (IsReasoningNoteMimicry(content)) {
         const size_t end = content.find("]\n");
         if (end == std::string::npos)
@@ -980,11 +1029,16 @@ std::string TaskMemoBuilder::ExtractThinkConclusion(const std::string& content)
         const size_t body_begin = open == std::string::npos ? 0 : open + 7;
         body = content.substr(body_begin, close == std::string::npos ? std::string::npos : close - body_begin);
         static const std::string kForced = "Considering the time constraints";
-        if (body.find(kForced) != std::string::npos)
-            return "";
+        const size_t forced = body.find(kForced);
+        if (forced != std::string::npos) {
+            body.erase(forced);
+            cut_off = true;
+        }
     }
     while (!body.empty() && std::isspace(static_cast<unsigned char>(body.back())))
         body.pop_back();
+    if (cut_off)
+        body = DropTrailingDataLines(body);
     if (body.empty())
         return "";
     size_t start = body.size() > 240 ? body.size() - 240 : 0;
@@ -1012,7 +1066,7 @@ std::string TaskMemoBuilder::ExtractThinkConclusion(const std::string& content)
     }
     if (words < 3 && out.size() < 24)
         return "";
-    return out;
+    return cut_off ? out + kCutOffMarker : out;
 }
 
 std::string TaskMemoBuilder::ExtractToolCallSummary(const std::string& content)
@@ -1135,9 +1189,11 @@ json TaskMemoBuilder::BuildRuleLayer(
             if (todo_pos != std::string::npos)
                 AppendCapped(entry["open_questions"], "待办: " + ReplaceInvalidUtf8(safe_utf8_truncate(m.content.substr(todo_pos), 160, "")), kMaxItemsPerField);
         } else if (m.role == "assistant") {
-            const std::string conclusion = TaskMemoBuilder::ExtractThinkConclusion(m.content);
-            if (!conclusion.empty())
-                AppendCapped(entry["facts_constraints"], "思考结论: " + ReplaceInvalidUtf8(conclusion), kMaxItemsPerField);
+            if (IsReasoningNoteMimicry(m.content)) {
+                const std::string conclusion = TaskMemoBuilder::ExtractThinkConclusion(m.content);
+                if (!conclusion.empty())
+                    AppendCapped(entry["intent_trail"], ReplaceInvalidUtf8(conclusion), kMaxIntentTrail);
+            }
             last_assistant_content = m.content;
         } else if (m.role == "tool") {
             const bool failed = tool_failed;
@@ -1812,6 +1868,7 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         ? task_memo_scan::RenderTriedQueriesSummary(entry["tried_queries"], tried_queries_count_safe) : std::string();
 
     const std::string completed_block = render_list("Completed", "completed");
+    const std::string intent_block = render_list("Recent intent (your own reasoning before earlier calls, most recent last)", "intent_trail");
     const std::string blocks[] = {
         render_list("Rules from documents you read (still in force)", "hard_rules"),
         pending_refs_block,
@@ -1819,6 +1876,7 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         artifacts_block,
         last_success_block,
         completed_block,
+        intent_block,
         exec_cache_block,
         render_list("Next actions", "next_actions"),
         render_list("Facts / constraints", "facts_constraints"),
@@ -1829,7 +1887,7 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         page_directory_block,
     };
     static const char* kBlockNames[] = {
-        "hard_rules", "pending_refs", "recovery_ledger", "artifacts", "last_success", "completed", "exec_cache", "next_actions",
+        "hard_rules", "pending_refs", "recovery_ledger", "artifacts", "last_success", "completed", "intent_trail", "exec_cache", "next_actions",
         "facts_constraints", "open_questions", "read_files", "tried_queries", "tool_state", "page_directory",
     };
     const size_t kBlockCount = sizeof(blocks) / sizeof(blocks[0]);
@@ -1856,7 +1914,7 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
     }
 
     const size_t progress_reserve = (max_chars > 0)
-        ? std::min(last_success_block.size() + completed_block.size(), max_chars * 3 / 20) : 0;
+        ? std::min(last_success_block.size() + completed_block.size() + intent_block.size(), max_chars * 3 / 20) : 0;
 
     auto fit_tail_rows = [](const std::string& block, size_t budget) -> std::string {
         std::vector<std::string> rows;
@@ -1888,6 +1946,8 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
             return fit_tail_rows(last_success_block, available);
         if (std::strcmp(block_name, "completed") == 0)
             return render_list_fit("Completed", "completed", available);
+        if (std::strcmp(block_name, "intent_trail") == 0)
+            return render_list_fit("Recent intent (your own reasoning before earlier calls, most recent last)", "intent_trail", available);
         if (std::strcmp(block_name, "tried_queries") == 0
                 && !tried_queries_summary.empty() && tried_queries_summary.size() <= available)
             return tried_queries_summary;

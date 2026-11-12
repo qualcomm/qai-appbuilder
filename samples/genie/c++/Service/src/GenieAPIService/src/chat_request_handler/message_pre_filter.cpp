@@ -843,6 +843,17 @@ void MessagePreFilter::CaptureDroppedMessages(const json& original, const json& 
         return content;
     };
 
+    const std::string session_key = TaskMemoBuilder::ComputeFirstMsgKey(original);
+    std::unordered_map<std::string, size_t> signature_seen;
+    std::vector<std::string> pins(original.size());
+    for (size_t i = 0; i < original.size(); ++i) {
+        if (get_json_value(original[i], "role", BLANK_STRING) != "assistant") continue;
+        const std::string signature = TaskMemoBuilder::AssistantToolCallSignature(original[i]);
+        if (signature.empty()) continue;
+        pins[i] = TaskMemoBuilder::LookupPinnedConclusion(
+            session_key, TaskMemoBuilder::ToolCallOrdinalKey(signature, ++signature_seen[signature]));
+    }
+
     std::unordered_set<size_t> kept_raw;
     for (const auto& m : kept) {
         if (m.is_object() && m.contains(kRawIdxKey)) kept_raw.insert(m[kRawIdxKey].get<size_t>());
@@ -851,7 +862,7 @@ void MessagePreFilter::CaptureDroppedMessages(const json& original, const json& 
         for (size_t i = 0; i < original.size(); ++i) {
             const std::string role = get_json_value(original[i], "role", BLANK_STRING);
             if (role == "system" || role == "developer" || kept_raw.count(i)) continue;
-            prefilter_dropped_messages_.push_back({role, message_content_for_memo(original[i])});
+            prefilter_dropped_messages_.push_back({role, pins[i] + message_content_for_memo(original[i])});
         }
         return;
     }
@@ -861,7 +872,8 @@ void MessagePreFilter::CaptureDroppedMessages(const json& original, const json& 
         std::string content = message_content_for_memo(m);
         kept_signatures.insert(role + "\x01" + content);
     }
-    for (const auto& m : original) {
+    for (size_t i = 0; i < original.size(); ++i) {
+        const auto& m = original[i];
         std::string role = get_json_value(m, "role", BLANK_STRING);
         if (role == "system" || role == "developer")
             continue;
@@ -871,7 +883,7 @@ void MessagePreFilter::CaptureDroppedMessages(const json& original, const json& 
             kept_signatures.erase(it);
             continue;
         }
-        prefilter_dropped_messages_.push_back({role, content});
+        prefilter_dropped_messages_.push_back({role, pins[i] + content});
     }
 }
 
