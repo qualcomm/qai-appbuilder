@@ -1686,6 +1686,7 @@ bool ModelManager::InitializeConfig()
                         fid_cfg.json_head_items = fid.value("json_head_items", (size_t) 3);
                         fid_cfg.json_tail_items = fid.value("json_tail_items", (size_t) 1);
                         fid_cfg.max_token_probe_per_message = fid.value("max_token_probe_per_message", (size_t) 8);
+                        fid_cfg.read_footer_directory = fid.value("read_footer_directory", true);
                         fid_cfg.cjk_bytes_per_token = fid.value("cjk_bytes_per_token", 3.0);
                         fid_cfg.ascii_bytes_per_token = fid.value("ascii_bytes_per_token", 4.0);
                         My_Log{} << "[Config] fidelity loaded: "
@@ -1697,6 +1698,7 @@ bool ModelManager::InitializeConfig()
                                  << ", json_head_items=" << fid_cfg.json_head_items
                                  << ", json_tail_items=" << fid_cfg.json_tail_items
                                  << ", max_token_probe_per_message=" << fid_cfg.max_token_probe_per_message
+                                 << ", read_footer_directory=" << fid_cfg.read_footer_directory
                                  << ", cjk_bytes_per_token=" << fid_cfg.cjk_bytes_per_token
                                  << ", ascii_bytes_per_token=" << fid_cfg.ascii_bytes_per_token
                                  << std::endl;
