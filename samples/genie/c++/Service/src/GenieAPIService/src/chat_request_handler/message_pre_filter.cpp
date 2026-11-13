@@ -408,12 +408,6 @@ void StripRawIdx(json& messages)
     }
 }
 
-const char kRepeatStubPrefix[] = "[Note: this ";
-const char kRepeatStubSuffix[] =
-    " call returned the same result as the earlier identical call (only numbers or temp paths may differ), which is still shown above; "
-    "calling it again will not return anything new. Use that result or change approach.";
-const char kRepeatStubTailHeader[] = "\nIts last lines:\n";
-const char kRepeatStubFullHeader[] = "\nIts full result:\n";
 constexpr size_t kRepeatStubTailLines = 3;
 constexpr size_t kRepeatStubTailMaxBytes = 300;
 constexpr size_t kRepeatStubFullInlineMaxBytes = 500;
@@ -568,13 +562,13 @@ void ApplyRepeatResultStubs(json& msg, const std::string& key, const void* model
         }
 
         if (stub) {
-            std::string note = std::string(kRepeatStubPrefix) + nm + kRepeatStubSuffix;
+            std::string note = std::string(task_memo_scan::kRepeatStubPrefix) + nm + task_memo_scan::kRepeatStubSuffix;
             const size_t trimmed_end = content.find_last_not_of(" \t\r\n");
             if (trimmed_end != std::string::npos && trimmed_end + 1 <= kRepeatStubFullInlineMaxBytes) {
-                note += kRepeatStubFullHeader + content.substr(0, trimmed_end + 1);
+                note += task_memo_scan::kRepeatStubFullHeader + content.substr(0, trimmed_end + 1);
             } else {
                 const std::string tail = LastLines(content, kRepeatStubTailLines, kRepeatStubTailMaxBytes);
-                if (!tail.empty()) note += kRepeatStubTailHeader + tail;
+                if (!tail.empty()) note += task_memo_scan::kRepeatStubTailHeader + tail;
             }
             m["content"] = note + "]";
         } else {

@@ -1164,6 +1164,8 @@ json TaskMemoBuilder::BuildRuleLayer(
     };
     for (size_t i = 0; i < dropped_messages.size(); ++i) {
         const auto& m = dropped_messages[i];
+        if (m.role == "tool" && task_memo_scan::IsRepeatStub(m.content))
+            continue;
         const bool binary = m.role == "tool" &&
             (task_memo_scan::IsBinaryContent(m.content) || m.content.rfind("[binary content, ", 0) == 0);
         const bool tool_failed = m.role == "tool" && LooksLikeFailure(m.content);
@@ -1711,7 +1713,9 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         return oss.str();
     };
 
-    auto render_list_fit = [&](const char* label, const char* key, size_t budget) -> std::string {
+    auto render_list_fit = [&](const char* label, const char* key, size_t budget, size_t* kept_out = nullptr) -> std::string {
+        if (kept_out)
+            *kept_out = 0;
         if (!entry.contains(key) || !entry[key].is_array() || entry[key].empty())
             return "";
         const std::string head = std::string(label) + " (some rows omitted to fit):\n";
@@ -1735,8 +1739,11 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         }
         std::string result;
         for (size_t i = 0; i < n; ++i)
-            if (keep[i])
+            if (keep[i]) {
                 result += "- " + entry[key][i].get<std::string>() + "\n";
+                if (kept_out)
+                    ++*kept_out;
+            }
         return result.empty() ? result : head + result;
     };
 
@@ -1941,11 +1948,14 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         return result;
     };
 
+    size_t completed_kept_rows = 0;
     auto degrade_block = [&](const char* block_name, size_t available) -> std::string {
         if (std::strcmp(block_name, "last_success") == 0)
             return fit_tail_rows(last_success_block, available);
+        if (std::strcmp(block_name, "artifacts") == 0)
+            return fit_tail_rows(artifacts_block, available);
         if (std::strcmp(block_name, "completed") == 0)
-            return render_list_fit("Completed", "completed", available);
+            return render_list_fit("Completed", "completed", available, &completed_kept_rows);
         if (std::strcmp(block_name, "intent_trail") == 0)
             return render_list_fit("Recent intent (your own reasoning before earlier calls, most recent last)", "intent_trail", available);
         if (std::strcmp(block_name, "tried_queries") == 0
@@ -1974,7 +1984,8 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
                                          || std::strcmp(block_name, "tool_state") == 0);
         const bool is_progress_donor = (std::strcmp(block_name, "hard_rules") == 0
                                         || std::strcmp(block_name, "pending_refs") == 0
-                                        || std::strcmp(block_name, "recovery_ledger") == 0);
+                                        || std::strcmp(block_name, "recovery_ledger") == 0
+                                        || std::strcmp(block_name, "artifacts") == 0);
         const size_t donor_budget = std::max(
             (budget_for_high_priority > progress_reserve) ? budget_for_high_priority - progress_reserve : size_t(0),
             budget_for_high_priority / 2);
@@ -2022,6 +2033,17 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
     for (size_t slot = 0; slot < kBlockCount; ++slot) {
         out += slot_text[slot];
         layout += layout_entries[slot];
+        if (max_chars > 0 && std::strcmp(kBlockNames[slot], "completed") == 0
+                && slot_text[slot].size() < blocks[slot].size()) {
+            const size_t total_rows = (entry.contains("completed") && entry["completed"].is_array())
+                ? entry["completed"].size() : 0;
+            My_Log{My_Log::Level::kInfo}
+                << "[TaskMemo] Completed rows trimmed to fit: kept_rows="
+                << (slot_text[slot].empty() ? size_t(0) : completed_kept_rows)
+                << ", total_rows=" << total_rows
+                << ", shown_chars=" << slot_text[slot].size()
+                << ", full_chars=" << blocks[slot].size() << std::endl;
+        }
     }
     if (max_chars > 0)
         My_Log{My_Log::Level::kInfo}

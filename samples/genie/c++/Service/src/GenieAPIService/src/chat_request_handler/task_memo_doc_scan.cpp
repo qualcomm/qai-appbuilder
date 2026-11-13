@@ -1447,6 +1447,15 @@ std::string ExtractCodeExcerpt(const std::string &text, size_t cap)
     return ClipHead(out, cap);
 }
 
+bool IsRepeatStub(const std::string &content)
+{
+    const std::string prefix = kRepeatStubPrefix;
+    if (content.size() <= prefix.size() || content.back() != ']' || content.compare(0, prefix.size(), prefix) != 0)
+        return false;
+    const size_t suffix_at = content.find(kRepeatStubSuffix, prefix.size());
+    return suffix_at != std::string::npos && suffix_at - prefix.size() <= 128;
+}
+
 void AppendCompletedRow(json &field, const std::string &row, size_t cap, const std::string &supersede_key)
 {
     if (!field.is_array())

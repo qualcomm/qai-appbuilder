@@ -131,6 +131,8 @@ public:
         request_data_ = request_data;
     }
 
+    void ForceThinkOnNextBuild() { force_think_ = true; }
+
     ModelInput &Build(json &data, bool &is_tool,
                       std::function<bool()> is_alive_fn = nullptr)
     {
@@ -675,12 +677,12 @@ private:
         {
             bool failure_trigger = false;
             bool forced_unblock_trigger = false;
-            bool loop_trigger = false;
+            bool loop_trigger = force_think_;
             if (instance_config_->getenableThinking())
             {
                 systemDefaultPrompt += "/think";
             }
-            else if (ShouldThinkThisTurn(&failure_trigger, &forced_unblock_trigger, &loop_trigger))
+            else if (force_think_ || ShouldThinkThisTurn(&failure_trigger, &forced_unblock_trigger, &loop_trigger))
             {
                 const auto &at_cfg = instance_config_->i_model_config_.GetAdaptiveThinkingConfig();
                 systemDefaultPrompt += "/no_think";
@@ -2583,6 +2585,8 @@ private:
     std::unordered_map<std::string, std::string> tool_call_id_to_name_;
 
     json request_data_;
+
+    bool force_think_ = false;
 
     PromptLedger last_ledger_;
 };

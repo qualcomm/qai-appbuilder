@@ -968,6 +968,8 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                             auto *mutable_instance_config = const_cast<ModelInstanceConfig *>(instance_config_);
                             ChatHistory scratch_chat_history(*mutable_instance_config);
                             ModelInputBuilder scratch_builder(scratch_chat_history, mutable_instance_config, scratch_data);
+                            if (hard_block_pending)
+                                scratch_builder.ForceThinkOnNextBuild();
 
                             bool scratch_is_tool = false;
                             std::function<bool()> scratch_is_alive_fn = nullptr;
@@ -976,6 +978,7 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                             ModelInput scratch_model_input =
                                 scratch_builder.Build(scratch_data, scratch_is_tool, scratch_is_alive_fn);
                             scratch_model_input.skip_checkpoint_save_ = true;
+                            const bool retry_think_open = scratch_model_input.think_time_budget_s_ > 0;
 
                             capture_harmony_history_snapshot();
 
@@ -1003,6 +1006,7 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                                              "replacing repeated call with model's reconsidered response "
                                              "(invisible to client). tool_call=" << (isToolResponse ? 1 : 0)
                                          << ", same_call=" << (retried_signature == store_signature ? 1 : 0)
+                                         << ", think_open=" << (retry_think_open ? 1 : 0)
                                          << std::endl;
                             }
                             else

@@ -40,6 +40,13 @@ constexpr size_t kMaxDigestsPerFile = 8;
 constexpr size_t kDigestGistChars = 48;
 constexpr size_t kDigestsSuffixChars = 260;
 
+inline constexpr char kRepeatStubPrefix[] = "[Note: this ";
+inline constexpr char kRepeatStubSuffix[] =
+    " call returned the same result as the earlier identical call (only numbers or temp paths may differ), which is still shown above; "
+    "calling it again will not return anything new. Use that result or change approach.";
+inline constexpr char kRepeatStubTailHeader[] = "\nIts last lines:\n";
+inline constexpr char kRepeatStubFullHeader[] = "\nIts full result:\n";
+
 struct Heading
 {
     size_t line = 0;
@@ -83,6 +90,8 @@ bool IsRuntimeLogLine(const std::string &line);
 bool IsBinaryContent(const std::string &content);
 
 std::string BinaryResultStub(size_t size);
+
+bool IsRepeatStub(const std::string &content);
 
 bool IsToolNoiseLine(const std::string &trimmed);
 
