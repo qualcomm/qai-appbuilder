@@ -1158,6 +1158,7 @@ json TaskMemoBuilder::BuildRuleLayer(
     size_t tool_seq = entry["tool_state"].size();
     bool episode_active = entry.value("_episode_active", false);
     size_t episode_attempt_count = entry.value("_episode_attempt_count", (size_t) 0);
+    std::string episode_tool = entry.value("_episode_tool", std::string(""));
 
     const auto &redundant_cfg = instance_config_.i_model_config_.GetToolCallRepairConfig().redundant_call_guard;
     std::string last_assistant_content;
@@ -1167,6 +1168,9 @@ json TaskMemoBuilder::BuildRuleLayer(
         std::ostringstream row;
         if (resolved) {
             row << "已解决 (第 " << episode_attempt_count << " 次尝试): " << detail;
+            const auto& attempts = entry["_episode_attempts"];
+            if (attempts.is_array() && !attempts.empty() && attempts.back().is_string())
+                row << "；此前最后一次失败：" << safe_utf8_truncate(attempts.back().get<std::string>(), 360, "...");
         } else {
             row << "未解决：同类尝试 " << episode_attempt_count << " 次，全部失败";
             bool first = true;
@@ -1177,8 +1181,12 @@ json TaskMemoBuilder::BuildRuleLayer(
                 }
         }
         task_memo_scan::AppendRecoveryEpisode(entry["recovery_ledger"], row.str(), kMaxRecoveryEpisodes);
+        My_Log{My_Log::Level::kInfo} << "[TaskMemo] Recovery episode closed: resolved=" << (resolved ? 1 : 0)
+                                     << ", attempts=" << episode_attempt_count
+                                     << ", failed_tool=" << episode_tool << std::endl;
         episode_active = false;
         episode_attempt_count = 0;
+        episode_tool.clear();
         entry["_episode_attempts"] = json::array();
     };
     for (size_t i = 0; i < dropped_messages.size(); ++i) {
@@ -1232,6 +1240,7 @@ json TaskMemoBuilder::BuildRuleLayer(
                 CapObjectSize(entry["tool_state"], kMaxItemsPerField);
             }
             const std::string call = ExtractToolCallSummary(call_content);
+            const std::string tool_name = call.substr(0, call.find(' '));
             const WriteCall write_call = failed ? WriteCall{} : SummarizeWriteCall(call_content);
             const std::string compact_call = write_call.summary.empty() ? CompactExecCall(call_content) : std::string();
             const std::string call_text = ReplaceInvalidUtf8(
@@ -1239,15 +1248,17 @@ json TaskMemoBuilder::BuildRuleLayer(
                 : !compact_call.empty()     ? compact_call
                                             : safe_utf8_truncate(call, 200, "..."));
             if (failed) {
+                if (episode_active && episode_tool != tool_name)
+                    close_episode(false, "");
                 episode_active = true;
+                episode_tool = tool_name;
                 ++episode_attempt_count;
                 const std::string failure_line = FirstFailureLineImpl(m.content);
                 AppendCapped(entry["_episode_attempts"], call_text + " -> " +
                     (failure_line.empty() ? preview : failure_line), kMaxRecoveryAttempts);
-            } else if (episode_active) {
+            } else if (episode_active && tool_name == episode_tool) {
                 close_episode(true, call_text + " -> " + preview);
             }
-            const std::string tool_name = call.substr(0, call.find(' '));
             const bool reads_content = IsReadLikeToolName(tool_name) || tool_name.find("fetch") != std::string::npos;
             std::string action_source;
             if (!indexed_read && !reads_content && !call.empty()) {
@@ -1405,6 +1416,7 @@ json TaskMemoBuilder::BuildRuleLayer(
 
     entry["_episode_active"] = episode_active;
     entry["_episode_attempt_count"] = episode_attempt_count;
+    entry["_episode_tool"] = episode_tool;
 
     size_t folded_before = entry.value("_folded_count", (size_t)0);
     size_t folded = folded_before + dropped_messages.size();
@@ -1900,10 +1912,20 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
 
     const std::string completed_block = render_list("Completed", "completed");
     const std::string intent_block = render_list("Recent intent (your own reasoning before earlier calls, most recent last)", "intent_trail");
+    std::string recovery_block = render_list("Recovery episodes recorded from earlier context", "recovery_ledger");
+    if (entry.value("_episode_active", false) && entry.contains("_episode_attempts") &&
+            entry["_episode_attempts"].is_array() && !entry["_episode_attempts"].empty() &&
+            entry["_episode_attempts"].back().is_string()) {
+        if (recovery_block.empty())
+            recovery_block = "Recovery episodes recorded from earlier context:\n";
+        recovery_block += "- 未解决（进行中）：同类尝试 " + std::to_string(entry.value("_episode_attempt_count", (size_t) 0)) +
+            " 次失败，最近一次：" +
+            safe_utf8_truncate(entry["_episode_attempts"].back().get<std::string>(), 360, "...") + "\n";
+    }
     const std::string blocks[] = {
         render_list("Rules from documents you read (still in force)", "hard_rules"),
         pending_refs_block,
-        render_list("Recovery episodes recorded from earlier context", "recovery_ledger"),
+        recovery_block,
         artifacts_block,
         last_success_block,
         completed_block,
