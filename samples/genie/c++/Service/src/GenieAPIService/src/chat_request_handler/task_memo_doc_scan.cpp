@@ -921,6 +921,56 @@ void AddPageDigest(json &file_entry, size_t first, size_t last, const std::strin
     file_entry["digests"] = arr;
 }
 
+static std::string CollapseSpaces(const std::string &s)
+{
+    std::string out;
+    out.reserve(s.size());
+    bool pending_space = false;
+    for (char c : s)
+    {
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
+        {
+            pending_space = !out.empty();
+            continue;
+        }
+        if (pending_space)
+            out += ' ';
+        pending_space = false;
+        out += c;
+    }
+    return out;
+}
+
+static bool HasPromptMarker(const std::string &s)
+{
+    static const char *kMarkers[] = {"<tool_", "</tool_", "<think", "</think", "<|", "[reasoning note:", kRepeatStubPrefix};
+    for (const char *marker : kMarkers)
+        if (s.find(marker) != std::string::npos)
+            return true;
+    return false;
+}
+
+static std::string SmallWholeFileBody(const std::string &text, size_t first_line, size_t total, size_t page_lines)
+{
+    static const char kWholeFileMarker[] = "...[read complete: whole file";
+    std::string body = text;
+    bool whole = false;
+    const size_t marker = body.rfind(kWholeFileMarker);
+    if (first_line <= 1 && marker != std::string::npos && (marker == 0 || body[marker - 1] == '\n'))
+    {
+        body.resize(marker);
+        whole = true;
+    }
+    else
+        whole = first_line <= 1 && total > 0 && page_lines >= total;
+    if (!whole)
+        return "";
+    const std::string compact = CollapseSpaces(body);
+    if (compact.empty() || compact.size() > kSmallBodyMaxChars || HasPromptMarker(compact))
+        return "";
+    return compact;
+}
+
 void FoldPage(json &file_entry, const std::string &text, size_t first_line)
 {
     if (!file_entry.is_object())
@@ -970,6 +1020,12 @@ void FoldPage(json &file_entry, const std::string &text, size_t first_line)
         file_entry["near_cursor_snippet"] = snippet;
         file_entry["near_cursor_line"] = anchor_line;
     }
+    const std::string body =
+        SmallWholeFileBody(text, first_line, file_entry.value("total", static_cast<size_t>(0)), page_lines);
+    if (body.empty())
+        file_entry.erase("body");
+    else
+        file_entry["body"] = body;
 }
 
 bool IsMarkedRef(const json &value)
@@ -1050,6 +1106,38 @@ void ClearReadRef(json &pending, const std::string &read_path)
             gone.push_back(it.key());
     for (const std::string &k : gone)
         pending.erase(k);
+}
+
+void TrimSmallBodies(json &read_files, size_t keep)
+{
+    if (!read_files.is_object())
+        return;
+    std::vector<std::pair<size_t, std::string>> held;
+    for (auto it = read_files.begin(); it != read_files.end(); ++it)
+        if (it.value().is_object() && it.value().contains("body"))
+            held.emplace_back(it.value().value("_last_touch_seq", static_cast<size_t>(0)), it.key());
+    if (held.size() <= keep)
+        return;
+    std::sort(held.begin(), held.end());
+    for (size_t i = 0; i + keep < held.size(); ++i)
+        read_files[held[i].second].erase("body");
+}
+
+void DropBodyForPath(json &read_files, const std::string &path)
+{
+    if (!read_files.is_object() || path.empty())
+        return;
+    for (auto it = read_files.begin(); it != read_files.end(); ++it)
+        if (it.value().is_object() && PathMatches(it.key(), path))
+            it.value().erase("body");
+}
+
+std::string RenderBodySuffix(const json &file_entry)
+{
+    if (!file_entry.is_object() || !file_entry.contains("body") || !file_entry["body"].is_string())
+        return "";
+    const std::string body = file_entry["body"].get<std::string>();
+    return body.empty() ? std::string() : "; content: " + body;
 }
 
 std::string LastNameOf(const std::string &path)

@@ -824,10 +824,32 @@ namespace {
         const size_t fixed = header.size() + omitted_note(first).size() + tail[first];
         size_t remaining = cap > fixed ? cap - fixed : 0;
         std::vector<std::string> suffixes(n);
+        std::vector<bool> has_body(n, false);
+        std::vector<std::pair<size_t, size_t>> body_order;
+        for (size_t i = first; i < n; ++i)
+            if (values[i]->is_object() && values[i]->contains("body"))
+                body_order.emplace_back(values[i]->value("_last_touch_seq", static_cast<size_t>(0)), i);
+        std::sort(body_order.begin(), body_order.end(),
+                  [](const std::pair<size_t, size_t>& a, const std::pair<size_t, size_t>& b) { return a > b; });
+        size_t body_pool = remaining * 3 / 5;
+        size_t pending = n - first;
+        for (const auto& candidate : body_order) {
+            const std::string body = task_memo_scan::RenderBodySuffix(*values[candidate.second]);
+            if (body.empty() || body.size() > body_pool)
+                continue;
+            suffixes[candidate.second] = body;
+            has_body[candidate.second] = true;
+            body_pool -= body.size();
+            remaining -= body.size();
+            --pending;
+        }
         for (size_t i = n; i-- > first;) {
-            const size_t share = std::min(task_memo_scan::kReadFileSuffixChars, remaining / (i - first + 1));
+            if (has_body[i])
+                continue;
+            const size_t share = std::min(task_memo_scan::kReadFileSuffixChars, remaining / pending);
             suffixes[i] = task_memo_scan::RenderReadFileSuffix(*values[i], share);
             remaining -= suffixes[i].size();
+            --pending;
         }
         std::string out = header + omitted_note(first);
         for (size_t i = first; i < n; ++i)
@@ -1289,6 +1311,10 @@ json TaskMemoBuilder::BuildRuleLayer(
             if (!call.empty() && !reads_content) {
                 const std::string query_path = ExtractAnyToolPathArg(call_content);
                 if (!query_path.empty()) {
+                    const std::string lower_tool = task_memo_scan::Lower(tool_name);
+                    if (query_path.rfind("cmd:", 0) != 0 &&
+                        (lower_tool.find("write") != std::string::npos || lower_tool.find("edit") != std::string::npos))
+                        task_memo_scan::DropBodyForPath(entry["read_files"], query_path);
                     if (!entry.contains("tried_queries") || !entry["tried_queries"].is_object())
                         entry["tried_queries"] = json::object();
                     json& bucket = entry["tried_queries"][query_path];
@@ -1358,6 +1384,7 @@ json TaskMemoBuilder::BuildRuleLayer(
                                                              << kMaxPendingRefs << std::endl;
                         }
                         task_memo_scan::EvictReadFilesByValue(entry["read_files"], kMaxItemsPerField);
+                        task_memo_scan::TrimSmallBodies(entry["read_files"], task_memo_scan::kMaxSmallBodies);
                     }
                     if (!entry.contains("hard_rules") || !entry["hard_rules"].is_array())
                         entry["hard_rules"] = json::array();

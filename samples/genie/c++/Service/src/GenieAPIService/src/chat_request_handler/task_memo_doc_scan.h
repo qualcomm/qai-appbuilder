@@ -39,6 +39,8 @@ constexpr size_t kMaxReadRangesPerFile = 12;
 constexpr size_t kMaxDigestsPerFile = 8;
 constexpr size_t kDigestGistChars = 48;
 constexpr size_t kDigestsSuffixChars = 260;
+constexpr size_t kSmallBodyMaxChars = 1200;
+constexpr size_t kMaxSmallBodies = 3;
 
 inline constexpr char kRepeatStubPrefix[] = "[Note: this ";
 inline constexpr char kRepeatStubSuffix[] =
@@ -176,6 +178,12 @@ std::string MakePageGist(const std::string &text, const std::vector<Heading> &fr
 void AddPageDigest(json &file_entry, size_t first, size_t last, const std::string &gist);
 
 void FoldPage(json &file_entry, const std::string &text, size_t first_line);
+
+void TrimSmallBodies(json &read_files, size_t keep);
+
+void DropBodyForPath(json &read_files, const std::string &path);
+
+std::string RenderBodySuffix(const json &file_entry);
 
 bool IsMarkedRef(const json &value);
 

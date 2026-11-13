@@ -2616,9 +2616,12 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         std::unordered_set<std::string> full_dump_paths;
         size_t last_tool_idx = 0;
         for (size_t i = 0; i < filtered_msg.size(); i++) {
-            const std::string role_i = get_json_value(filtered_msg[i], "role", BLANK_STRING);
-            if (role_i == "assistant" && filtered_msg[i].contains("tool_calls") && filtered_msg[i]["tool_calls"].is_array()) {
-                for (const auto& tc : filtered_msg[i]["tool_calls"]) {
+            if (get_json_value(filtered_msg[i], "role", BLANK_STRING) == "tool") last_tool_idx = i;
+        }
+        for (size_t i = 0; i < msg.size(); i++) {
+            const std::string role_i = get_json_value(msg[i], "role", BLANK_STRING);
+            if (role_i == "assistant" && msg[i].contains("tool_calls") && msg[i]["tool_calls"].is_array()) {
+                for (const auto& tc : msg[i]["tool_calls"]) {
                     if (!tc.is_object() || !tc.contains("id") || !tc["id"].is_string()) continue;
                     const std::string call_id = tc["id"].get<std::string>();
                     const std::string path_arg = ExtractJsonPathArgFromToolCall(tc);
@@ -2628,21 +2631,18 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
                 }
             } else if (role_i == "tool") {
                 const std::string saved_path = ExtractFullOutputSavedPath(
-                    get_json_value(filtered_msg[i], "content", BLANK_STRING));
+                    get_json_value(msg[i], "content", BLANK_STRING));
                 if (!saved_path.empty()) full_dump_paths.insert(saved_path);
-                last_tool_idx = i;
             }
         }
         const bool read_footer_directory = model_config_.GetPromptOptimizationConfig().fidelity.read_footer_directory;
-        PagedReadLedger read_ledger;
-        size_t capped_count = 0;
-        for (size_t i = 0; i < filtered_msg.size(); i++) {
-            if (get_json_value(filtered_msg[i], "role", BLANK_STRING) != "tool") continue;
-            std::string content = get_json_value(filtered_msg[i], "content", BLANK_STRING);
-            std::string tool_name = get_json_value(filtered_msg[i], "name", BLANK_STRING);
-            std::string call_path;
-            if (filtered_msg[i].contains("tool_call_id") && filtered_msg[i]["tool_call_id"].is_string()) {
-                const std::string call_id = filtered_msg[i]["tool_call_id"].get<std::string>();
+        auto resolve_tool_call = [&](const json& m, std::string& tool_name, std::string& call_path,
+                                     std::string& call_tool_name) {
+            tool_name = get_json_value(m, "name", BLANK_STRING);
+            call_path.clear();
+            const bool has_call_id = m.contains("tool_call_id") && m["tool_call_id"].is_string();
+            if (has_call_id) {
+                const std::string call_id = m["tool_call_id"].get<std::string>();
                 auto path_it = call_id_to_path.find(call_id);
                 if (path_it != call_id_to_path.end()) call_path = path_it->second;
                 if (tool_name.empty() && tool_call_id_to_name) {
@@ -2650,52 +2650,94 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
                     if (name_it != tool_call_id_to_name->end()) tool_name = name_it->second;
                 }
             }
-            std::string call_tool_name = tool_name;
-            if (call_tool_name.empty() && filtered_msg[i].contains("tool_call_id") && filtered_msg[i]["tool_call_id"].is_string()) {
-                auto tool_it = call_id_to_tool.find(filtered_msg[i]["tool_call_id"].get<std::string>());
+            call_tool_name = tool_name;
+            if (call_tool_name.empty() && has_call_id) {
+                auto tool_it = call_id_to_tool.find(m["tool_call_id"].get<std::string>());
                 if (tool_it != call_id_to_tool.end()) call_tool_name = tool_it->second;
             }
-            const bool is_read_call = read_footer_directory && IsReadToolName(call_tool_name);
-            if (read_footer_directory && !is_read_call && !call_path.empty())
-                read_ledger.Invalidate(call_path);
+        };
+        auto entry_cap_for = [&](const json& m) -> size_t {
+            if (m.contains("tool_call_id") && m["tool_call_id"].is_string()) {
+                auto path_it = call_id_to_path.find(m["tool_call_id"].get<std::string>());
+                if (path_it != call_id_to_path.end() && full_dump_paths.count(path_it->second))
+                    return tool_entry_cap_tokens;
+            }
+            return cap_tokens;
+        };
+        auto cap_entry = [&](const std::string& content, const std::string& tool_name,
+                             size_t entry_cap_tokens) -> std::string {
+            if (content.size() <= entry_cap_tokens) return content;
+            std::string capped = IsGrepToolName(tool_name)
+                ? CapGrepResultByMatches(content, CountTokens(content), entry_cap_tokens)
+                : CapToolResultHeadTail(content, CountTokens(content), entry_cap_tokens);
+            return capped.size() < content.size() ? capped : content;
+        };
+        struct ReadPage {
+            std::string text;
+            bool directed = false;
+        };
+        std::unordered_map<size_t, ReadPage> read_pages;
+        if (read_footer_directory) {
+            PagedReadLedger read_ledger;
+            for (size_t i = 0; i < msg.size(); i++) {
+                if (get_json_value(msg[i], "role", BLANK_STRING) != "tool") continue;
+                std::string tool_name, call_path, call_tool_name;
+                resolve_tool_call(msg[i], tool_name, call_path, call_tool_name);
+                if (call_path.empty()) continue;
+                if (!IsReadToolName(call_tool_name)) {
+                    read_ledger.Invalidate(call_path);
+                    continue;
+                }
+                std::string content = get_json_value(msg[i], "content", BLANK_STRING);
+                const std::string cleaned = RemoveToolResponseRedundancy(content);
+                if (cleaned.length() < content.length()) content = cleaned;
+                if (task_memo_scan::IsBinaryContent(content)) continue;
+                std::string text = cap_entry(content, tool_name, entry_cap_for(msg[i]));
+                bool directed = false;
+                std::string rewritten;
+                if (read_ledger.RewriteFooter(call_path, text, rewritten)) {
+                    text = std::move(rewritten);
+                    directed = true;
+                }
+                read_ledger.Observe(call_path, text);
+                if (!prior_dropped_set.count(i)) read_pages[i] = ReadPage{std::move(text), directed};
+            }
+        }
+        size_t capped_count = 0;
+        for (size_t i = 0; i < filtered_msg.size(); i++) {
+            if (get_json_value(filtered_msg[i], "role", BLANK_STRING) != "tool") continue;
+            std::string content = get_json_value(filtered_msg[i], "content", BLANK_STRING);
+            std::string tool_name, call_path, call_tool_name;
+            resolve_tool_call(filtered_msg[i], tool_name, call_path, call_tool_name);
             if (task_memo_scan::IsBinaryContent(content)) {
                 filtered_msg[i]["content"] = task_memo_scan::BinaryResultStub(content.size());
                 capped_count++;
                 continue;
             }
-            size_t entry_cap_tokens = cap_tokens;
-            if (filtered_msg[i].contains("tool_call_id") && filtered_msg[i]["tool_call_id"].is_string()) {
-                auto path_it = call_id_to_path.find(filtered_msg[i]["tool_call_id"].get<std::string>());
-                if (path_it != call_id_to_path.end() && full_dump_paths.count(path_it->second))
-                    entry_cap_tokens = tool_entry_cap_tokens;
-            }
-            if (content.size() > entry_cap_tokens) {
-                std::string capped = IsGrepToolName(tool_name)
-                    ? CapGrepResultByMatches(content, CountTokens(content), entry_cap_tokens)
-                    : CapToolResultHeadTail(content, CountTokens(content), entry_cap_tokens);
-                if (capped.size() < content.size()) {
-                    filtered_msg[i]["content"] = capped;
-                    capped_count++;
-                    content = capped;
-                }
-            }
-            if (is_read_call && !call_path.empty()) {
-                std::string directed;
-                if (read_ledger.RewriteFooter(call_path, content, directed)) {
-                    filtered_msg[i]["content"] = directed;
-                    capped_count++;
-                    if (i == last_tool_idx || model_config_.getenablePromptDebug()) {
+            if (read_footer_directory && !call_path.empty() && IsReadToolName(call_tool_name) &&
+                filtered_msg[i].contains(kRawIdxKey)) {
+                const auto page = read_pages.find(filtered_msg[i][kRawIdxKey].get<size_t>());
+                if (page != read_pages.end()) {
+                    if (page->second.text != content) {
+                        filtered_msg[i]["content"] = page->second.text;
+                        capped_count++;
+                    }
+                    if (page->second.directed && (i == last_tool_idx || model_config_.getenablePromptDebug())) {
                         size_t shown_first = 0, shown_last = 0, shown_total = 0;
-                        task_memo_scan::ParsePagedReadFooter(directed, shown_first, shown_last, shown_total);
+                        task_memo_scan::ParsePagedReadFooter(page->second.text, shown_first, shown_last, shown_total);
                         My_Log{My_Log::Level::kInfo} << "[PreFilter] ReadFooter swapped: file="
                                                       << task_memo_scan::LastNameOf(call_path)
                                                       << " msg_idx=" << i
                                                       << " shown=" << shown_first << "-" << shown_last
                                                       << " total=" << shown_total << std::endl;
                     }
-                    content = directed;
+                    continue;
                 }
-                read_ledger.Observe(call_path, content);
+            }
+            const std::string capped = cap_entry(content, tool_name, entry_cap_for(filtered_msg[i]));
+            if (capped.size() < content.size()) {
+                filtered_msg[i]["content"] = capped;
+                capped_count++;
             }
         }
         if (capped_count > 0) {

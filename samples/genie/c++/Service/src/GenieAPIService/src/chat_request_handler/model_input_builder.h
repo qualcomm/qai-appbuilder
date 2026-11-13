@@ -2017,7 +2017,7 @@ private:
                 candidates.push_back({"near_repeat", "near:" + near_tpl, false});
         }
 
-        constexpr size_t kCycleWindow = 12;
+        constexpr size_t kCycleWindow = 48;
         const std::vector<std::string> cycle_keys = CollectCycleToolCallKeys(messages);
         const std::string cycle_signature = BuildCycleRepeatSignature(cycle_keys, kCycleWindow);
         if (!cycle_signature.empty())
@@ -2068,7 +2068,7 @@ private:
                 blocked = "signature_limit";
             else if (paced && st.last_think_msg_count > 0 && messages.size() <= st.last_think_msg_count + 2)
                 blocked = "cooldown";
-            else if (paced && at_cfg.max_think_turn_share > 0.0 &&
+            else if ((paced || candidate.reason == "cycle_repeat") && at_cfg.max_think_turn_share > 0.0 &&
                      st.think_turns >= static_cast<int>(at_cfg.max_think_turn_share * st.tool_turns))
                 blocked = "turn_share";
 
