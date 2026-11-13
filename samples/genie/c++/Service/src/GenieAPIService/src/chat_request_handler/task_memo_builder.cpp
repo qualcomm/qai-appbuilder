@@ -9,6 +9,7 @@
 #include "task_memo_builder.h"
 #include "tool_call_circuit_breaker_store.h"
 #include "task_memo_doc_scan.h"
+#include "session_continuity.h"
 #include <utils.h>
 #include "log.h"
 #include <sstream>
@@ -958,7 +959,7 @@ namespace {
         }
     }
 
-    std::unordered_map<std::string, std::pair<std::string, std::chrono::steady_clock::time_point>> g_pins;
+    LruSessionTable<std::unordered_map<std::string, std::string>> g_pins(64);
 }
 
 std::string TaskMemoBuilder::ToolCallOrdinalKey(const std::string& call_signature, size_t ordinal)
@@ -988,14 +989,7 @@ void TaskMemoBuilder::PinThinkConclusion(const std::string& session_key, const s
     if (session_key.empty() || call_signature.empty() || conclusion.empty())
         return;
     std::lock_guard<std::mutex> lk(g_pin_mu);
-    const auto now = std::chrono::steady_clock::now();
-    if (g_pins.size() > 4096) {
-        for (auto it = g_pins.begin(); it != g_pins.end();)
-            it = (now - it->second.second > std::chrono::hours(2)) ? g_pins.erase(it) : std::next(it);
-        if (g_pins.size() > 4096)
-            g_pins.clear();
-    }
-    g_pins[session_key + "\x1f" + call_signature] = {conclusion, now};
+    g_pins.Touch(session_key)[call_signature] = conclusion;
 }
 
 std::string TaskMemoBuilder::LookupPinnedConclusion(const std::string& session_key, const std::string& call_signature)
@@ -1003,8 +997,11 @@ std::string TaskMemoBuilder::LookupPinnedConclusion(const std::string& session_k
     if (session_key.empty() || call_signature.empty())
         return "";
     std::lock_guard<std::mutex> lk(g_pin_mu);
-    auto it = g_pins.find(session_key + "\x1f" + call_signature);
-    return it == g_pins.end() ? "" : std::string(kPinPrefix) + it->second.first + "]\n";
+    const auto* pins = g_pins.Find(session_key);
+    if (!pins)
+        return "";
+    const auto it = pins->find(call_signature);
+    return it == pins->end() ? "" : std::string(kPinPrefix) + it->second + "]\n";
 }
 
 bool TaskMemoBuilder::IsReasoningNoteMimicry(const std::string& content)

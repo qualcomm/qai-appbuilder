@@ -1812,7 +1812,6 @@ bool ModelManager::InitializeConfig()
                             sum_cfg.cache.enabled = ca.value("enabled", true);
                             sum_cfg.cache.max_entries = ca.value("max_entries", (size_t) 500);
                             sum_cfg.cache.max_memory_mb = ca.value("max_memory_mb", (size_t) 50);
-                            sum_cfg.cache.ttl_minutes = ca.value("ttl_minutes", 60);
                         }
 
                         My_Log{My_Log::Level::kInfo}
@@ -1824,7 +1823,6 @@ bool ModelManager::InitializeConfig()
                                 << ", summarize_tool=" << sum_cfg.summarize_tool_responses
                                 << ", cache.enabled=" << sum_cfg.cache.enabled
                                 << ", cache.max_entries=" << sum_cfg.cache.max_entries
-                                << ", cache.ttl_minutes=" << sum_cfg.cache.ttl_minutes
                                 << std::endl;
 
                         if (sum_cfg.enabled && sum_cfg.cache.enabled)
@@ -1834,7 +1832,6 @@ bool ModelManager::InitializeConfig()
                                     << "[LongTextSummarization] SummaryCache configured: max_entries="
                                     << sum_cfg.cache.max_entries
                                     << ", max_memory_mb=" << sum_cfg.cache.max_memory_mb
-                                    << ", ttl_minutes=" << sum_cfg.cache.ttl_minutes
                                     << std::endl;
                         }
                     }

@@ -519,7 +519,6 @@ struct PromptOptimizationConfig {
         bool enabled = true;
         size_t max_entries = 500;
         size_t max_memory_mb = 50;
-        int ttl_minutes = 60;
     };
 
     struct LongTextSummarizationConfig {

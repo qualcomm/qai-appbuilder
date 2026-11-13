@@ -22,6 +22,7 @@
 #include "task_memo_builder.h"
 #include "task_memo_doc_scan.h"
 #include "prompt_ledger.h"
+#include "session_continuity.h"
 #include "tool_call_circuit_breaker_store.h"
 #include "tool_call_repetition_store.h"
 #include "../response/repeat_gate.h"
@@ -2043,18 +2044,12 @@ private:
             int tool_turns = 0;
 
             int failure_reserve_used = 0;
-            std::chrono::steady_clock::time_point touched;
+            ContinuityMark mark;
         };
         static std::mutex s_mu;
-        static std::unordered_map<std::string, SessionThinkState> s_state;
-        const auto now = std::chrono::steady_clock::now();
+        static LruSessionTable<SessionThinkState> s_state(512);
         std::lock_guard<std::mutex> lk(s_mu);
-        if (s_state.size() > 512)
-            s_state.clear();
-        auto &st = s_state[session_key];
-        if (now - st.touched >= std::chrono::hours(2))
-            st = SessionThinkState{};
-        st.touched = now;
+        auto &st = TouchContinuing(s_state, session_key, messages);
         ++st.tool_turns;
         if (repeat_count_checked && repeat_count < 2)
         {

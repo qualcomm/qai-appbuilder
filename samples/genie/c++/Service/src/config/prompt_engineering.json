@@ -169,9 +169,7 @@
                 "_comment_max_entries": "最大缓存条目数；达到上限时淘汰最旧条目；默认 500",
                 "max_entries": 500,
                 "_comment_max_memory_mb": "缓存最大内存占用（MB）；超出时淘汰最旧条目；默认 50",
-                "max_memory_mb": 50,
-                "_comment_ttl_minutes": "缓存条目 TTL（分钟）；超时后自动失效；代码内默认 60，此处显式调高到 180 以覆盖长任务全程（同一份超长内容在一轮任务内相隔 90 分钟以上被重复摘要时，60 分钟 TTL 会在第二次查询前把条目清掉，白白重跑一次 map/reduce）",
-                "ttl_minutes": 180
+                "max_memory_mb": 50
             }
         },
 
