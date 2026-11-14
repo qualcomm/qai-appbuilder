@@ -1725,13 +1725,106 @@ std::string PromptOptimizer::InjectSpawnGuard(const std::string& tool_response_c
     return tool_response_content;
 }
 
+#if defined(_MSC_VER)
+static bool IsTrimBlankChar(char c)
+{
+    return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r';
+}
+
+static std::string RemoveBlankLinesLikeMultilineRegex(const std::string& text)
+{
+    const size_t n = text.size();
+    std::string step1;
+    step1.reserve(n);
+
+    size_t i = 0;
+    while (i < n)
+    {
+        if ((i == 0 || text[i - 1] == '\n') && IsTrimBlankChar(text[i]))
+        {
+            size_t j = i;
+            size_t last_nl = std::string::npos;
+            while (j < n && IsTrimBlankChar(text[j]))
+            {
+                if (text[j] == '\n')
+                    last_nl = j;
+                ++j;
+            }
+
+            if (last_nl != std::string::npos)
+            {
+                i = last_nl + 1;
+            }
+            else
+            {
+                step1.append(text, i, j - i);
+                i = j;
+            }
+            continue;
+        }
+
+        step1.push_back(text[i]);
+        ++i;
+    }
+
+    const size_t m = step1.size();
+    std::string result;
+    result.reserve(m);
+
+    i = 0;
+    while (i < m)
+    {
+        if (!IsTrimBlankChar(step1[i]))
+        {
+            result.push_back(step1[i]);
+            ++i;
+            continue;
+        }
+
+        size_t j = i;
+        while (j < m && IsTrimBlankChar(step1[j]))
+            ++j;
+
+        size_t cut = std::string::npos;
+        if (j == m && step1[j - 1] == '\n')
+        {
+            cut = j;
+        }
+        else
+        {
+            for (size_t e = j - 1; e > i; --e)
+            {
+                if (step1[e] == '\n' && step1[e - 1] == '\n')
+                {
+                    cut = e;
+                    break;
+                }
+            }
+        }
+
+        if (cut == std::string::npos)
+            result.append(step1, i, j - i);
+        else
+            result.append(step1, cut, j - cut);
+
+        i = j;
+    }
+
+    return result;
+}
+#endif
+
 std::string PromptOptimizer::OptimizeToolResponse(
     const std::string& tool_response)
 {
 
     std::string trimmed = tool_response;
+#if defined(_MSC_VER)
+    trimmed = RemoveBlankLinesLikeMultilineRegex(trimmed);
+#else
     trimmed = std::regex_replace(trimmed, std::regex(R"(^(\s*\n)+)"), "");
     trimmed = std::regex_replace(trimmed, std::regex(R"((\s*\n)+$)"), "");
+#endif
 
     if (trimmed.find_first_not_of(" \t\r\n") == std::string::npos)
         trimmed = "[empty result: the tool returned no text; success or failure is not shown]";
