@@ -484,6 +484,8 @@ struct PromptOptimizationConfig {
         size_t json_tail_items = 1;
         size_t max_token_probe_per_message = 8;
         bool read_footer_directory = true;
+        bool footer_section_hints = true;
+        size_t footer_outline_max_bytes = 150;
 
         double cjk_bytes_per_token = 3.0;
         double ascii_bytes_per_token = 4.0;

@@ -174,38 +174,68 @@ size_t Utf8Floor(const std::string& s, size_t pos)
     return pos;
 }
 
-bool CapPagedReadHead(const std::string& content, size_t keep_bytes, std::string& out)
+constexpr size_t kOutlineTitleChars = 24;
+constexpr char kOutlineTag[] = "; sections, read with offset = line: ";
+
+std::string BuildOmittedOutline(const std::string& omitted, size_t first_line, size_t max_bytes, size_t& added)
 {
-    constexpr size_t kFooterReserve = 200;
+    std::string out;
+    added = 0;
+    if (max_bytes == 0 || omitted.empty()) return out;
+    for (const task_memo_scan::Heading& heading : task_memo_scan::ExtractHeadings(omitted, first_line)) {
+        if (heading.title.find_first_of("[]<>;|") != std::string::npos) continue;
+        const std::string item = "L" + std::to_string(heading.line) + " " +
+                                 task_memo_scan::ClipHead(heading.title, kOutlineTitleChars);
+        const size_t separator = out.empty() ? 0 : 3;
+        if (out.size() + separator + item.size() > max_bytes) break;
+        if (separator > 0) out += " | ";
+        out += item;
+        added++;
+    }
+    return out;
+}
+
+bool CapPagedReadHead(const std::string& content, size_t keep_bytes, size_t outline_max_bytes, std::string& out,
+                      size_t* outline_sections = nullptr)
+{
+    constexpr size_t kFooterBaseReserve = 200;
+    const size_t footer_reserve = kFooterBaseReserve + outline_max_bytes;
     const size_t marker = content.rfind("showed lines ");
-    if (marker == std::string::npos || keep_bytes <= kFooterReserve) return false;
+    if (marker == std::string::npos || keep_bytes <= footer_reserve) return false;
     size_t first = 0, last = 0, total = 0;
     if (std::sscanf(content.c_str() + marker, "showed lines %zu-%zu of total %zu", &first, &last, &total) != 3)
         return false;
     const size_t footer_nl = content.rfind('\n', marker);
     if (footer_nl == std::string::npos) return false;
-    const size_t body_budget = keep_bytes - kFooterReserve;
+    const size_t body_budget = keep_bytes - footer_reserve;
     if (footer_nl + 1 <= body_budget) return false;
     const size_t cut_nl = content.rfind('\n', Utf8Floor(content, body_budget));
     if (cut_nl == std::string::npos) return false;
     const size_t kept_lines = static_cast<size_t>(std::count(content.begin(), content.begin() + cut_nl + 1, '\n'));
     const size_t shown_last = first + kept_lines - 1;
     if (kept_lines == 0 || shown_last >= last) return false;
+    const std::string omitted = footer_nl > cut_nl + 1
+        ? content.substr(cut_nl + 1, footer_nl - cut_nl - 1) : std::string();
+    size_t outline_added = 0;
+    const std::string outline = BuildOmittedOutline(omitted, shown_last + 1, outline_max_bytes, outline_added);
     const size_t footer_end = content.find('\n', marker);
     out = content.substr(0, cut_nl + 1) + "...[read truncated: context budget; showed lines " + std::to_string(first) +
           "-" + std::to_string(shown_last) + " of total " + std::to_string(total) +
-          "; next offset=" + std::to_string(shown_last + 1) + "]" +
+          "; next offset=" + std::to_string(shown_last + 1) +
+          (outline.empty() ? std::string() : std::string(kOutlineTag) + outline) + "]" +
           (footer_end == std::string::npos ? std::string() : content.substr(footer_end));
+    if (outline_sections) *outline_sections += outline_added;
     return true;
 }
 
-std::string CapToolResultHeadTail(const std::string& content, size_t content_tokens, size_t cap_tokens)
+std::string CapToolResultHeadTail(const std::string& content, size_t content_tokens, size_t cap_tokens,
+                                  size_t outline_max_bytes, size_t* outline_sections = nullptr)
 {
     if (cap_tokens == 0 || content_tokens <= cap_tokens || content.empty()) return content;
     const double keep_ratio = 0.95 * static_cast<double>(cap_tokens) / static_cast<double>(content_tokens);
     const size_t keep_bytes = static_cast<size_t>(static_cast<double>(content.size()) * keep_ratio);
     std::string paged_head;
-    if (CapPagedReadHead(content, keep_bytes, paged_head)) return paged_head;
+    if (CapPagedReadHead(content, keep_bytes, outline_max_bytes, paged_head, outline_sections)) return paged_head;
     const size_t head_target = static_cast<size_t>(static_cast<double>(keep_bytes) * kToolEntryHeadShare);
     const size_t tail_target = keep_bytes - head_target;
     size_t head_end = Utf8Floor(content, head_target);
@@ -2664,12 +2694,19 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
             }
             return cap_tokens;
         };
+        size_t last_outline_added = 0;
+        size_t outline_pages = 0;
+        size_t outline_sections = 0;
         auto cap_entry = [&](const std::string& content, const std::string& tool_name,
                              size_t entry_cap_tokens) -> std::string {
+            last_outline_added = 0;
             if (content.size() <= entry_cap_tokens) return content;
+            const size_t outline_max_bytes = cfg.fidelity.footer_section_hints
+                ? cfg.fidelity.footer_outline_max_bytes : 0;
             std::string capped = IsGrepToolName(tool_name)
                 ? CapGrepResultByMatches(content, CountTokens(content), entry_cap_tokens)
-                : CapToolResultHeadTail(content, CountTokens(content), entry_cap_tokens);
+                : CapToolResultHeadTail(content, CountTokens(content), entry_cap_tokens, outline_max_bytes,
+                                        &last_outline_added);
             return capped.size() < content.size() ? capped : content;
         };
         struct ReadPage {
@@ -2693,6 +2730,10 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
                 if (cleaned.length() < content.length()) content = cleaned;
                 if (task_memo_scan::IsBinaryContent(content)) continue;
                 std::string text = cap_entry(content, tool_name, entry_cap_for(msg[i]));
+                if (last_outline_added > 0 && !prior_dropped_set.count(i)) {
+                    outline_pages++;
+                    outline_sections += last_outline_added;
+                }
                 bool directed = false;
                 std::string rewritten;
                 if (read_ledger.RewriteFooter(call_path, text, rewritten)) {
@@ -2702,6 +2743,10 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
                 read_ledger.Observe(call_path, text);
                 if (!prior_dropped_set.count(i)) read_pages[i] = ReadPage{std::move(text), directed};
             }
+        }
+        if (outline_pages > 0) {
+            My_Log{My_Log::Level::kInfo} << "[PreFilter] ReadFooter outline: pages=" << outline_pages
+                                          << ", sections=" << outline_sections << std::endl;
         }
         size_t capped_count = 0;
         for (size_t i = 0; i < filtered_msg.size(); i++) {

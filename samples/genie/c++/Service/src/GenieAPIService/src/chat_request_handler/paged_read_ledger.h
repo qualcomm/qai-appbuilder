@@ -11,6 +11,7 @@
 
 #include "task_memo_doc_scan.h"
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <map>
 #include <string>
@@ -41,6 +42,7 @@ public:
                 continue;
             entry.headings.emplace(heading.line, heading.title);
         }
+        AddFooterOutline(entry, content);
     }
 
     void Invalidate(const std::string& path)
@@ -89,6 +91,34 @@ private:
     static bool IsPlainTitle(const std::string& title)
     {
         return title.find_first_of("[]<>") == std::string::npos;
+    }
+
+    static void AddFooterOutline(Entry& entry, const std::string& content)
+    {
+        static const std::string kTag = "; sections, read with offset = line: ";
+        const size_t begin = content.find(kTag);
+        if (begin == std::string::npos)
+            return;
+        const size_t end = content.find(']', begin);
+        if (end == std::string::npos)
+            return;
+        size_t pos = begin + kTag.size();
+        while (pos < end) {
+            size_t sep = content.find(" | ", pos);
+            if (sep == std::string::npos || sep > end)
+                sep = end;
+            const std::string item = content.substr(pos, sep - pos);
+            pos = sep == end ? end : sep + 3;
+            const size_t space = item.find(' ');
+            if (item.size() < 3 || item[0] != 'L' || space == std::string::npos || space < 2 || space > 10)
+                continue;
+            bool digits = true;
+            for (size_t k = 1; k < space; k++)
+                digits = digits && std::isdigit(static_cast<unsigned char>(item[k]));
+            if (!digits)
+                continue;
+            entry.headings.emplace(static_cast<size_t>(std::stoull(item.substr(1, space - 1))), item.substr(space + 1));
+        }
     }
 
     static void AddRange(std::vector<std::pair<size_t, size_t>>& ranges, size_t first, size_t last)
