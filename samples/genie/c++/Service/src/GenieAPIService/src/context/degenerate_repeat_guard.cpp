@@ -13,21 +13,21 @@
 namespace degenerate_repeat_guard
 {
 
-StreamGuard::StreamGuard(bool enabled, int max_period, std::size_t min_span_bytes)
-    : enabled_(enabled && max_period > 0 && min_span_bytes > 0),
+StreamGuard::StreamGuard(bool enabled, int max_period, std::size_t min_span_chars)
+    : enabled_(enabled && max_period > 0 && min_span_chars > 0),
       max_period_(enabled_ ? max_period : 0),
-      min_span_bytes_(min_span_bytes)
+      min_span_chars_(min_span_chars)
 {
     if (enabled_)
     {
         const std::size_t ring = static_cast<std::size_t>(max_period_) + 1;
         ids_.assign(ring, 0);
-        cumulative_bytes_.assign(ring, 0);
+        cumulative_chars_.assign(ring, 0);
         run_.assign(ring, 0);
     }
 }
 
-Decision StreamGuard::Observe(int32_t id, std::size_t piece_bytes)
+Decision StreamGuard::Observe(int32_t id, std::size_t piece_chars)
 {
     Decision decision;
     if (!enabled_)
@@ -45,9 +45,9 @@ Decision StreamGuard::Observe(int32_t id, std::size_t piece_bytes)
         run_[period] = same ? run_[period] + 1 : 0;
     }
 
-    total_bytes_ += piece_bytes;
+    total_chars_ += piece_chars;
     ids_[slot] = id;
-    cumulative_bytes_[slot] = total_bytes_;
+    cumulative_chars_[slot] = total_chars_;
     ++observed_;
 
     for (std::size_t period = 1; period <= static_cast<std::size_t>(max_period_); ++period)
@@ -57,19 +57,32 @@ Decision StreamGuard::Observe(int32_t id, std::size_t piece_bytes)
         {
             continue;
         }
-        const uint64_t before_unit = index >= period ? cumulative_bytes_[(index - period) % ring] : 0;
-        const uint64_t unit_bytes = total_bytes_ - before_unit;
-        const uint64_t span_bytes = unit_bytes * repeats;
-        const uint64_t required = period == 1 ? std::max<std::size_t>(1, min_span_bytes_ / 2) : min_span_bytes_;
-        if (span_bytes >= required)
+        const uint64_t before_unit = index >= period ? cumulative_chars_[(index - period) % ring] : 0;
+        const uint64_t unit_chars = total_chars_ - before_unit;
+        const uint64_t span_chars = unit_chars * repeats;
+        const uint64_t required = period == 1 ? std::max<std::size_t>(1, min_span_chars_ / 2) : min_span_chars_;
+        if (span_chars >= required)
         {
             decision.abort = true;
             decision.period = static_cast<int>(period);
-            decision.span_bytes = static_cast<std::size_t>(span_bytes);
+            decision.span_chars = static_cast<std::size_t>(span_chars);
             return decision;
         }
     }
     return decision;
+}
+
+std::size_t CountUtf8Chars(const std::string &text)
+{
+    std::size_t count = 0;
+    for (const char c : text)
+    {
+        if ((static_cast<unsigned char>(c) & 0xC0) != 0x80)
+        {
+            ++count;
+        }
+    }
+    return count;
 }
 
 }

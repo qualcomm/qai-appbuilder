@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace degenerate_repeat_guard
@@ -18,28 +19,30 @@ namespace degenerate_repeat_guard
 
 constexpr int kMinRepeats = 3;
 
+std::size_t CountUtf8Chars(const std::string &text);
+
 struct Decision
 {
     bool abort = false;
     int period = 0;
-    std::size_t span_bytes = 0;
+    std::size_t span_chars = 0;
 };
 
 class StreamGuard
 {
 public:
-    StreamGuard(bool enabled, int max_period, std::size_t min_span_bytes);
+    StreamGuard(bool enabled, int max_period, std::size_t min_span_chars);
 
-    Decision Observe(int32_t id, std::size_t piece_bytes);
+    Decision Observe(int32_t id, std::size_t piece_chars);
 
 private:
     bool enabled_ = false;
     int max_period_ = 0;
-    std::size_t min_span_bytes_ = 0;
+    std::size_t min_span_chars_ = 0;
     std::size_t observed_ = 0;
-    uint64_t total_bytes_ = 0;
+    uint64_t total_chars_ = 0;
     std::vector<int32_t> ids_;
-    std::vector<uint64_t> cumulative_bytes_;
+    std::vector<uint64_t> cumulative_chars_;
     std::vector<std::size_t> run_;
 };
 

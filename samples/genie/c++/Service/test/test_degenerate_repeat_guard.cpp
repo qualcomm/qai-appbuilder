@@ -53,8 +53,13 @@ std::vector<std::string> Tokenize(const std::string &text)
             i = j;
             continue;
         }
-        tokens.push_back(text.substr(i, 1));
-        ++i;
+        j = i + 1;
+        while (j < text.size() && (static_cast<unsigned char>(text[j]) & 0xC0) == 0x80)
+        {
+            ++j;
+        }
+        tokens.push_back(text.substr(i, j - i));
+        i = j;
     }
     return tokens;
 }
@@ -79,7 +84,7 @@ Outcome Run(const std::string &text, bool enabled = true, int max_period = 128, 
             it = vocab.emplace(token, static_cast<int32_t>(vocab.size())).first;
         }
         ++index;
-        const auto decision = guard.Observe(it->second, token.size());
+        const auto decision = guard.Observe(it->second, degenerate_repeat_guard::CountUtf8Chars(token));
         if (decision.abort)
         {
             outcome.abort_at = index;
@@ -135,6 +140,9 @@ void LegitimateRepeatsAreNotStopped()
         {"same table row x5", Repeat("| a | b |\n", 5)},
         {"sentence x2", kSentence + kSentence},
         {"paragraph x2", kParagraph + kParagraph},
+        {"48 box-drawing chars (3 bytes each)", Repeat("═", 48)},
+        {"100 box-drawing chars", Repeat("═", 100)},
+        {"CJK sentence x2", Repeat("这是一段中文说明文字。", 2)},
     };
     for (const auto &item : cases)
     {
@@ -160,6 +168,8 @@ void RealLoopsAreStopped()
         {"', ' x200", Repeat(", ", 200), 260},
         {"sentence x4", " " + Repeat(kSentence, 4), 60},
         {"paragraph x4", " " + Repeat(kParagraph, 4), 3 * static_cast<int>(Tokenize(kParagraph).size()) + 2},
+        {"CJK char x300", Repeat("哈", 300), 130},
+        {"box-drawing x130", Repeat("═", 130), 130},
     };
     for (const auto &item : cases)
     {
@@ -168,6 +178,29 @@ void RealLoopsAreStopped()
               "stopped at " + std::to_string(outcome.abort_at) + " (limit " + std::to_string(item.max_abort_at) + ")");
     }
     Check("zero x300 reports period 1", Run(Repeat("0", 300)).period == 1);
+    Check("CJK char x300 reports span in characters", Run(Repeat("哈", 300)).period == 1);
+}
+
+void LogNineFormIsNotStopped()
+{
+    std::printf("== log9 form: 6-character box-drawing piece repeated 8 times\n");
+    degenerate_repeat_guard::StreamGuard guard(true, 128, 256);
+    bool stopped = false;
+    for (int i = 0; i < 8; ++i)
+    {
+        stopped = stopped || guard.Observe(5, degenerate_repeat_guard::CountUtf8Chars("══════")).abort;
+    }
+    Check("6-char piece x8 (48 chars) is not stopped", !stopped);
+}
+
+void Utf8Counting()
+{
+    std::printf("== CountUtf8Chars\n");
+    Check("empty string is 0", degenerate_repeat_guard::CountUtf8Chars("") == 0);
+    Check("ascii counts bytes", degenerate_repeat_guard::CountUtf8Chars("abc") == 3);
+    Check("box-drawing char is 1", degenerate_repeat_guard::CountUtf8Chars("═") == 1);
+    Check("mixed CJK and ascii", degenerate_repeat_guard::CountUtf8Chars("中a") == 2);
+    Check("lone continuation byte is 0", degenerate_repeat_guard::CountUtf8Chars("\x80\xBF") == 0);
 }
 
 void EdgeCases()
@@ -201,7 +234,7 @@ void EdgeCases()
     {
         stopped = stopped || zero_width.Observe(5, 0).abort;
     }
-    Check("zero-width pieces never trip the byte span", !stopped);
+    Check("zero-width pieces never trip the character span", !stopped);
 }
 
 }
@@ -210,7 +243,9 @@ int main()
 {
     LegitimateRepeatsAreNotStopped();
     RealLoopsAreStopped();
+    LogNineFormIsNotStopped();
     EdgeCases();
+    Utf8Counting();
     std::printf("\n%d checks, %d failed\n", g_total, g_failed);
     return g_failed == 0 ? 0 : 1;
 }

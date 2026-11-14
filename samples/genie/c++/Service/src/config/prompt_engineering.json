@@ -4,12 +4,12 @@
     "_version": "1.0",
 
     "generation_repeat_guard": {
-        "_comment": "单次生成内的退化 token 循环防护：token 先正常输出，只有尾部同一 token 块连续重复至少 3 次、且重复区的解码字节数达到 min_span_bytes 时才判定为死循环并停止生成（不回滚 KV、不暂存 token）；数字 1000/1111、版本号、分隔线等短的合法重复不会触发。停止后对外 finish_reason=length，请求层会先用纠偏消息自动重试一次",
+        "_comment": "单次生成内的退化 token 循环防护：token 先正常输出，只有尾部同一 token 块连续重复至少 3 次、且重复区的 UTF-8 字符数达到 min_span_bytes 时才判定为死循环并停止生成（不回滚 KV、不暂存 token）；数字 1000/1111、版本号、分隔线等短的合法重复不会触发。停止后对外 finish_reason=length，请求层会先用纠偏消息自动重试一次",
         "_comment_enabled": "true=启用（默认），false=关闭本次生成内退化循环防护",
         "enabled": true,
         "_comment_max_period_tokens": "检测的最大重复周期长度（token 数），默认128；超过该周期的循环不检测，由输出上限兜底",
         "max_period_tokens": 128,
-        "_comment_min_span_bytes": "重复区解码字节数的触发下限，默认256；周期为 1 个 token 时取其一半。调大更不容易误杀合法的长重复，调小更早拦下真循环",
+        "_comment_min_span_bytes": "重复区的 UTF-8 字符数触发下限（键名 min_span_bytes 为历史命名，单位已是字符），默认256；周期为 1 个 token 时取其一半。多字节字符（如 ═、中文）按一个字符计，不会因字节数大而提前误杀分隔线；调大更不容易误杀合法的长重复，调小更早拦下真循环",
         "min_span_bytes": 256
     },
 

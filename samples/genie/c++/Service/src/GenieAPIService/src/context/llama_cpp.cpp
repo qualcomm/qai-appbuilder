@@ -569,11 +569,11 @@ public:
             }
         }
 
-        size_t last_piece_bytes = 0;
+        size_t last_piece_chars = 0;
         auto emit_generated_token = [&](llama_token id) -> bool
         {
             std::string token_str = common_token_to_piece(ctx, id, params_.special);
-            last_piece_bytes = token_str.size();
+            last_piece_chars = degenerate_repeat_guard::CountUtf8Chars(token_str);
 
             if (token_str == "<|im_end|>")
             {
@@ -650,7 +650,7 @@ public:
             {
                 return false;
             }
-            const auto decision = repeat_guard.Observe(static_cast<int32_t>(id), last_piece_bytes);
+            const auto decision = repeat_guard.Observe(static_cast<int32_t>(id), last_piece_chars);
             if (!decision.abort)
             {
                 return true;
@@ -660,7 +660,7 @@ public:
             My_Log{My_Log::Level::kWarning}
                 << "[LLAMACpp] " << query_type
                 << " Degenerate repeat guard stopped period=" << decision.period
-                << " span_bytes=" << decision.span_bytes
+                << " span_chars=" << decision.span_chars
                 << " n_generated=" << n_generated << "\n";
             return false;
         };
