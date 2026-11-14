@@ -30,9 +30,8 @@ export type ChatMessageRole =
   | "tool_indicator"
   | "system_notice";
 
-/** Tool mode pill state — drives the toolbar mode buttons + outgoing
- *  `tool_mode` SSE query param so the backend system-prompt builder
- *  picks the right feature prompt (refactor-plan §10.7).
+/** Toolbar mode state. `vla-simulation` is persisted per tab but intentionally
+ *  excluded from outgoing `tool_mode` payloads because it only embeds a UI.
  */
 export type ToolModeKey =
   | "model-build"
@@ -43,7 +42,8 @@ export type ToolModeKey =
   | "ppt"
   | "pro"
   | "gomaster"
-  | "aihub-device";
+  | "aihub-device"
+  | "vla-simulation";
 
 /** Per-mode tool parameters aggregated by ChatComposer and forwarded
  *  to the backend as `tool_params` (SSE query / WS envelope). Mirrors

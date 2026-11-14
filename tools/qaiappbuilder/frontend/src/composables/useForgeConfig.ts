@@ -75,14 +75,11 @@ export interface VisibleToolbarModule extends ToolbarModuleEntry {
  *
  * Order values leave 10-unit gaps so future modules can slot in without
  * renumbering. The order reflects the intended user journey rather than
- * chronological addition: Model Builder → App Builder → Pro → GoMaster
- * (advanced / cloud-assisted model workflows) → Code → Translate → PPT
- * (general-purpose modes). See `forge_config.py` for the two internal-
- * only modules (pro / gomaster) that the backend injects with orders
- * 30 / 40 respectively — the two files intentionally share the same
- * order scheme so the toolbar looks the same on internal builds
- * regardless of whether a module comes from the frontend fallback or
- * the backend edition-gated injection. */
+ * chronological addition: Model Builder → App Builder → Pro → GoMaster → VLA
+ * Simulation → Code → Translate → PPT. The backend injects Pro/GoMaster only
+ * for full internal editions; VLA is also available through its explicit
+ * VLA-only deployment flag. These internal modules have no frontend defaults.
+ */
 export const DEFAULT_TOOLBAR_MODULES: ToolbarModulesMap = {
   model_builder: {
     enabled: true,
@@ -115,11 +112,8 @@ export const DEFAULT_TOOLBAR_MODULES: ToolbarModulesMap = {
     // currently has a matching `*Hint` locale key; peers omit `hint`.
     hint: "index.appBuilderHint",
   },
-  // NOTE: order 40 / 50 are reserved for the internal-only `pro` and
-  // `gomaster` modules that the backend injects (see forge_config.py
-  // `pro.setdefault("order", 40)` / `gomaster.setdefault("order", 50)`).
-  // The frontend has no fallback entries for those two — they only
-  // render on internal editions where the backend ships them.
+  // NOTE: order 40 / 50 are reserved for full-internal `pro` and `gomaster`
+  // modules. They have no frontend fallback entries.
   code: {
     enabled: true,
     order: 60,

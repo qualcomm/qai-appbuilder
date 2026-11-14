@@ -91,15 +91,16 @@ import ModeFrameTranslate from "./toolbar-modes/ModeFrameTranslate.vue";
 import ModeFramePpt from "./toolbar-modes/ModeFramePpt.vue";
 import ModeFrameSsh from "./toolbar-modes/ModeFrameSsh.vue";
 import ModeFrameAiHubDevice from "./toolbar-modes/ModeFrameAiHubDevice.vue";
-// Internal-only sub-toolbars (MB Pro / GoMaster). Referenced lazily and ONLY
-// on the internal edition so the external open-source build tree-shakes the
-// dynamic import() away — the modules are physically absent from that bundle
-// and the source files can be removed without a broken static import.
+// Internal-only sub-toolbars. Pro and GoMaster require the full internal source
+// tree; VLA can also be explicitly enabled in the external source distribution.
 const ModeFramePro = IS_INTERNAL
   ? defineAsyncComponent(() => import("@/components/chat/toolbar-modes/ModeFramePro.vue"))
   : null;
 const ModeFrameGomaster = IS_INTERNAL
   ? defineAsyncComponent(() => import("@/components/chat/toolbar-modes/ModeFrameGomaster.vue"))
+  : null;
+const ModeFrameVlaSimulation = IS_VLA_SIMULATION_ENABLED
+  ? defineAsyncComponent(() => import("@/components/chat/toolbar-modes/ModeFrameVlaSimulation.vue"))
   : null;
 import ComposerModeButtons from "./composer/ComposerModeButtons.vue";
 import ActiveRunsButton from "./composer/ActiveRunsButton.vue";
@@ -111,7 +112,7 @@ import {
   discussionColorToken,
   type DiscussionParticipant,
 } from "@/stores/_chatTabsTypes";
-import { IS_INTERNAL } from "@/edition";
+import { IS_INTERNAL, IS_VLA_SIMULATION_ENABLED } from "@/edition";
 
 const { t } = useI18n();
 const store = useChatTabsStore();
@@ -1256,9 +1257,8 @@ onBeforeUnmount(() => {
   }
 });
 
-// Map of v1-style key (e.g. `model_builder`) → ToolModeKey for the
-// store. Only model_builder/app_builder/code/translate are typed
-// ToolModeKey values; ppt is stored as a generic UI-side ToolMode.
+// Map backend toolbar keys to per-tab mode state. VLA Simulation is retained
+// per tab for UI continuity; useChatTransport excludes it from chat payloads.
 function setToolModeFromKey(modeStr: string): void {
   const tab = store.activeTab;
   if (tab === null) return;
@@ -1272,6 +1272,7 @@ function setToolModeFromKey(modeStr: string): void {
     pro: true,
     gomaster: true,
     "aihub-device": true,
+    "vla-simulation": true,
   };
   if (known[modeStr] === true) {
     setToolMode(modeStr as ToolModeKey);
@@ -2024,6 +2025,11 @@ const {
           <component
             :is="ModeFrameGomaster"
             v-else-if="ModeFrameGomaster && effectiveMode === 'gomaster'"
+            @exit="exitMode"
+          />
+          <component
+            :is="ModeFrameVlaSimulation"
+            v-else-if="ModeFrameVlaSimulation && effectiveMode === 'vla-simulation'"
             @exit="exitMode"
           />
           <ModeFrameAiHubDevice

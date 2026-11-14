@@ -36,6 +36,7 @@ const KNOWN: ReadonlySet<string> = new Set([
   "ppt",
   "pro",
   "gomaster",
+  "vla_simulation",
   "ssh",
 ]);
 
@@ -229,6 +230,19 @@ function resolve(key: string): string {
     stroke-linejoin="round"
     aria-hidden="true"
   ><rect x="2" y="3" width="20" height="15" rx="2" /><path d="M6 8l4 4-4 4" /><path d="M12 16h6" /></svg>
+  <!-- vla_simulation — robot/simulation control surface -->
+  <svg
+    v-else-if="resolve(iconKey) === 'vla_simulation'"
+    :width="size"
+    :height="size"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  ><rect x="4" y="7" width="16" height="12" rx="3" /><path d="M12 3v4M9 12h.01M15 12h.01M9 16h6M2 12h2m16 0h2" /></svg>
   <!-- fallback — generic rounded square -->
   <svg
     v-else

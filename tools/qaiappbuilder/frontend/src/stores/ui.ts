@@ -64,7 +64,8 @@ export type ToolMode =
   | "translate"
   | "pro"
   | "gomaster"
-  | "aihub-device";
+  | "aihub-device"
+  | "vla-simulation";
 
 interface UiState {
   theme: AppTheme;

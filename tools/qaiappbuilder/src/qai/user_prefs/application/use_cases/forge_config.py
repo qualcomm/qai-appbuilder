@@ -113,6 +113,8 @@ class LoadForgeConfigUseCase:
     # is purely backend-data-driven, so an external build simply never renders
     # it. (mb-pro-integration-plan.md §6 / §7 layer ①.)
     is_internal: bool = False
+    # Allows a VLA-only local build without enabling unrelated internal modes.
+    vla_simulation_enabled: bool = False
     # Which GoMaster link is wired (edition config ``gomaster_mode``): "external"
     # (default, one-click optimize task — NOT chat), "agent" (conversational),
     # or "both". Surfaced to the frontend on the ``gomaster`` toolbar module so
@@ -281,3 +283,12 @@ class LoadForgeConfigUseCase:
             # lock the session on an unbound hint), and (b) show the GoMaster
             # intro empty-state. "external" (default) / "agent" / "both".
             gomaster.setdefault("gomaster_mode", self.gomaster_mode)
+        # Expose VLA in full internal editions or an explicitly opted-in
+        # VLA-only deployment. This does not enable Pro or GoMaster modes.
+        if self.is_internal or self.vla_simulation_enabled:
+            vla_simulation = _ensure_dict(toolbar_modules, "vla_simulation")
+            vla_simulation.setdefault("enabled", True)
+            vla_simulation.setdefault("order", 55)
+            vla_simulation.setdefault("mode", "vla-simulation")
+            vla_simulation.setdefault("i18n", "index.vlaSimulationMode")
+            vla_simulation.setdefault("icon", "vla_simulation")

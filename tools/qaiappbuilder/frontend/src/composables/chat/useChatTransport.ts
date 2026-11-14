@@ -110,21 +110,16 @@ function interpolatePath(
 }
 
 /**
- * Derive the outgoing `tool_mode` + `tool_params` for a turn from the
- * tab's active mode and aggregated tool params (V1 `_toolParamsComputed`
- * parity). Only the keys relevant to the active mode are emitted so the
- * backend renderer receives a clean, mode-scoped dict.
+ * Derive an outgoing chat `tool_mode` + `tool_params` from the active tab.
+ * UI-only modes such as VLA Simulation must never be sent to the backend.
  *
  *   code:      { speed, file_path, repo_url, persona? }
  *   translate: { target_lang }
  *   ppt:       { length }
  *   model-build: { model_path, model_paths, quant_precision, dataset_path }
  *
- * `app-builder` keeps its mode and carries the workbench selection
- * (model / variant / category + last-run summary) so the backend
- * system-prompt builder inlines the right per-Pack SKILL + pack catalog
- * (V1 `toolParamsForChat` parity). The SKILL files / pack catalog
- * themselves are resolved server-side from `tool_mode === "app-builder"`.
+ * `app-builder` carries the workbench selection so the backend system-prompt
+ * builder resolves the per-Pack SKILL and pack catalog server-side.
  */
 export function deriveToolPayload(tab: ChatTab | undefined): {
   toolMode: string | null;
@@ -134,7 +129,7 @@ export function deriveToolPayload(tab: ChatTab | undefined): {
     return { toolMode: null, toolParams: null };
   }
   const mode = tab.activeMode;
-  if (mode === null) {
+  if (mode === null || mode === "vla-simulation") {
     return { toolMode: null, toolParams: null };
   }
   const tp: ToolParams = tab.toolParams ?? {};

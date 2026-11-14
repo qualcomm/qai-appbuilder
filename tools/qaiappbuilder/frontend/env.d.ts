@@ -37,7 +37,10 @@ interface ImportMeta {
 /** Injected at build time by vite.config.ts `define` from package.json version. */
 declare const __APP_VERSION__: string;
 
-/** Injected at build time by vite.config.ts `define`. Either "internal"
- *  (dev / full feature set) or "external" (packaged open-source release with
- *  internal-only features physically removed). */
+/** Injected at build time by vite.config.ts. Pro/GoMaster and the full
+ *  internal feature set are absent from external source-distribution builds. */
 declare const __EDITION__: string;
+
+/** Injected when the VLA-only feature bundle is explicitly enabled. */
+declare const __VLA_SIMULATION_ENABLED__: boolean;
+

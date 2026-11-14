@@ -187,6 +187,13 @@ def build_user_prefs_services(container: Container) -> UserPrefsServices:
             is_internal=bool(
                 getattr(getattr(container, "settings", None), "is_internal", False)
             ),
+            vla_simulation_enabled=bool(
+                getattr(
+                    getattr(container, "settings", None),
+                    "is_vla_simulation_enabled",
+                    False,
+                )
+            ),
             # Which GoMaster link is wired (edition config; "external" default).
             # Surfaced on the gomaster toolbar module so the composer skips the
             # ``query::gomaster`` chat route in external mode (one-click optimize,

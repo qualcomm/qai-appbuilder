@@ -2075,6 +2075,14 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Explicitly opt an external source-tree deployment into the VLA-only UI.
+    # Release builds leave this disabled; full internal editions enable VLA
+    # through `is_internal` instead.
+    vla_simulation_enabled: bool = Field(
+        default=False,
+        description="Enable the internal VLA Simulation toolbar module on this deployment.",
+    )
+
     # 2026-07-10 — unified TLS/SSL verification switch.
     # Controls ALL outbound HTTPS connections in the process: web_fetch tool,
     # LLM stream, LLM title generator, MCP client, channels (Feishu / HTTP
@@ -2124,6 +2132,11 @@ class Settings(BaseSettings):
         layer of the four-layer internal-asset defence).
         """
         return self.edition == "internal"
+
+    @property
+    def is_vla_simulation_enabled(self) -> bool:
+        """Whether this deployment may expose the internal VLA Simulation UI."""
+        return self.is_internal or self.vla_simulation_enabled
 
     def data_paths(self) -> DataPaths:
         """Return a ``DataPaths`` rooted at ``data.data_dir``."""

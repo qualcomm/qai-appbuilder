@@ -24,6 +24,7 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify("0.0.0-test"),
     __EDITION__: JSON.stringify("internal"),
+    __VLA_SIMULATION_ENABLED__: JSON.stringify(false),
   },
   plugins: [vue()],
   resolve: {

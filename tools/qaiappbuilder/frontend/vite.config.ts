@@ -56,21 +56,17 @@ export default defineConfig(({ mode }) => {
   const backendWs = env.QAI_DEV_BACKEND_WS ?? `ws://127.0.0.1:${devBackend}`;
 
   // -------------------------------------------------------------------------
-  // Edition split (build-time). QAI_EDITION selects which feature set is
-  // compiled into the bundle. The release pipeline (scripts/release/build.py)
-  // sets QAI_EDITION=external so internal-only feature code is dead-code-
-  // eliminated and physically absent from the external open-source bundle.
-  // Defaults to "internal" for dev / `pnpm build` without the flag.
-  //   - `__EDITION__` is substituted as a literal so `IS_INTERNAL` guards
-  //     collapse to `if (false)` on external builds → Rollup drops the
-  //     guarded dynamic import() and the internal chunk is never emitted.
-  //   - The external-only resolve aliases below map any residual internal
-  //     module specifier to an empty stub so a physically-removed internal
-  //     source tree still resolves and nothing internal can leak into the
-  //     external bundle (defence-in-depth).
+  // Edition split (build-time). QAI_EDITION selects the full internal or
+  // external feature set; release builds set it to "external" so full-internal
+  // features are dead-code-eliminated and missing Pro/GoMaster sources resolve
+  // only through external stubs. The VLA-only source is present here and has a
+  // separate QAI_VLA_SIMULATION_ENABLED opt-in for this source distribution.
+  // By default, the release build omits it as well.
   // -------------------------------------------------------------------------
   const edition = env.QAI_EDITION === "external" ? "external" : "internal";
   const isExternal = edition === "external";
+  const vlaSimulationEnabled =
+    !isExternal || env.QAI_VLA_SIMULATION_ENABLED === "true";
   const emptyModule = fileURLToPath(
     new URL("./src/edition-stubs/empty.ts", import.meta.url),
   );
@@ -127,6 +123,7 @@ export default defineConfig(({ mode }) => {
     define: {
       __APP_VERSION__: JSON.stringify(pkg.version as string),
       __EDITION__: JSON.stringify(edition),
+      __VLA_SIMULATION_ENABLED__: JSON.stringify(vlaSimulationEnabled),
     },
 
     plugins: [vue()],

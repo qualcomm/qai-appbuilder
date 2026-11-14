@@ -16,9 +16,9 @@
 //     dynamic import() inside it) is dead-code-eliminated by Rollup, so the
 //     internal-only feature modules are never emitted into the bundle.
 //
-// This is the single source of truth for the frontend edition split. New
-// internal-only frontend features MUST route their imports through an
-// `IS_INTERNAL` guard so they stay out of the external open-source build.
+// Internal-only features use IS_INTERNAL. VLA also exposes a dedicated flag so
+// this external source tree can opt into VLA without compiling absent Pro or
+// GoMaster modules.
 // =============================================================================
 
 export const EDITION: "internal" | "external" =
@@ -27,3 +27,7 @@ export const EDITION: "internal" | "external" =
     : "internal");
 
 export const IS_INTERNAL = EDITION === "internal";
+
+/** VLA-only opt-in for external source trees that omit other internal modules. */
+export const IS_VLA_SIMULATION_ENABLED =
+  IS_INTERNAL || __VLA_SIMULATION_ENABLED__;

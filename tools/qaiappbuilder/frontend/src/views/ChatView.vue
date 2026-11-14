@@ -93,8 +93,12 @@ import {
   type ForkConfirmPayload,
 } from "@/composables/useConversationFork";
 import { useRouter } from "vue-router";
+const VlaSimulationViewport = IS_VLA_SIMULATION_ENABLED
+  ? defineAsyncComponent(() => import("@/components/pipeline/VlaSimulationViewport.vue"))
+  : null;
 import MbProIframe from "@/components/pipeline/MbProIframe.vue";
 import { useProConnection } from "@/composables/useProConnection";
+import { IS_INTERNAL, IS_VLA_SIMULATION_ENABLED } from "@/edition";
 import {
   ICON_CHEVRON_DOWN,
   ICON_CHEVRON_UP,
@@ -413,6 +417,9 @@ const showMbProIframe = computed(() =>
   store.activeTab?.activeMode === "pro" &&
   activeTabIdStr.value !== null &&
   isConnectedFor(activeTabIdStr.value),
+);
+const vlaSimulationActive = computed(
+  () => ui.activeToolMode === "vla-simulation",
 );
 
 // Mode-intro card visibility. Rendered as an on-demand overlay attached
@@ -1489,6 +1496,10 @@ useHeaderActions((): HeaderAction[] => [
       </transition>
 
       <MbProIframe v-if="showMbProIframe" :tab-id="activeTabIdStr!" />
+      <component
+        :is="VlaSimulationViewport"
+        v-if="VlaSimulationViewport && vlaSimulationActive"
+      />
 
       <ChatMessageList
         ref="messageListRef"

@@ -43,6 +43,7 @@
 |----------|------|
 | 🧩 **App Builder（应用构建器）** | **【核心亮点】** 内置工作台，一键运行打包好的 **Model Pack** 在本机 NPU 上推理。Pack 自包含格式（`manifest.json` + `runner.py` + 可选 `SKILL.md`），支持多精度变体切换、**Sticky Worker** 二次推理亚秒级响应、历史 / 对比 / 基准 / 分享，并提供可选 **LLM Agent Pipeline**——让云端 LLM 通过 `appbuilder_run` 工具自主编排多个 Pack 完成复合任务。 |
 | 🚀 **Model Builder（模型构建器）技能** | **【核心亮点】** AI 驱动的模型转换与优化——通过自然语言对话，将 PyTorch/ONNX 模型转换为多种精度的 QNN 格式（FP16/FP32/W8A16/W8A8/W4A16/W4A8 等），在骁龙 NPU 上运行推理并验证。**适用于 ~2 GB 以下的中小型模型；不支持大语言模型（LLM）转换。** |
+| 🦾 **VLA Simulation（仅内部版）** | 在聊天工具栏嵌入指定服务器上的仿真网页；填写管理员提供的完整 HTTP(S) 地址，地址保存在当前浏览器配置中。服务端需允许 iframe 嵌入，聊天输入与仿真器独立。在本外部源码树中，如需本地显示 VLA-only UI，前端构建和服务启动都显式设置 `QAI_VLA_SIMULATION_ENABLED=true`；默认外部发布包不包含该功能。 |
 | 💬 **多 Agent 流式聊天** | 实时 **WebSocket** 流式输出（并自动 **SSE** 回退），完整 Markdown + 代码语法高亮，并提供 **讨论模式**——多个具名 agent 角色围绕话题轮流辩论并收敛成实施计划。 |
 | 🔥 **骁龙 NPU 本地推理** | 通过 GenieAPIService daemon（受控的 启动/停止/状态/加载模型/实时日志）在骁龙 X Elite / X Plus NPU 上离线运行 LLM。 |
 | 🤖 **多模型支持** | 本地 NPU 模型与云端模型（OpenAI 兼容 provider）无缝切换。 |
