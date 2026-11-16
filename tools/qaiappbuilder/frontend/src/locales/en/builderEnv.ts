@@ -20,6 +20,8 @@ const builderEnv = {
   sizeHint:
     "About 4–5 GB will be downloaded (QAIRT SDK ≈ 2 GB, Python packages ≈ 2.5 GB). It is resumable — you can cancel and continue later.",
   unavailable: "This build cannot install it automatically.",
+  useSetupSh:
+    "On Linux the conversion environment is installed by `bash setup.sh` (QAIRT SDK + Python venv). Run it in the project folder, then restart the server.",
   installing: "Installing the model conversion environment",
   keepUsing: "You can keep using the app while this runs.",
   failed: "Installation failed",

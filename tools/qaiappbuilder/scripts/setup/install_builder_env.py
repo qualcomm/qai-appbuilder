@@ -56,6 +56,9 @@ from typing import Callable, Deque, Optional, Sequence
 
 PY310_SPEC = "cpython-3.10-windows-x86_64"
 SDK_MARKER_REL = Path("bin") / "aarch64-windows-msvc" / "qnn-context-binary-generator.exe"
+# Linux SDK markers - the same files scripts/init/install_qairt.py (run by setup.sh) treats as "installed".
+_SDK_MARKER_LINUX_X64 = Path("bin") / "x86_64-linux-clang" / "qnn-onnx-converter"
+_SDK_MARKER_LINUX_ARM64 = Path("bin") / "aarch64-oe-linux-gcc11.2" / "qnn-net-run"
 # Written into the SDK root ONLY when this script extracted that SDK itself. The uninstaller offers to delete an SDK
 # ONLY when this file is present: an SDK the user (or another tool) installed is never touched.
 OWNER_MARKER_NAME = ".installed_by_qai_modelbuilder"
@@ -351,13 +354,13 @@ def status(ctx: Ctx) -> dict:
             problems.append({"code": "sdk_not_configured", "key": "qairt_sdk_root"})
         elif not os.path.isabs(sdk_root):
             problems.append({"code": "sdk_path_not_absolute", "path": sdk_root})
-        elif not (Path(sdk_root) / SDK_MARKER_REL).is_file():
+        elif not (Path(sdk_root) / host_sdk_marker_rel()).is_file():
             problems.append({"code": "sdk_missing", "path": sdk_root})
         if not venv:
             problems.append({"code": "venv_not_configured", "key": "python_x64_venv"})
         elif not os.path.isabs(venv):
             problems.append({"code": "venv_path_not_absolute", "path": venv})
-        elif not (Path(venv) / "Scripts" / "python.exe").is_file():
+        elif not (Path(venv) / host_venv_python_rel()).is_file():
             problems.append({"code": "venv_missing", "path": venv})
     return {
         "ready": not problems,
@@ -368,6 +371,19 @@ def status(ctx: Ctx) -> dict:
         "sdk_version": ctx.version,
         "config": str(ctx.config_file),
     }
+
+
+def host_sdk_marker_rel() -> Path:
+    """SDK marker for THIS host (must match qai.platform.builder_env.detect.sdk_marker_rel)."""
+    if sys.platform.startswith("linux"):
+        machine = platform.machine().lower()
+        return _SDK_MARKER_LINUX_ARM64 if machine in ("aarch64", "arm64") else _SDK_MARKER_LINUX_X64
+    return SDK_MARKER_REL
+
+
+def host_venv_python_rel() -> Path:
+    """Interpreter inside a venv on THIS host."""
+    return Path("Scripts") / "python.exe" if sys.platform == "win32" else Path("bin") / "python"
 
 
 # ─── Network helpers ──────────────────────────────────────────────────────────

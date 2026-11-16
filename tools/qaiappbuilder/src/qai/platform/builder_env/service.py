@@ -37,6 +37,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Callable
 
+from qai.platform.builder_env.detect import installer_supported
 from qai.platform.logging import get_logger
 from qai.platform.process import terminate_process_tree
 from qai.platform.process.spawn_flags import no_window_creationflags
@@ -47,6 +48,7 @@ __all__ = [
     "InstallJob",
     "InstallState",
     "ScriptMissingError",
+    "UnsupportedPlatformError",
 ]
 
 _LOGGER = get_logger(__name__)
@@ -87,6 +89,10 @@ class InstallState(StrEnum):
 
 class AlreadyRunningError(RuntimeError):
     """An installer job is already running."""
+
+
+class UnsupportedPlatformError(RuntimeError):
+    """The installer cannot run on this host (it is Windows only)."""
 
 
 class ScriptMissingError(RuntimeError):
@@ -165,8 +171,11 @@ class BuilderEnvService:
 
     @property
     def installable(self) -> bool:
-        """The installer script is present in this build."""
-        return self._script.is_file()
+        """The installer script is present in this build AND this host can run it.
+
+        The script installs the Windows QAIRT SDK, so on Linux it is not offered:
+        there the environment comes from ``setup.sh``."""
+        return installer_supported() and self._script.is_file()
 
     @property
     def release_file(self) -> Path:
@@ -188,6 +197,11 @@ class BuilderEnvService:
 
         Must be called from the running event loop (the route handler).
         """
+        if not installer_supported():
+            raise UnsupportedPlatformError(
+                "the in-app installer only supports Windows; on Linux run `bash setup.sh` "
+                "(it installs the QAIRT SDK and the converter venv)"
+            )
         if self.running:
             raise AlreadyRunningError("a model-conversion environment install is already running")
         if mirror not in _MIRRORS:
