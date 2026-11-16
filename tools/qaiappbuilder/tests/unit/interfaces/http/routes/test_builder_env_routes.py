@@ -1,4 +1,4 @@
-﻿# ---------------------------------------------------------------------
+# ---------------------------------------------------------------------
 # Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
@@ -20,9 +20,16 @@ from fastapi.testclient import TestClient
 
 from interfaces.http.error_handlers import register_error_handlers
 from interfaces.http.routes import builder_env
-from qai.platform.builder_env import SDK_MARKER_REL, BuilderEnvService
+from qai.platform.builder_env import SDK_MARKER_REL, BuilderEnvService, detect as detect_mod
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _windows_host(monkeypatch):
+    """The installer and its Windows disk layout are what most tests here exercise; pin the host so they
+    pass on any CI box. The Linux test below overrides it."""
+    monkeypatch.setattr(detect_mod, "_host", lambda: ("windows", "x86_64"))
 
 SLOW = "import time; time.sleep(60)"
 OK = """
@@ -232,3 +239,36 @@ def test_not_gated_on_qairt_env_json(tmp_path):
         assert client.get("/api/system/builder-env").status_code == 200
         assert client.post("/api/system/builder-env/install", json={}).status_code == 202
         wait_state(client, "succeeded")
+
+
+@pytest.mark.parametrize("arch", ["x86_64", "aarch64"])
+def test_linux_reports_setup_sh_and_refuses_install(tmp_path, monkeypatch, arch):
+    """Linux: ready comes from what setup.sh created; the install button is replaced by a hint."""
+    monkeypatch.setattr(detect_mod, "_host", lambda: ("linux", arch))
+    sdk, venv = tmp_path / "sdk", tmp_path / "envs" / "venv"
+    marker = {"x86_64": "bin/x86_64-linux-clang/qnn-onnx-converter",
+              "aarch64": "bin/aarch64-oe-linux-gcc11.2/qnn-net-run"}[arch]
+    client, _, _ = build(tmp_path, OK)
+    with client:
+        write_cfg(tmp_path, {"qairt_sdk_root": str(sdk), "python_x64_venv": str(venv)})
+        before = client.get("/api/system/builder-env").json()
+        assert before["ready"] is False and before["missing"] == ["sdk", "venv"]
+        assert before["installable"] is False and before["install_hint"] == "setup_sh"
+
+        (sdk / marker).parent.mkdir(parents=True)
+        (sdk / marker).write_text("ELF")
+        (venv / "bin").mkdir(parents=True)
+        (venv / "bin" / "python").write_text("#!")
+        after = client.get("/api/system/builder-env").json()
+        assert after["ready"] is True and after["problems"] == []
+
+        r = client.post("/api/system/builder-env/install", json={})
+    assert r.status_code == 400 and "setup.sh" in r.text
+    assert client.get("/api/system/builder-env").json()["job"] is None
+
+
+def test_windows_has_no_install_hint(tmp_path):
+    client, _, _ = build(tmp_path, OK)
+    with client:
+        body = client.get("/api/system/builder-env").json()
+    assert body["installable"] is True and body["install_hint"] == ""

@@ -178,11 +178,21 @@ const sdkVersion = computed(() => {
         >
           {{ t("builderEnv.missingParts") }}: {{ missingText }}
         </p>
-        <p class="builder-env-card__hint">
+        <p
+          v-if="status?.install_hint !== 'setup_sh'"
+          class="builder-env-card__hint"
+        >
           {{ t("builderEnv.sizeHint") }}
         </p>
         <p
-          v-if="env.phase.value === 'unavailable'"
+          v-if="status?.install_hint === 'setup_sh'"
+          class="builder-env-card__hint"
+          data-testid="builder-env-use-setup-sh"
+        >
+          {{ t("builderEnv.useSetupSh") }}
+        </p>
+        <p
+          v-else-if="env.phase.value === 'unavailable'"
           class="builder-env-card__hint"
         >
           {{ t("builderEnv.unavailable") }}

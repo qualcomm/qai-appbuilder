@@ -14,7 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from qai.platform.builder_env import SDK_MARKER_REL, detect_builder_env
+from qai.platform.builder_env import SDK_MARKER_REL, detect_builder_env, installer_supported, sdk_marker_rel, venv_python_rel
+from qai.platform.builder_env import detect as detect_mod
 
 pytestmark = pytest.mark.unit
 
@@ -237,3 +238,100 @@ def test_read_release_version(tmp_path, content, want):
     if content is not None:
         f.write_text(content, encoding="utf-8")
     assert read_release_version(f) == want
+
+# ── Linux (x86_64 + aarch64): what setup.sh produces must read as ready ──────
+
+
+def _linux_sdk(root: Path, arch: str) -> Path:
+    rel = {
+        "x86_64": Path("bin") / "x86_64-linux-clang" / "qnn-onnx-converter",
+        "aarch64": Path("bin") / "aarch64-oe-linux-gcc11.2" / "qnn-net-run",
+    }[arch]
+    f = root / rel
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("\x7fELF")
+    return root
+
+
+def _linux_venv(venv: Path) -> Path:
+    py = venv / "bin" / "python"
+    py.parent.mkdir(parents=True, exist_ok=True)
+    py.write_text("#!")
+    return venv
+
+
+@pytest.mark.parametrize("arch", ["x86_64", "aarch64"])
+def test_linux_setup_sh_layout_is_ready(tmp_path, monkeypatch, arch):
+    monkeypatch.setattr(detect_mod, "_host", lambda: ("linux", arch))
+    sdk, venv = _linux_sdk(tmp_path / "sdk", arch), _linux_venv(tmp_path / "envs" / "venv")
+    st = detect_builder_env(_cfg(tmp_path, {"qairt_sdk_root": str(sdk), "python_x64_venv": str(venv)}))
+    assert st.ready and st.problems == ()
+
+
+@pytest.mark.parametrize("arch", ["x86_64", "aarch64"])
+def test_linux_missing_parts_are_reported(tmp_path, monkeypatch, arch):
+    monkeypatch.setattr(detect_mod, "_host", lambda: ("linux", arch))
+    st = detect_builder_env(
+        _cfg(tmp_path, {"qairt_sdk_root": str(tmp_path / "a"), "python_x64_venv": str(tmp_path / "b")})
+    )
+    assert codes(st) == ["sdk_missing", "venv_missing"]
+
+
+def test_linux_does_not_accept_the_windows_layout(tmp_path, monkeypatch):
+    """A Windows-style SDK/venv on a Linux box is not a usable environment."""
+    monkeypatch.setattr(detect_mod, "_host", lambda: ("linux", "x86_64"))
+    sdk, venv = _make_sdk(tmp_path / "sdk"), _make_venv(tmp_path / "venv")
+    st = detect_builder_env(_cfg(tmp_path, {"qairt_sdk_root": str(sdk), "python_x64_venv": str(venv)}))
+    assert codes(st) == ["sdk_missing", "venv_missing"]
+
+
+def test_linux_aarch64_sdk_is_not_valid_on_x86_64(tmp_path, monkeypatch):
+    monkeypatch.setattr(detect_mod, "_host", lambda: ("linux", "x86_64"))
+    sdk, venv = _linux_sdk(tmp_path / "sdk", "aarch64"), _linux_venv(tmp_path / "venv")
+    st = detect_builder_env(_cfg(tmp_path, {"qairt_sdk_root": str(sdk), "python_x64_venv": str(venv)}))
+    assert codes(st) == ["sdk_missing"]
+
+
+def test_markers_match_what_setup_sh_checks():
+    """setup.sh's installer (install_qairt.py) and the app must agree on 'SDK installed'."""
+    from scripts.init import install_qairt as iq
+
+    assert sdk_marker_rel("linux", "x86_64") == iq._QAIRT_SENTINEL_LINUX_X64
+    assert sdk_marker_rel("linux", "aarch64") == iq._QAIRT_SENTINEL_LINUX_ARM64
+    assert sdk_marker_rel("windows", "aarch64") == iq._QAIRT_SENTINEL_WIN
+    assert venv_python_rel("linux") == Path("bin") / "python"
+    assert venv_python_rel("windows") == Path("Scripts") / "python.exe"
+
+
+@pytest.mark.parametrize(("host", "supported"), [(("windows", "x86_64"), True), (("windows", "aarch64"), True),
+                                                 (("linux", "x86_64"), False), (("linux", "aarch64"), False),
+                                                 (("other", "arm64"), False)])
+def test_installer_only_supported_on_windows(monkeypatch, host, supported):
+    monkeypatch.setattr(detect_mod, "_host", lambda: host)
+    assert installer_supported() is supported
+
+
+@pytest.mark.parametrize(("machine", "arch"), [("x86_64", "x86_64"), ("AMD64", "x86_64"),
+                                               ("aarch64", "aarch64"), ("arm64", "aarch64"), ("riscv64", "riscv64")])
+def test_host_arch_normalisation(monkeypatch, machine, arch):
+    monkeypatch.setattr(detect_mod.sys, "platform", "linux")
+    monkeypatch.setattr(detect_mod.platform, "machine", lambda: machine)
+    assert detect_mod._host() == ("linux", arch)
+
+
+@pytest.mark.parametrize("arch", ["x86_64", "aarch64"])
+def test_script_check_matches_backend_on_linux(ibe, tmp_path, monkeypatch, arch):
+    """install_builder_env.py --check runs on Linux too and must say the same as the backend."""
+    monkeypatch.setattr(detect_mod, "_host", lambda: ("linux", arch))
+    monkeypatch.setattr(ibe.sys, "platform", "linux")
+    monkeypatch.setattr(ibe.platform, "machine", lambda: arch)
+    sdk, venv = _linux_sdk(tmp_path / "sdk", arch), _linux_venv(tmp_path / "venv")
+    cfgfile = _cfg(tmp_path, {"qairt_sdk_root": str(sdk), "python_x64_venv": str(venv)})
+    backend = detect_builder_env(cfgfile)
+    script = _script_status(ibe, tmp_path, cfgfile)
+    assert backend.ready and script["ready"] is True
+    # and a half-installed one
+    for victim in (sdk / sdk_marker_rel("linux", arch), venv / "bin" / "python"):
+        victim.unlink()
+    backend, script = detect_builder_env(cfgfile), _script_status(ibe, tmp_path, cfgfile)
+    assert not backend.ready and [p["code"] for p in script["problems"]] == [p.code for p in backend.problems]

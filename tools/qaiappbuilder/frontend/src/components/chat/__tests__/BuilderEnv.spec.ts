@@ -105,6 +105,21 @@ describe("BuilderEnvCard", () => {
     expect(w.find(tid("builder-env-cancel")).exists()).toBe(false);
   });
 
+  it("Linux: no Install button and no size hint, tells the user to run setup.sh", async () => {
+    const w = await mountCard(status({ installable: false, install_hint: "setup_sh" }));
+    expect(w.get(tid("builder-env-card")).attributes("data-phase")).toBe("unavailable");
+    expect(w.find(tid("builder-env-install")).exists()).toBe(false);
+    expect(w.get(tid("builder-env-use-setup-sh")).text()).toContain("bash setup.sh");
+    expect(w.text()).not.toContain("cannot install it automatically");
+    expect(w.text()).not.toContain("GB");
+  });
+
+  it("a build without the installer keeps the old 'cannot install' text", async () => {
+    const w = await mountCard(status({ installable: false }));
+    expect(w.find(tid("builder-env-use-setup-sh")).exists()).toBe(false);
+    expect(w.text()).toContain("cannot install it automatically");
+  });
+
   it("Install sends the chosen mirror and proxy", async () => {
     startMock.mockResolvedValue({ job_id: "j1", status: "queued" });
     const w = await mountCard(status());

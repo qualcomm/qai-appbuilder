@@ -63,8 +63,10 @@ export interface BuilderEnvStatus {
   /** QAIRT version the current qairt_env.json names; "" when none. */
   installed_sdk_version?: string;
   job: BuilderEnvJob | null;
-  /** False when the installer script is not part of this build. */
+  /** False when the installer script is not part of this build, or this host (Linux) cannot run it. */
   installable: boolean;
+  /** Why it is not installable: "" or "setup_sh" (Linux - the environment comes from `bash setup.sh`). */
+  install_hint?: string;
 }
 
 export type BuilderEnvMirror = "auto" | "official" | "cn";
