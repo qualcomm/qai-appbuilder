@@ -91,7 +91,8 @@ $srcDirty = [bool](& git status --porcelain -- frontend/src frontend/package.jso
 if ($srcDirty) { Warn 'frontend sources have uncommitted changes - frontend\dist may not match HEAD.' }
 
 # --- 3. stage: git archive + frontend\dist ---------------------------------------
-$Name = "QAIAppBuilder-$Version"                          # top-level directory inside the archive\n$FileBase = "QAIAppBuilder-$Version-qairt$QairtShort-linux" # archive file name
+$Name = "QAIAppBuilder-$Version"                          # top-level directory inside the archive
+$FileBase = "QAIAppBuilder-$Version-qairt$QairtShort-linux" # archive file name
 if (-not $OutDir) { $OutDir = Join-Path $Root 'dist\linux' }
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $OutDir = (Resolve-Path $OutDir).Path
