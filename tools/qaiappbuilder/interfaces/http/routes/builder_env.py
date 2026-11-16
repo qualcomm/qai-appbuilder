@@ -33,7 +33,9 @@ from qai.platform.builder_env import (
     AlreadyRunningError,
     InstallJob,
     ScriptMissingError,
+    UnsupportedPlatformError,
     detect_builder_env,
+    installer_supported,
     read_release_version,
 )
 from qai.platform.errors import ConflictError, NotFoundError, ValidationError
@@ -89,8 +91,12 @@ class BuilderEnvResponse(BaseModel):
     # QAIRT version the current qairt_env.json names; "" when none / no config.
     installed_sdk_version: str = ""
     job: JobDto | None
-    # False when the installer script is not in this build (the UI hides the button).
+    # False when the installer script is not in this build, or this host cannot run it
+    # (Linux). The UI then hides the button.
     installable: bool
+    # Why it is not installable here: "" (nothing to say / script missing) or "setup_sh"
+    # (Linux: the environment comes from `bash setup.sh`).
+    install_hint: str = ""
 
 
 class InstallRequest(BaseModel):
@@ -166,6 +172,7 @@ def build_router(*, container: Container) -> APIRouter:
             installed_sdk_version=status.sdk_version,
             job=_job_dto(job) if job is not None else None,
             installable=service.installable,
+            install_hint="" if installer_supported() else "setup_sh",
         )
 
     @router.post("/builder-env/install", response_model=InstallStarted, status_code=202)
@@ -174,6 +181,11 @@ def build_router(*, container: Container) -> APIRouter:
         body = body or InstallRequest()
         try:
             job = service.start(mirror=body.mirror, proxy=body.proxy)
+        except UnsupportedPlatformError as exc:
+            # Linux: the environment is created by setup.sh, not by this installer.
+            raise ValidationError(
+                "builder_env.unsupported_platform", str(exc), field_errors={}
+            ) from exc
         except AlreadyRunningError as exc:
             raise ConflictError("builder_env.already_running", str(exc)) from exc
         except ScriptMissingError as exc:

@@ -20,9 +20,18 @@ from qai.platform.builder_env import (
     BuilderEnvService,
     InstallState,
     ScriptMissingError,
+    UnsupportedPlatformError,
 )
+from qai.platform.builder_env import detect as detect_mod
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _windows_host(monkeypatch):
+    """The installer is Windows-only; pin the host so these tests behave the same on any CI box.
+    A test that needs another host just calls ``monkeypatch.setattr`` again (the later one wins)."""
+    monkeypatch.setattr(detect_mod, "_host", lambda: ("windows", "x86_64"))
 
 
 def fake_script(tmp_path: Path, body: str) -> Path:
@@ -289,3 +298,15 @@ def _pid_alive(pid: int) -> bool:
         return True
     except OSError:
         return False
+
+
+@pytest.mark.parametrize("arch", ["x86_64", "aarch64"])
+async def test_linux_is_not_installable_and_start_is_refused(tmp_path, monkeypatch, arch):
+    """On Linux the environment comes from setup.sh: no install button, and no child process."""
+    monkeypatch.setattr(detect_mod, "_host", lambda: ("linux", arch))
+    svc = make(tmp_path, "pass")
+    assert svc.installable is False
+    with pytest.raises(UnsupportedPlatformError) as ei:
+        svc.start()
+    assert "setup.sh" in str(ei.value)
+    assert svc.job is None and not svc.running

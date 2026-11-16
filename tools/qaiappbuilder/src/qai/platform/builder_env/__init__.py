@@ -12,7 +12,10 @@ from qai.platform.builder_env.detect import (
     BuilderEnvProblem,
     BuilderEnvStatus,
     detect_builder_env,
+    installer_supported,
     read_release_version,
+    sdk_marker_rel,
+    venv_python_rel,
 )
 from qai.platform.builder_env.service import (
     AlreadyRunningError,
@@ -20,6 +23,7 @@ from qai.platform.builder_env.service import (
     InstallJob,
     InstallState,
     ScriptMissingError,
+    UnsupportedPlatformError,
 )
 
 __all__ = [
@@ -31,6 +35,10 @@ __all__ = [
     "InstallJob",
     "InstallState",
     "ScriptMissingError",
+    "UnsupportedPlatformError",
     "detect_builder_env",
+    "installer_supported",
     "read_release_version",
+    "sdk_marker_rel",
+    "venv_python_rel",
 ]

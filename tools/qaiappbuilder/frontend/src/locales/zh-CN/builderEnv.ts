@@ -19,6 +19,8 @@ const builderEnv = {
   sizeHint:
     "需要下载约 4–5 GB（QAIRT SDK 约 2 GB，Python 依赖约 2.5 GB），支持断点续传，可随时取消，之后接着下载。",
   unavailable: "当前版本无法自动安装。",
+  useSetupSh:
+    "Linux 下模型转换环境由 `bash setup.sh` 安装（QAIRT SDK + Python 虚拟环境）。请在项目目录运行它，然后重启服务。",
   installing: "正在安装模型转换环境",
   keepUsing: "安装期间可以继续使用本应用。",
   failed: "安装失败",
