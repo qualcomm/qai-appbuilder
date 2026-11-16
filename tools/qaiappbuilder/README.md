@@ -595,7 +595,7 @@ Describe how the AI should use this skill...
 | **OS** | Ubuntu 22.04 / 24.04 (x86_64 or aarch64, e.g. QCS8300 and other Snapdragon IoT boards) |
 | **CPU** (HTP/NPU inference) | Qualcomm HTP on aarch64, requires the `qcom-fastrpc1` package for `libcdsprpc.so` (`setup.sh` detects this and prints install guidance; if already installed but missing the unversioned symlink, `setup.sh` creates it automatically) |
 | **Python** | System must have 3.12 pre-installed (`sudo apt install python3.12 python3.12-venv`); aarch64 additionally needs `python3.12-dev` (for compiling onnxsim) |
-| **Node.js / pnpm** | Not required on Linux — `setup.sh --frontend` / `build.sh` bootstrap a project-local Node 22 + pnpm 11.9.0 automatically (`scripts/setup/node_bootstrap.sh`, lives entirely under `envs/`) |
+| **Node.js / pnpm** | Not required on Linux — the release package ships `frontend/dist` prebuilt; `setup.sh` / `build.sh` bootstrap a project-local Node 22 + pnpm 11.9.0 only when it is missing (`scripts/setup/node_bootstrap.sh`, lives entirely under `envs/`). `setup.sh --frontend` forces a rebuild, `--no-frontend` skips it. The package is built on Windows with `installer\package_linux.ps1` |
 | **Build tools** (aarch64 only) | `cmake` + `build-essential` (C++ compiler), for building onnxsim==0.4.36 from source (no aarch64 pre-built wheel exists for this version) |
 | **QAIRT SDK** | Automatically downloaded and installed by `setup.sh` to `~/qairt/<version>` (or `$QAIRT_SDK_ROOT`) |
 
