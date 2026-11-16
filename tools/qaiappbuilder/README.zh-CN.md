@@ -548,7 +548,7 @@ use_for: 适用场景描述
 | **操作系统** | Ubuntu 22.04 / 24.04（x86_64 或 aarch64，如 QCS8300 等骁龙 IoT 板卡） |
 | **处理器**（HTP/NPU 推理） | aarch64 上的 Qualcomm HTP，需 `qcom-fastrpc1` 包提供 `libcdsprpc.so`（`setup.sh` 会检测并给出安装指引；若已安装但缺 unversioned symlink，`setup.sh` 会自动创建） |
 | **Python** | 系统需预先安装 3.12（`sudo apt install python3.12 python3.12-venv`）；aarch64 额外需 `python3.12-dev`（编译 onnxsim 用） |
-| **Node.js / pnpm** | Linux 下不需要——`setup.sh --frontend` / `build.sh` 会自动搭建项目本地 Node 22 + pnpm 11.9.0（`scripts/setup/node_bootstrap.sh`，完全落在 `envs/` 下） |
+| **Node.js / pnpm** | Linux 下不需要——发布包已自带预编译的 `frontend/dist`；只有它缺失时，`setup.sh` / `build.sh` 才会搭建项目本地 Node 22 + pnpm 11.9.0（`scripts/setup/node_bootstrap.sh`，完全落在 `envs/` 下）。`setup.sh --frontend` 强制重新编译，`--no-frontend` 跳过。Linux 包在 Windows 上用 `installer\package_linux.ps1` 打包 |
 | **编译工具**（仅 aarch64） | `cmake` + `build-essential`（C++ 编译器），用于源码编译 onnxsim==0.4.36（该版本无 aarch64 预编译 wheel） |
 | **QAIRT SDK** | 由 `setup.sh` 自动下载安装到 `~/qairt/<version>`（或 `$QAIRT_SDK_ROOT`） |
 

@@ -215,3 +215,17 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 - 链接:应用自己的地址在窗口里打开(SSO 登录弹窗也一样);其他 http(s) 链接交给系统浏览器;其他协议一律拒绝。
 - 语言:按 Windows 显示语言选中文或英文。
 - 构建、源码结构、调试方法:见 [`desktop/README.md`](../desktop/README.md)。打包命令见上面的"打包"一节(一条命令会自动编译桌面版)。
+
+## Linux 安装包(tar.gz)
+
+在 **Windows** 上用 `installer\package_linux.ps1` 打包,产物是 `dist\linux\QAIAppBuilder-<版本>-linux.tar.gz`(与架构无关,x86_64 / aarch64 通用):
+
+```powershell
+.\installer\package_linux.ps1                  # 先跑 Build.bat 编译前端,再打包
+.\installer\package_linux.ps1 -SkipFrontend    # 沿用现有 frontend\dist
+.\installer\package_linux.ps1 -Version 3.2.0   # 版本只用于文件名,不会修改任何版本文件
+```
+
+- 包里的源码来自 `git archive HEAD`(**已提交的内容**,LF 换行,不含 `desktop\`、`installer\`),再加上编译好的 `frontend\dist` 和 `frontend\dist\.build_info`(版本、提交号、时间)。工作区有未提交的改动时会警告,并把提交号标成 `-dirty`。
+- 用户在 Linux 上:`tar -xzf <文件> && cd QAIAppBuilder-<版本>-linux && bash setup.sh && bash start.sh`。`setup.sh` 发现 `frontend/dist` 已存在(有 `index.html` 且 `assets/` 非空)就跳过 Node/pnpm 和前端编译;`--frontend` 强制重新编译,`--no-frontend` 完全不处理前端。
+- 打包时会检查文本文件里没有 CRLF(会让 `#!/usr/bin/env bash` 失效),并回读压缩包确认 `setup.sh` 和 `frontend/dist/index.html` 在里面。
