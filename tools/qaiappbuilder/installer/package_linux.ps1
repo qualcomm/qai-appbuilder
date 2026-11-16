@@ -1,4 +1,4 @@
-﻿# ---------------------------------------------------------------------
+# ---------------------------------------------------------------------
 # Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
@@ -12,15 +12,16 @@
        exactly what is in the repository - not the working tree)
     3. add the built frontend\dist plus frontend\dist\.build_info
     4. pack everything under one top-level directory:
-         dist\linux\QAIAppBuilder-<version>-linux.tar.gz
+         dist\linux\QAIAppBuilder-<version>-qairt<A.B.C>-linux.tar.gz
 
-    On the Linux machine:  tar -xzf <file>  &&  cd QAIAppBuilder-<version>-linux  &&  bash setup.sh  &&  bash start.sh
+    On the Linux machine:  tar -xzf <file>  &&  cd QAIAppBuilder-<version>-qairt<A.B.C>-linux  &&  bash setup.sh  &&  bash start.sh
     setup.sh finds frontend\dist already built and skips Node/pnpm and the frontend build.
 
     Not packed: desktop\ (Tauri, Windows only) and installer\ (this script, Inno Setup).
     The package is architecture independent; Python/QAIRT environments are created by setup.sh.
 
 .PARAMETER SkipFrontend  do not run Build.bat; use the existing frontend\dist
+.PARAMETER QairtVersion  QAIRT version shown in the file name (default: scripts\qairt_release.json); only the A.B.C part is used
 .PARAMETER Version       version used in the file name (default: build_info.json "version"); no version file is changed
 .PARAMETER OutDir        output directory (default: dist\linux)
 .PARAMETER Help          show this help
@@ -28,6 +29,7 @@
 param(
     [switch]$SkipFrontend,
     [string]$Version = '',
+    [string]$QairtVersion = '',
     [string]$OutDir = '',
     [switch]$Help
 )
@@ -56,6 +58,14 @@ if (-not $Version) {
 if ($Version -notmatch '^\d+(\.\d+){1,3}') { Fail "bad version '$Version'" }
 Info "version: $Version"
 
+# QAIRT version in the file name, aligned with the Windows installer (read from scripts\qairt_release.json)
+if (-not $QairtVersion) {
+    $QairtVersion = [string](Get-Content (Join-Path $Root 'scripts\qairt_release.json') -Raw | ConvertFrom-Json).qairt_version
+}
+if ($QairtVersion -notmatch '^(\d+\.\d+\.\d+)') { Fail "bad qairt_version '$QairtVersion'" }
+$QairtShort = $Matches[1]
+Info "QAIRT: $QairtVersion (file name uses $QairtShort)"
+
 # --- 1. frontend --------------------------------------------------------------
 if (-not $SkipFrontend) {
     Info 'building frontend via Build.bat ...'
@@ -81,7 +91,7 @@ $srcDirty = [bool](& git status --porcelain -- frontend/src frontend/package.jso
 if ($srcDirty) { Warn 'frontend sources have uncommitted changes - frontend\dist may not match HEAD.' }
 
 # --- 3. stage: git archive + frontend\dist ---------------------------------------
-$Name = "QAIAppBuilder-$Version-linux"
+$Name = "QAIAppBuilder-$Version-qairt$QairtShort-linux"
 if (-not $OutDir) { $OutDir = Join-Path $Root 'dist\linux' }
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $OutDir = (Resolve-Path $OutDir).Path
@@ -104,7 +114,7 @@ Remove-Item $srcTar -Force
 $null = robocopy $dist (Join-Path $stage 'frontend\dist') /E /NFL /NDL /NJH /NJS /NP
 if ($LASTEXITCODE -ge 8) { Fail "robocopy frontend\dist failed ($LASTEXITCODE)" }
 
-$buildInfo = "version=$Version`ncommit=$commit`nbuilt_at=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))`n"
+$buildInfo = "version=$Version`nqairt=$QairtVersion`ncommit=$commit`nbuilt_at=$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))`n"
 [IO.File]::WriteAllText((Join-Path $stage 'frontend\dist\.build_info'), $buildInfo, (New-Object Text.UTF8Encoding $false))
 
 # --- 4. safety checks, then pack -------------------------------------------------
