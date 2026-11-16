@@ -4,30 +4,41 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 # setup.sh — Ubuntu 一键初始化（x86_64 & aarch64）
-# Usage: bash setup.sh [--frontend]
+# Usage: bash setup.sh [--frontend | --no-frontend]
 #
 # Idempotent: safe to run multiple times; only fills in what is missing.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FRONTEND=0
+# Frontend mode: auto (default) | force | skip.
+#   auto  - build frontend/dist only when it is missing (a release package
+#           ships it prebuilt, so no Node/pnpm is needed on the user's box).
+#   force - always (re)build, even if frontend/dist exists.
+#   skip  - never touch the frontend.
+FRONTEND_MODE=auto
 
 # ---------------------------------------------------------------------------
 # Parse arguments
 # ---------------------------------------------------------------------------
 for arg in "$@"; do
   case "$arg" in
-    --frontend) FRONTEND=1 ;;
+    --frontend)    FRONTEND_MODE=force ;;
+    --no-frontend) FRONTEND_MODE=skip ;;
     -h|--help)
       cat <<'EOF'
-Usage: bash setup.sh [--frontend]
+Usage: bash setup.sh [--frontend | --no-frontend]
 
-Set up QAI AppBuilder on Linux. Frontend installation and build are skipped
-by default; pass --frontend to bootstrap project-local Node/pnpm and build it.
+Set up QAI AppBuilder on Linux.
+
+The web UI (frontend/dist) is normally shipped prebuilt in the release
+package; in that case it is used as is and Node.js/pnpm are not needed. When
+frontend/dist is missing (e.g. a git checkout), setup.sh bootstraps
+project-local Node/pnpm and builds it.
 
 Options:
-  --frontend  Install frontend dependencies and build frontend/dist
-  -h, --help  Show this help and exit
+  --frontend     Always rebuild frontend/dist, even if it already exists
+  --no-frontend  Never build the frontend (backend only)
+  -h, --help     Show this help and exit
 EOF
       exit 0
       ;;
@@ -53,6 +64,23 @@ detect_arch() {
 # ---------------------------------------------------------------------------
 # Step 01 — Python 3.12
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Frontend: is a usable prebuilt bundle already here?
+# ---------------------------------------------------------------------------
+# A bundle counts as usable when index.html exists and assets/ is non-empty.
+FRONTEND_PREBUILT=0
+if [[ -f "$REPO_ROOT/frontend/dist/index.html" ]] \
+   && [[ -n "$(ls -A "$REPO_ROOT/frontend/dist/assets" 2>/dev/null)" ]]; then
+  FRONTEND_PREBUILT=1
+fi
+# FRONTEND=1 -> run Steps 02/03/08/09 (Node/pnpm bootstrap, install, build).
+FRONTEND=0
+case "$FRONTEND_MODE" in
+  force) FRONTEND=1 ;;
+  auto)  [[ "$FRONTEND_PREBUILT" -eq 1 ]] || FRONTEND=1 ;;
+  skip)  FRONTEND=0 ;;
+esac
+
 info "Step 01: checking Python 3.12..."
 if ! command -v python3.12 &>/dev/null; then
   error "python3.12 not found.
@@ -77,8 +105,10 @@ if [[ "$FRONTEND" -eq 1 ]]; then
   source "$NODE_BOOTSTRAP"
   info "  found: Node.js $(node --version)"
   info "  found: pnpm $(pnpm --version)"
+elif [[ "$FRONTEND_MODE" == "skip" ]]; then
+  info "Steps 02/03: frontend skipped (--no-frontend)"
 else
-  info "Steps 02/03: frontend skipped by default (pass --frontend to enable)"
+  info "Steps 02/03: prebuilt frontend/dist found, Node.js/pnpm not needed"
 fi
 
 # ---------------------------------------------------------------------------
@@ -275,8 +305,10 @@ if [[ "$FRONTEND" -eq 1 ]]; then
   info "Step 08: installing frontend dependencies (pnpm install)..."
   pnpm -C "$REPO_ROOT/frontend" install
   info "  frontend dependencies installed"
+elif [[ "$FRONTEND_MODE" == "skip" ]]; then
+  info "Step 08: frontend skipped (--no-frontend)"
 else
-  info "Step 08: frontend skipped by default (pass --frontend to enable)"
+  info "Step 08: prebuilt frontend/dist found, skipping dependency install"
 fi
 
 # ---------------------------------------------------------------------------
@@ -286,8 +318,10 @@ if [[ "$FRONTEND" -eq 1 ]]; then
   info "Step 09: building frontend (pnpm build)..."
   pnpm -C "$REPO_ROOT/frontend" build
   info "  frontend built → frontend/dist/"
+elif [[ "$FRONTEND_MODE" == "skip" ]]; then
+  info "Step 09: frontend skipped (--no-frontend)"
 else
-  info "Step 09: frontend skipped by default (pass --frontend to enable)"
+  info "Step 09: prebuilt frontend/dist found, skipping build (use --frontend to rebuild)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -491,9 +525,11 @@ else
   echo "  Infer venv   : skipped (aarch64-only)"
 fi
 if [[ "$FRONTEND" -eq 1 ]]; then
-  echo "  Frontend     : frontend/dist/ (built)"
+  echo "  Frontend     : frontend/dist/ (built just now)"
+elif [[ "$FRONTEND_MODE" == "skip" ]]; then
+  echo "  Frontend     : skipped (--no-frontend); run build.sh to build it later"
 else
-  echo "  Frontend     : skipped by default (pass --frontend to enable, or run build.sh)"
+  echo "  Frontend     : frontend/dist/ (prebuilt, used as is)"
 fi
 echo ""
 echo "  Next steps:"

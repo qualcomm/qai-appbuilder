@@ -53,6 +53,12 @@ if [[ ! -d "$VENV" ]]; then
   exit 1
 fi
 
+# Without the built web UI the server only answers {"detail":"Not Found"}.
+if [[ ! -f "$REPO_ROOT/frontend/dist/index.html" ]]; then
+  echo "[start] WARNING: frontend/dist/ is missing - the web page will show {\"detail\":\"Not Found\"}." >&2
+  echo "[start]          Build it with 'bash build.sh' (or 'bash setup.sh --frontend'), then restart." >&2
+fi
+
 # shellcheck source=/dev/null
 source "$VENV/bin/activate"
 export PYTHONPATH="$REPO_ROOT/src:$REPO_ROOT"
