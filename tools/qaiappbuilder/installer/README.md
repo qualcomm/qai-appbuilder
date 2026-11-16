@@ -227,5 +227,5 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 ```
 
 - 包里的源码来自 `git archive HEAD`(**已提交的内容**,LF 换行,不含 `desktop\`、`installer\`),再加上编译好的 `frontend\dist` 和 `frontend\dist\.build_info`(版本、提交号、时间)。工作区有未提交的改动时会警告,并把提交号标成 `-dirty`。
-- 用户在 Linux 上:`tar -xzf <文件> && cd QAIAppBuilder-<版本>-qairt<A.B.C>-linux && bash setup.sh && bash start.sh`。`setup.sh` 发现 `frontend/dist` 已存在(有 `index.html` 且 `assets/` 非空)就跳过 Node/pnpm 和前端编译;`--frontend` 强制重新编译,`--no-frontend` 完全不处理前端。
+- 用户在 Linux 上:`tar -xzf <文件> && cd QAIAppBuilder-<版本> && bash setup.sh && bash start.sh`。`setup.sh` 发现 `frontend/dist` 已存在(有 `index.html` 且 `assets/` 非空)就跳过 Node/pnpm 和前端编译;`--frontend` 强制重新编译,`--no-frontend` 完全不处理前端。
 - 打包时会检查文本文件里没有 CRLF(会让 `#!/usr/bin/env bash` 失效),并回读压缩包确认 `setup.sh` 和 `frontend/dist/index.html` 在里面。
