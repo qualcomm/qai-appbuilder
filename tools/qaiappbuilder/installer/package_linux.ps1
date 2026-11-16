@@ -14,7 +14,7 @@
     4. pack everything under one top-level directory:
          dist\linux\QAIAppBuilder-<version>-qairt<A.B.C>-linux.tar.gz
 
-    On the Linux machine:  tar -xzf <file>  &&  cd QAIAppBuilder-<version>-qairt<A.B.C>-linux  &&  bash setup.sh  &&  bash start.sh
+    On the Linux machine:  tar -xzf <file>  &&  cd QAIAppBuilder-<version>  &&  bash setup.sh  &&  bash start.sh
     setup.sh finds frontend\dist already built and skips Node/pnpm and the frontend build.
 
     Not packed: desktop\ (Tauri, Windows only) and installer\ (this script, Inno Setup).
@@ -91,11 +91,11 @@ $srcDirty = [bool](& git status --porcelain -- frontend/src frontend/package.jso
 if ($srcDirty) { Warn 'frontend sources have uncommitted changes - frontend\dist may not match HEAD.' }
 
 # --- 3. stage: git archive + frontend\dist ---------------------------------------
-$Name = "QAIAppBuilder-$Version-qairt$QairtShort-linux"
+$Name = "QAIAppBuilder-$Version"                          # top-level directory inside the archive\n$FileBase = "QAIAppBuilder-$Version-qairt$QairtShort-linux" # archive file name
 if (-not $OutDir) { $OutDir = Join-Path $Root 'dist\linux' }
 New-Item -ItemType Directory -Force $OutDir | Out-Null
 $OutDir = (Resolve-Path $OutDir).Path
-$Archive = Join-Path $OutDir "$Name.tar.gz"
+$Archive = Join-Path $OutDir "$FileBase.tar.gz"
 
 $work = Join-Path $Root '.build\linux_package'
 if (Test-Path $work) { Remove-Item $work -Recurse -Force }
@@ -147,5 +147,5 @@ Write-Host "  commit : $commit"
 Write-Host "  sha256 : $sha"
 Write-Host ''
 Write-Host '  On the Linux machine:'
-Write-Host "    tar -xzf $Name.tar.gz"
+Write-Host "    tar -xzf $FileBase.tar.gz"
 Write-Host "    cd $Name && bash setup.sh && bash start.sh"
