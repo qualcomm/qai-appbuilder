@@ -364,6 +364,41 @@ _MODEL_BUILD_TOOL_MODE_ALIASES: tuple[str, ...] = (
 )
 
 
+_AGENT_ONLY_EXTRA_KEY = "agent_only"
+_AGENT_ONLY_IDENTITY = (
+    "You are QAI Agent, a scriptable AI assistant running inside the user's "
+    "workspace."
+)
+
+
+def _is_agent_only_request(extra: dict[str, Any] | None) -> bool:
+    """True when the caller (``qai agent run`` / SDK) asked for agent-only mode.
+
+    Agent-only turns drop the Model Builder framing (identity, fallback
+    guidance, auto mode detection, model-builder skill catalog rows) so a
+    scripted caller gets a plain workspace agent.
+    """
+    raw = (extra or {}).get(_AGENT_ONLY_EXTRA_KEY)
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
+def _filter_agent_only_catalog(
+    rows: tuple[tuple[str, str], ...],
+) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (path, use_for)
+        for path, use_for in rows
+        if not any(
+            alias in path.replace("\\", "/").lower()
+            for alias in _MODEL_BUILD_TOOL_MODE_ALIASES
+        )
+    )
+
+
 def _render_model_build_params(tool_params: dict[str, Any] | None) -> str:
     """Render model-build ``tool_params`` to natural-language Chinese.
 
@@ -1579,7 +1614,11 @@ class RichSystemPromptBuilder(SystemPromptBuilderPort):
         # ``_MODEL_BUILD_FALLBACK`` text already instructs the model to read
         # the model-builder SKILL.md on demand when the request truly needs it.
         auto_detected = False
-        if not effective_mode and self.auto_detect_model_build:
+        if (
+            not effective_mode
+            and self.auto_detect_model_build
+            and not _is_agent_only_request(extra)
+        ):
             latest = extra.get("latest_user_message")
             if isinstance(latest, str):
                 detected = _auto_detect_tool_mode(latest)
@@ -2006,12 +2045,15 @@ class RichSystemPromptBuilder(SystemPromptBuilderPort):
         Python env / workspace / Available Skills / persona) still apply.
         """
         parts: list[str] = []
+        agent_only = _is_agent_only_request(extra)
 
         # 1. identity_intro (skipped for discussion speakers — they are
         # user-defined roles, NOT QAI AppBuilder; framing + persona via
         # ``extra["persona"]`` carry the speaker's identity instead).
         if not skip_identity:
-            parts.append(self._effective_identity(extra))
+            parts.append(
+                _AGENT_ONLY_IDENTITY if agent_only else self._effective_identity(extra)
+            )
 
             # Working principles (communicate only via reply text; technical
             # accuracy over agreement; file_path:line_number code references).
@@ -2028,7 +2070,7 @@ class RichSystemPromptBuilder(SystemPromptBuilderPort):
             # sentence was a V2 invention not present in V1, so it is NO LONGER
             # injected by default. Only an explicitly-configured
             # ``default_instructions`` (per-deployment override) is honoured.
-            if self.default_instructions:
+            if self.default_instructions and not agent_only:
                 parts.append(self.default_instructions)
 
             # 1a-2. model_build_fallback (V1 chat_handler.py:3155-3158): only in
@@ -2062,7 +2104,8 @@ class RichSystemPromptBuilder(SystemPromptBuilderPort):
             # "每次普通对话都背 700 字符"。
             _latest_msg = extra.get("latest_user_message")
             _inject_fallback = (
-                isinstance(_latest_msg, str)
+                not agent_only
+                and isinstance(_latest_msg, str)
                 and _auto_detect_tool_mode(_latest_msg) == "model_build"
             )
             if _inject_fallback:
@@ -2082,6 +2125,8 @@ class RichSystemPromptBuilder(SystemPromptBuilderPort):
         # Skill catalog rows: prefer extra-supplied (per-request) over
         # constructor-provided defaults.
         catalog_rows = self._resolve_skill_catalog(extra)
+        if agent_only:
+            catalog_rows = _filter_agent_only_catalog(catalog_rows)
 
         # 2. skill_rule (only when there ARE skills).
         #    (The former ``tools_intro`` — a "You can only call these tools:"

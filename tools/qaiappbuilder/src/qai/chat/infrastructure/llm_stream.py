@@ -3778,7 +3778,7 @@ def _accumulate_tool_calls(
             # shape the OpenAI path produces so downstream consumers
             # (json.loads of ``function.arguments``) stay identical.
             initial_input = block.get("input")
-            if isinstance(initial_input, dict) and initial_input:
+            if isinstance(initial_input, dict):
                 try:
                     entry["function"]["arguments"] = json.dumps(
                         initial_input, ensure_ascii=False,

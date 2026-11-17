@@ -148,6 +148,7 @@ async def ensure_workspace_session_grant(
             expires_at=None,
             scope_kind="session",
             scope_key=conversation_id,
+            is_directory=True,
         )
         _log.info(
             "workspace_session_grant.created",
@@ -212,7 +213,10 @@ async def _revoke_stale_workspace_grants(
             getattr(grant, "scope_kind", None) == "session"
             and getattr(grant, "scope_key", None) == conversation_id
             and getattr(grant, "source", None) == GrantSource.AUTO
-            and getattr(grant, "path", None) != keep_path
+            and (
+                getattr(grant, "path", None) != keep_path
+                or not getattr(grant, "is_directory", False)
+            )
         ):
             try:
                 await revoke.execute(grant_id=grant.grant_id)
