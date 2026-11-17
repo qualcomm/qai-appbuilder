@@ -88,6 +88,16 @@ def register(subparsers: argparse._SubParsersAction) -> None:
         ),
     )
     run.add_argument(
+        "--provider-file",
+        type=Path,
+        metavar="<path>",
+        help=(
+            "JSON file describing the model provider(s) for this run only "
+            "(base_url, api_key or ${ENV_NAME}, models). Held in memory, "
+            "never saved; the model must be listed in it or in the saved providers"
+        ),
+    )
+    run.add_argument(
         "--conversation-id",
         metavar="<id>",
         help="continue an existing QAI conversation instead of creating one",
@@ -198,6 +208,17 @@ def cmd_agent_run(args: argparse.Namespace) -> int:
         sys.stderr.write(f"qai agent run: {_MODEL_REQUIRED_MESSAGE}\n")
         return 2
     args.model = args.model.strip()
+    provider_file = getattr(args, "provider_file", None)
+    if provider_file is not None:
+        # Validate up front so a bad file is a usage error (2) with a clear
+        # message, not a traceback from deep inside container start-up.
+        from apps.api._provider_file_overlay import ProviderFileError, load_provider_file
+
+        try:
+            load_provider_file(provider_file)
+        except ProviderFileError as exc:
+            sys.stderr.write(f"qai agent run: --provider-file: {exc}\n")
+            return 2
     return asyncio.run(_run_agent(args, prompt=prompt, extra=extra))
 
 
@@ -224,6 +245,7 @@ async def _run_agent(
     async with QaiAgentClient(
         repo_root=getattr(args, "repo_root", None),
         config_file=getattr(args, "config_file", None),
+        provider_file=getattr(args, "provider_file", None),
     ) as client:
         if not args.no_provider_check and not await client.has_configured_provider():
             sys.stderr.write(

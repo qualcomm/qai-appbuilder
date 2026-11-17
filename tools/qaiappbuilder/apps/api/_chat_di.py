@@ -1364,6 +1364,7 @@ def build_chat_services(container: Container) -> ChatServices:
             provider_registry=_provider_registry,
             secret_store=getattr(container, "secret_store", None),
             local_models=make_local_models_lookup(container),
+            provider_overlay=getattr(container, "provider_overlay", None),
         )
     # Local Genie service endpoint provider (V1 ``_stream_local`` parity):
     # resolves ``http://127.0.0.1:<port>/v1`` from the live model_runtime

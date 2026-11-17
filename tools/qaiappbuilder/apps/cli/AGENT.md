@@ -59,3 +59,26 @@ Add further verbs as more `agent_sub.add_parser(...)` calls in
 `apps/cli/commands/agent.py` and keep the exit-code contract above. Agent-only
 mode (`extra["agent_only"]`) removes the Model Builder framing from the system
 prompt; Model Builder workflows stay under `qai build`.
+
+## Provider file (`--provider-file`)
+
+A caller that owns its gateway address and credential (for example a
+validator service) can describe the providers for ONE run in a JSON file:
+
+    {"providers": [
+      {"provider_id": "qgenie",
+       "base_url": "https://qgenie-api.qualcomm.com/v1",
+       "api_key": "${QGENIE_API_KEY}",
+       "models": [
+         {"model_id": "azure::gpt-6-luna", "context_length": 128000}
+       ]}
+    ]}
+
+- Held in memory only: nothing is written to the database or the secret
+  store, and it disappears with the process.
+- Consulted before the saved providers; models not listed fall back to the
+  saved providers. A provider id defined in the file never falls back to a
+  stored key of the same id.
+- `api_key` is a literal or `${ENV_NAME}`; referencing an unset variable is an
+  error. `context_length` is required for every model. Keys are never logged.
+- A bad file exits with code 2 and a message naming the field.

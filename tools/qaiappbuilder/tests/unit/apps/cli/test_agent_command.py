@@ -79,3 +79,33 @@ def test_agent_run_blank_model_is_rejected(capsys) -> None:
 
     assert code == 2
     assert "no model specified" in capsys.readouterr().err
+
+
+@pytest.mark.unit
+def test_provider_file_with_bad_content_is_a_usage_error(tmp_path, capsys) -> None:
+    bad = tmp_path / "providers.json"
+    bad.write_text("{not json", encoding="utf-8")
+
+    code = main(["agent", "run", "--model", "m", "--provider-file", str(bad), "hello"])
+
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "--provider-file" in err and "not valid JSON" in err
+
+
+@pytest.mark.unit
+def test_provider_file_missing_is_a_usage_error(tmp_path, capsys) -> None:
+    code = main(
+        ["agent", "run", "--model", "m", "--provider-file", str(tmp_path / "nope.json"), "hi"]
+    )
+
+    assert code == 2
+    assert "cannot read provider file" in capsys.readouterr().err
+
+
+@pytest.mark.unit
+def test_provider_file_flag_is_documented_in_help(capsys) -> None:
+    code = main(["agent", "run", "--help"])
+
+    assert code == 0
+    assert "--provider-file" in capsys.readouterr().out

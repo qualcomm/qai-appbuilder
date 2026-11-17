@@ -280,3 +280,53 @@ async def test_agent_client_records_client_turn_id_in_message_meta() -> None:
         )
 
     assert container._stream.requests[0].user_message_meta == {"client_turn_id": "turn-7"}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_provider_file_counts_as_a_configured_provider() -> None:
+    container = _container()
+    async with QaiAgentClient(container=container, provider_file="providers.json") as client:
+        assert await client.has_configured_provider() is True
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_provider_file_is_loaded_and_handed_to_the_container(tmp_path) -> None:
+    import json
+    from unittest.mock import MagicMock
+
+    path = tmp_path / "providers.json"
+    path.write_text(
+        json.dumps(
+            {
+                "providers": [
+                    {
+                        "provider_id": "p",
+                        "base_url": "https://x/v1",
+                        "models": [{"model_id": "m", "context_length": 10}],
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    captured = {}
+
+    class _CM:
+        async def __aenter__(self):
+            return _container()
+
+        async def __aexit__(self, *exc):
+            return None
+
+    def _fake_cli_container(**kwargs):
+        captured.update(kwargs)
+        return _CM()
+
+    with patch("apps.cli._runtime.cli_container", _fake_cli_container):
+        async with QaiAgentClient(provider_file=path):
+            pass
+
+    overlay = captured["provider_overlay"]
+    assert overlay is not None and overlay.has_provider("p")

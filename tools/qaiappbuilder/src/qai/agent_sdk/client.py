@@ -158,9 +158,13 @@ class QaiAgentClient:
         repo_root: str | Path | None = None,
         config_file: str | Path | None = None,
         container: Any | None = None,
+        provider_file: str | Path | None = None,
     ) -> None:
         self._repo_root = Path(repo_root) if repo_root is not None else None
         self._config_file = Path(config_file) if config_file is not None else None
+        # Providers for this client only (in memory, never persisted). See
+        # ``apps.api._provider_file_overlay`` for the file format.
+        self._provider_file = Path(provider_file) if provider_file is not None else None
         self._external_container = container
         self._container: Any | None = None
         self._container_cm: Any | None = None
@@ -172,9 +176,15 @@ class QaiAgentClient:
 
         from apps.cli._runtime import cli_container
 
+        provider_overlay = None
+        if self._provider_file is not None:
+            from apps.api._provider_file_overlay import load_provider_file
+
+            provider_overlay = load_provider_file(self._provider_file)
         self._container_cm = cli_container(
             config_file=self._config_file,
             repo_root=self._repo_root,
+            provider_overlay=provider_overlay,
         )
         self._container = await self._container_cm.__aenter__()
         return self
@@ -197,8 +207,10 @@ class QaiAgentClient:
         return self._container
 
     async def has_configured_provider(self) -> bool:
-        """Return whether the model catalog currently has any provider config."""
+        """Return whether any provider is available (file-supplied or saved)."""
 
+        if self._provider_file is not None:
+            return True
         try:
             rows = await self.container.model_catalog.list_provider_configs_use_case.execute()
         except Exception:  # noqa: BLE001 - availability probe; caller decides policy
@@ -413,12 +425,15 @@ async def run_agent(
     extra: Mapping[str, Any] | None = None,
     repo_root: str | Path | None = None,
     config_file: str | Path | None = None,
+    provider_file: str | Path | None = None,
     on_frame: FrameCallback | None = None,
     include_frames: bool = True,
 ) -> AgentRunResult:
     """Convenience helper for one-shot SDK callers."""
 
-    async with QaiAgentClient(repo_root=repo_root, config_file=config_file) as client:
+    async with QaiAgentClient(
+        repo_root=repo_root, config_file=config_file, provider_file=provider_file
+    ) as client:
         return await client.run(
             AgentRunRequest(
                 prompt=prompt,
