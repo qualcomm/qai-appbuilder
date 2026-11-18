@@ -3,7 +3,7 @@ REM ---------------------------------------------------------------------
 REM Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 REM SPDX-License-Identifier: BSD-3-Clause
 REM ---------------------------------------------------------------------
-REM qai.bat - convenience wrapper for the unified "qai" command-line tool.
+REM qaiAppbuilder.bat - convenience wrapper for the unified "qai" command-line tool.
 REM
 REM The runtime venv supplies third-party dependencies. This wrapper loads the
 REM current installation's apps/ and src/qai/ through PYTHONPATH, so separate

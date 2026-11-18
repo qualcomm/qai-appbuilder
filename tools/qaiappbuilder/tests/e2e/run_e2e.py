@@ -111,7 +111,7 @@ CATEGORIES: dict[str, tuple[str, list[str]]] = {
                 ["test_gallery.py"]),
     "events": ("Event stream (/events, SSE + WebSocket)",
                ["test_events*.py"]),
-    "cli": ("qai.bat command line",
+    "cli": ("qaiAppbuilder.bat command line",
             ["test_cli.py"]),
     "mb_system": ("Model Builder system tests (tests/system: adapters, pack export, HTTP bridge, NPU)",
                   ["system/model_builder/test_*.py"]),

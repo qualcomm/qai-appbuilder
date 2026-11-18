@@ -5,7 +5,7 @@
 
 """L1 - the ``qai`` command line: help text and the read-only provider listing (INST-08).
 
-``qai.bat`` is a thin launcher: it picks the venv (``--arch`` flag > ``data\\config\\host_arch`` > CPU), sets
+``qaiAppbuilder.bat`` is a thin launcher: it picks the venv (``--arch`` flag > ``data\\config\\host_arch`` > CPU), sets
 ``PYTHONPATH`` to this checkout and runs ``python -m apps.cli``. These tests run ``python -m apps.cli`` directly with
 the test interpreter and ``QAI_DATA__DATA_DIR`` pointing at a throw-away folder (the same pattern as the CLI tests in
 ``test_model_builder.py``); the ``.bat`` wrapper itself is exercised once, only through ``--help``.
@@ -21,7 +21,7 @@ NOT covered (deliberately):
   installation or start servers.
 * **``qai config provider add|edit|remove|test`` and ``qai auth``.** They write the OS keyring (Credential Manager is not
   isolated) or make real network requests.
-* **The ``--arch`` / ``host_arch`` selection inside ``qai.bat``** and the "venv missing" branch: they need a second venv or
+* **The ``--arch`` / ``host_arch`` selection inside ``qaiAppbuilder.bat``** and the "venv missing" branch: they need a second venv or
   renaming the real one.
 * The interactive wizards (``qai config setup``, ``provider add`` on a TTY).
 
@@ -346,7 +346,7 @@ def test_missing_or_bad_arguments_exit_2(qai: Callable[..., Run], args: tuple[st
 
 
 # --------------------------------------------------------------------------
-# qai.bat (the Windows launcher)
+# qaiAppbuilder.bat (the Windows launcher)
 # --------------------------------------------------------------------------
 
 
@@ -357,13 +357,13 @@ def bat_env() -> dict[str, str]:
     return env
 
 
-@pytest.mark.skipif(os.name != "nt", reason="qai.bat is a Windows launcher")
+@pytest.mark.skipif(os.name != "nt", reason="qaiAppbuilder.bat is a Windows launcher")
 def test_qai_bat_help_goes_through_the_launcher(bat_env: dict[str, str]) -> None:
     """Needs the real runtime venv under ``<repo>\\envs``; the launcher says so (exit 1) when it is absent."""
     venv_ok = any((REPO_ROOT / "envs" / n / "Scripts" / "python.exe").is_file()
                   for n in (".venv_arm64_313", ".venv_x64_313"))
     try:
-        p = subprocess.run(["cmd", "/c", str(REPO_ROOT / "qai.bat"), "--help"], cwd=str(REPO_ROOT), env=bat_env,
+        p = subprocess.run(["cmd", "/c", str(REPO_ROOT / "qaiAppbuilder.bat"), "--help"], cwd=str(REPO_ROOT), env=bat_env,
                            capture_output=True, text=True, encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL, timeout=120)
     finally:
         shutil.rmtree(bat_env["QAI_DATA__DATA_DIR"], ignore_errors=True)
@@ -376,14 +376,14 @@ def test_qai_bat_help_goes_through_the_launcher(bat_env: dict[str, str]) -> None
     assert "usage: qai [-h]" in p.stdout and "QAIModelBuilder unified CLI" in p.stdout
 
 
-@pytest.mark.skipif(os.name != "nt", reason="qai.bat is a Windows launcher")
+@pytest.mark.skipif(os.name != "nt", reason="qaiAppbuilder.bat is a Windows launcher")
 def test_qai_bat_forwards_exit_codes(bat_env: dict[str, str]) -> None:
     venv_ok = any((REPO_ROOT / "envs" / n / "Scripts" / "python.exe").is_file()
                   for n in (".venv_arm64_313", ".venv_x64_313"))
     if not venv_ok:
         pytest.skip("runtime venv is not installed on this machine")
     try:
-        p = subprocess.run(["cmd", "/c", str(REPO_ROOT / "qai.bat"), "nosuchcmd"], cwd=str(REPO_ROOT), env=bat_env,
+        p = subprocess.run(["cmd", "/c", str(REPO_ROOT / "qaiAppbuilder.bat"), "nosuchcmd"], cwd=str(REPO_ROOT), env=bat_env,
                            capture_output=True, text=True, encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL, timeout=120)
     finally:
         shutil.rmtree(bat_env["QAI_DATA__DATA_DIR"], ignore_errors=True)

@@ -10,7 +10,7 @@ REM   * network preflight + proxy / mirror profile (scripts\setup\net_config.ps1
 REM   * x64 never downloads the ARM64-only vendor wheels (~170MB) or openblas
 REM   * only the pieces needed to run the server are installed by default;
 REM     everything heavy is opt-in
-REM   * same layout as Setup.bat, so Start.bat / qai.bat / Console.bat / Uninstall.bat
+REM   * same layout as Setup.bat, so Start.bat / qaiAppbuilder.bat / Console.bat / Uninstall.bat
 REM     work on the result unchanged:
 REM       venv        <repo>\envs\.venv_<arch>_313   (removed with the program on uninstall)
 REM       data        <repo>\data   (uv, aria2c, 7zr, config\host_arch, qai.db ...)
@@ -390,7 +390,7 @@ echo  ================================================================
 echo      setup_env finished ^(arch=%HOST_ARCH%, profile=%QAI_NET_PROFILE%^)
 echo  ================================================================
 echo   Run the server :  Start.bat
-echo   CLI            :  qai.bat --help
+echo   CLI            :  qaiAppbuilder.bat --help
 echo   Python shell   :  Console.bat
 echo   Remove it all  :  clean_env.bat   ^(--help for options^)
 echo.
@@ -460,7 +460,7 @@ echo uv and ast-grep come from PyPI wheels ^(pypi.org, or the tuna mirror first 
 echo github.com does not stop the core install. GitHub is still needed for the x64 qai_appbuilder wheel and
 echo guard.zip ^(optional FileGuard^); without it on x64 only NPU inference is unavailable.
 echo.
-echo Installs to the same places as Setup.bat, so Start.bat / qai.bat / Console.bat just work.
+echo Installs to the same places as Setup.bat, so Start.bat / qaiAppbuilder.bat / Console.bat just work.
 exit /b 0
 
 REM ===========================================================================

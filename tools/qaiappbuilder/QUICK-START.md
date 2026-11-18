@@ -96,7 +96,7 @@ automatically. Press `Ctrl+C` to stop.
 
 | Command | Purpose |
 |---|---|
-| `qai.bat <args>` | Run the unified CLI without activating the venv (`qai --help` / `qai config provider list` / `qai build`…) |
+| `qaiAppbuilder.bat <args>` | Run the unified CLI without activating the venv (`qai --help` / `qai config provider list` / `qai build`…) |
 | `Console.bat` | Drop into an activated venv shell for `pip install <pkg>` / ad-hoc Python |
 | `Uninstall.bat` | Remove everything Setup installed OUTSIDE the project (venv / PortableGit / Node); **leaves `data/` untouched** |
 | `Uninstall.bat --all` | Above + uv cache + QAIRT SDK + Playwright Chromium + `vendor/` runtime caches |
@@ -134,8 +134,8 @@ Extract qaiappbuilder.zip  →  Setup.bat  →  Start.bat
 | `node_modules` is broken | `Build.bat --clean` |
 | Run pytest / write contributor tests | `Setup.bat --dev` once, then `Console.bat` to enter venv |
 | Package for end users | `Build.bat --install`, then archive `tools\qaiappbuilder\` as `qaiappbuilder.zip` |
-| Run a one-shot CLI command | `qai.bat <args>` |
+| Run a one-shot CLI command | `qaiAppbuilder.bat <args>` |
 | Install an extra Python pkg temporarily | `Console.bat` then `pip install <pkg>` |
 | Full cleanup (keep `data/`) | `Uninstall.bat` (or `--all` for deeper cleanup) |
 
-> **`Setup.bat` / `Build.bat` / `Uninstall.bat` support `--help` / `-h` / `/?`** — e.g. `Build.bat --help` lists every flag. `Start.bat` / `qai.bat` forward any extra arguments to the underlying Python entry point.
+> **`Setup.bat` / `Build.bat` / `Uninstall.bat` support `--help` / `-h` / `/?`** — e.g. `Build.bat --help` lists every flag. `Start.bat` / `qaiAppbuilder.bat` forward any extra arguments to the underlying Python entry point.

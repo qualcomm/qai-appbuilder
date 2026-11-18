@@ -443,7 +443,7 @@ QAIAppBuilder/
 ├── models/               # 预置端侧模型权重
 ├── data/                 # 运行时数据（install 生成；gitignore）
 ├── vendor/               # 离线 wheel（ARM64）+ 内置二进制 + g2p/nltk 数据
-├── Setup.bat  Start.bat  Build.bat  Console.bat  Uninstall.bat  qai.bat
+├── Setup.bat  Start.bat  Build.bat  Console.bat  Uninstall.bat  qaiAppbuilder.bat
 └── pyproject.toml        # Python 依赖与控制台脚本（唯一权威）
 ```
 

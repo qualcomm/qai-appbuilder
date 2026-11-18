@@ -205,7 +205,7 @@ foreach ($da in $desktopArches) {
 $Dirs = @('src', 'apps', 'factory', 'scripts', 'interfaces', 'skills', 'tools')
 $Files = @(
     'pyproject.toml', 'build_info.json',
-    'installer\_setup_env.bat', 'Start.bat', 'qai.bat', 'Console.bat', 'Uninstall.bat', 'clean_env.bat',
+    'installer\_setup_env.bat', 'Start.bat', 'qaiAppbuilder.bat', 'Console.bat', 'Uninstall.bat', 'clean_env.bat',
     'README.md', 'README.zh-CN.md', 'QUICK-START.md', 'QUICK-START.zh-CN.md'
 )
 $ExcludeDirs = @('__pycache__', '.pytest_cache', '.mypy_cache', '.ruff_cache', 'node_modules', 'tests', '.git')

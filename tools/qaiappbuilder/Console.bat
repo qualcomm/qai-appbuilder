@@ -82,7 +82,7 @@ if not exist "%ACTIVATE%" goto :no_venv
 REM Prefer this installation's launchers before the shared venv console scripts.
 set "PATH=%ROOT_DIR%;%ROOT_DIR%tools;%PATH%"
 
-REM PortableGit PATH injection (parity with Start.bat / qai.bat) so commands
+REM PortableGit PATH injection (parity with Start.bat / qaiAppbuilder.bat) so commands
 REM that shell out to git -- e.g. `pip install git+https://...`, editable
 REM installs of git checkouts, or `qai` subcommands -- find git even on a
 REM machine without a system-wide git.
@@ -96,7 +96,7 @@ if exist "%PORTABLE_GIT_DIR%\cmd\git.exe" (
 set "PYTHONPATH=%ROOT_DIR%src;%ROOT_DIR%"
 cd /d "%ROOT_DIR%"
 echo [INFO] Console source root: %ROOT_DIR%
-echo [INFO] Console qai.bat: %ROOT_DIR%qai.bat
+echo [INFO] Console qaiAppbuilder.bat: %ROOT_DIR%qaiAppbuilder.bat
 cmd /k call "%ACTIVATE%"
 exit /b 0
 
