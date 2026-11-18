@@ -32,9 +32,6 @@
 >
 > **On Linux**, download the `*-linux.tar.gz` package from the release page, extract it, then run
 > `bash setup.sh` (one-time environment setup) followed by `bash start.sh` to launch the WebUI.
->
-> QAI AppBuilder is provided "as is", without warranty of any kind — please evaluate it for your
-> use case and test thoroughly before relying on it in critical systems.
 
 <div align="center">
   <a href="https://github.com/qualcomm/qai-appbuilder/releases/tag/v3.2.0"><img src="https://img.shields.io/badge/Download-QAI%20AppBuilder%20v3.2.0-2ea44f?style=for-the-badge" alt="Download QAI AppBuilder"></a>
