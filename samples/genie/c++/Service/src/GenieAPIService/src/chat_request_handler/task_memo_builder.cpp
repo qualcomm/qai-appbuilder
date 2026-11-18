@@ -9,6 +9,7 @@
 #include "task_memo_builder.h"
 #include "tool_call_circuit_breaker_store.h"
 #include "task_memo_doc_scan.h"
+#include "session_continuity.h"
 #include <utils.h>
 #include "log.h"
 #include <sstream>
@@ -160,6 +161,7 @@ namespace {
     constexpr size_t kMaxHardRuleChars = 220;
     constexpr size_t kMaxArtifacts = 8;
     constexpr size_t kMaxLastSuccessChars = 900;
+    constexpr size_t kMaxIntentTrail = 3;
 
     constexpr size_t kMaxTriedQueryResources = 10;
     constexpr size_t kMaxTriedQueriesPerResource = 6;
@@ -822,10 +824,32 @@ namespace {
         const size_t fixed = header.size() + omitted_note(first).size() + tail[first];
         size_t remaining = cap > fixed ? cap - fixed : 0;
         std::vector<std::string> suffixes(n);
+        std::vector<bool> has_body(n, false);
+        std::vector<std::pair<size_t, size_t>> body_order;
+        for (size_t i = first; i < n; ++i)
+            if (values[i]->is_object() && values[i]->contains("body"))
+                body_order.emplace_back(values[i]->value("_last_touch_seq", static_cast<size_t>(0)), i);
+        std::sort(body_order.begin(), body_order.end(),
+                  [](const std::pair<size_t, size_t>& a, const std::pair<size_t, size_t>& b) { return a > b; });
+        size_t body_pool = remaining * 3 / 5;
+        size_t pending = n - first;
+        for (const auto& candidate : body_order) {
+            const std::string body = task_memo_scan::RenderBodySuffix(*values[candidate.second]);
+            if (body.empty() || body.size() > body_pool)
+                continue;
+            suffixes[candidate.second] = body;
+            has_body[candidate.second] = true;
+            body_pool -= body.size();
+            remaining -= body.size();
+            --pending;
+        }
         for (size_t i = n; i-- > first;) {
-            const size_t share = std::min(task_memo_scan::kReadFileSuffixChars, remaining / (i - first + 1));
-            suffixes[i] = task_memo_scan::RenderReadFileSuffix(*values[i], share);
+            if (has_body[i])
+                continue;
+            const size_t share = std::min(task_memo_scan::kReadFileSuffixChars, remaining / pending);
+            suffixes[i] = task_memo_scan::RenderReadFileSuffix(*values[i], share, task_memo_scan::FullSectionMapEnabled());
             remaining -= suffixes[i].size();
+            --pending;
         }
         std::string out = header + omitted_note(first);
         for (size_t i = first; i < n; ++i)
@@ -925,13 +949,60 @@ std::string TaskMemoBuilder::StripThinkBlock(const std::string& content)
 
 namespace {
     const char kPinPrefix[] = "[reasoning note: ";
+    const char kCutOffMarker[] = " (reasoning was cut off by the thinking budget)";
     std::mutex g_pin_mu;
-    std::unordered_map<std::string, std::pair<std::string, std::chrono::steady_clock::time_point>> g_pins;
+
+    bool IsDataLine(const std::string& line)
+    {
+        size_t visible = 0;
+        size_t letters = 0;
+        for (unsigned char c : line) {
+            if (std::isspace(c))
+                continue;
+            ++visible;
+            if (std::isalpha(c) || c >= 0x80)
+                ++letters;
+        }
+        return visible > 0 && letters * 10 < visible * 4;
+    }
+
+    std::string DropTrailingDataLines(std::string body)
+    {
+        for (;;) {
+            while (!body.empty() && std::isspace(static_cast<unsigned char>(body.back())))
+                body.pop_back();
+            const size_t nl = body.find_last_of('\n');
+            const std::string last = nl == std::string::npos ? body : body.substr(nl + 1);
+            if (!IsDataLine(last))
+                return body;
+            if (nl == std::string::npos)
+                return "";
+            body.erase(nl);
+        }
+    }
+
+    LruSessionTable<std::unordered_map<std::string, std::string>> g_pins(64);
 }
 
 std::string TaskMemoBuilder::ToolCallOrdinalKey(const std::string& call_signature, size_t ordinal)
 {
     return call_signature + "#" + std::to_string(ordinal);
+}
+
+std::string TaskMemoBuilder::AssistantToolCallSignature(const json& element)
+{
+    if (!element.contains("tool_calls") || !element["tool_calls"].is_array()
+        || element["tool_calls"].empty() || !element["tool_calls"][0].contains("function"))
+        return std::string();
+    const auto& fn = element["tool_calls"][0]["function"];
+    std::string args = "{}";
+    try {
+        if (fn.contains("arguments") && fn["arguments"].is_string())
+            args = json::parse(fn["arguments"].get<std::string>()).dump();
+        else if (fn.contains("arguments") && fn["arguments"].is_object())
+            args = fn["arguments"].dump();
+    } catch (...) {}
+    return fn.value("name", "") + "|" + args;
 }
 
 void TaskMemoBuilder::PinThinkConclusion(const std::string& session_key, const std::string& call_signature,
@@ -940,14 +1011,7 @@ void TaskMemoBuilder::PinThinkConclusion(const std::string& session_key, const s
     if (session_key.empty() || call_signature.empty() || conclusion.empty())
         return;
     std::lock_guard<std::mutex> lk(g_pin_mu);
-    const auto now = std::chrono::steady_clock::now();
-    if (g_pins.size() > 4096) {
-        for (auto it = g_pins.begin(); it != g_pins.end();)
-            it = (now - it->second.second > std::chrono::hours(2)) ? g_pins.erase(it) : std::next(it);
-        if (g_pins.size() > 4096)
-            g_pins.clear();
-    }
-    g_pins[session_key + "\x1f" + call_signature] = {conclusion, now};
+    g_pins.Touch(session_key)[call_signature] = conclusion;
 }
 
 std::string TaskMemoBuilder::LookupPinnedConclusion(const std::string& session_key, const std::string& call_signature)
@@ -955,8 +1019,11 @@ std::string TaskMemoBuilder::LookupPinnedConclusion(const std::string& session_k
     if (session_key.empty() || call_signature.empty())
         return "";
     std::lock_guard<std::mutex> lk(g_pin_mu);
-    auto it = g_pins.find(session_key + "\x1f" + call_signature);
-    return it == g_pins.end() ? "" : std::string(kPinPrefix) + it->second.first + "]\n";
+    const auto* pins = g_pins.Find(session_key);
+    if (!pins)
+        return "";
+    const auto it = pins->find(call_signature);
+    return it == pins->end() ? "" : std::string(kPinPrefix) + it->second + "]\n";
 }
 
 bool TaskMemoBuilder::IsReasoningNoteMimicry(const std::string& content)
@@ -967,6 +1034,7 @@ bool TaskMemoBuilder::IsReasoningNoteMimicry(const std::string& content)
 std::string TaskMemoBuilder::ExtractThinkConclusion(const std::string& content)
 {
     std::string body;
+    bool cut_off = false;
     if (IsReasoningNoteMimicry(content)) {
         const size_t end = content.find("]\n");
         if (end == std::string::npos)
@@ -980,11 +1048,16 @@ std::string TaskMemoBuilder::ExtractThinkConclusion(const std::string& content)
         const size_t body_begin = open == std::string::npos ? 0 : open + 7;
         body = content.substr(body_begin, close == std::string::npos ? std::string::npos : close - body_begin);
         static const std::string kForced = "Considering the time constraints";
-        if (body.find(kForced) != std::string::npos)
-            return "";
+        const size_t forced = body.find(kForced);
+        if (forced != std::string::npos) {
+            body.erase(forced);
+            cut_off = true;
+        }
     }
     while (!body.empty() && std::isspace(static_cast<unsigned char>(body.back())))
         body.pop_back();
+    if (cut_off)
+        body = DropTrailingDataLines(body);
     if (body.empty())
         return "";
     size_t start = body.size() > 240 ? body.size() - 240 : 0;
@@ -1012,7 +1085,7 @@ std::string TaskMemoBuilder::ExtractThinkConclusion(const std::string& content)
     }
     if (words < 3 && out.size() < 24)
         return "";
-    return out;
+    return cut_off ? out + kCutOffMarker : out;
 }
 
 std::string TaskMemoBuilder::ExtractToolCallSummary(const std::string& content)
@@ -1085,6 +1158,7 @@ json TaskMemoBuilder::BuildRuleLayer(
     size_t tool_seq = entry["tool_state"].size();
     bool episode_active = entry.value("_episode_active", false);
     size_t episode_attempt_count = entry.value("_episode_attempt_count", (size_t) 0);
+    std::string episode_tool = entry.value("_episode_tool", std::string(""));
 
     const auto &redundant_cfg = instance_config_.i_model_config_.GetToolCallRepairConfig().redundant_call_guard;
     std::string last_assistant_content;
@@ -1094,6 +1168,9 @@ json TaskMemoBuilder::BuildRuleLayer(
         std::ostringstream row;
         if (resolved) {
             row << "已解决 (第 " << episode_attempt_count << " 次尝试): " << detail;
+            const auto& attempts = entry["_episode_attempts"];
+            if (attempts.is_array() && !attempts.empty() && attempts.back().is_string())
+                row << "；此前最后一次失败：" << safe_utf8_truncate(attempts.back().get<std::string>(), 360, "...");
         } else {
             row << "未解决：同类尝试 " << episode_attempt_count << " 次，全部失败";
             bool first = true;
@@ -1104,12 +1181,18 @@ json TaskMemoBuilder::BuildRuleLayer(
                 }
         }
         task_memo_scan::AppendRecoveryEpisode(entry["recovery_ledger"], row.str(), kMaxRecoveryEpisodes);
+        My_Log{My_Log::Level::kInfo} << "[TaskMemo] Recovery episode closed: resolved=" << (resolved ? 1 : 0)
+                                     << ", attempts=" << episode_attempt_count
+                                     << ", failed_tool=" << episode_tool << std::endl;
         episode_active = false;
         episode_attempt_count = 0;
+        episode_tool.clear();
         entry["_episode_attempts"] = json::array();
     };
     for (size_t i = 0; i < dropped_messages.size(); ++i) {
         const auto& m = dropped_messages[i];
+        if (m.role == "tool" && task_memo_scan::IsRepeatStub(m.content))
+            continue;
         const bool binary = m.role == "tool" &&
             (task_memo_scan::IsBinaryContent(m.content) || m.content.rfind("[binary content, ", 0) == 0);
         const bool tool_failed = m.role == "tool" && LooksLikeFailure(m.content);
@@ -1135,9 +1218,11 @@ json TaskMemoBuilder::BuildRuleLayer(
             if (todo_pos != std::string::npos)
                 AppendCapped(entry["open_questions"], "待办: " + ReplaceInvalidUtf8(safe_utf8_truncate(m.content.substr(todo_pos), 160, "")), kMaxItemsPerField);
         } else if (m.role == "assistant") {
-            const std::string conclusion = TaskMemoBuilder::ExtractThinkConclusion(m.content);
-            if (!conclusion.empty())
-                AppendCapped(entry["facts_constraints"], "思考结论: " + ReplaceInvalidUtf8(conclusion), kMaxItemsPerField);
+            if (IsReasoningNoteMimicry(m.content)) {
+                const std::string conclusion = TaskMemoBuilder::ExtractThinkConclusion(m.content);
+                if (!conclusion.empty())
+                    AppendCapped(entry["intent_trail"], ReplaceInvalidUtf8(conclusion), kMaxIntentTrail);
+            }
             last_assistant_content = m.content;
         } else if (m.role == "tool") {
             const bool failed = tool_failed;
@@ -1155,6 +1240,7 @@ json TaskMemoBuilder::BuildRuleLayer(
                 CapObjectSize(entry["tool_state"], kMaxItemsPerField);
             }
             const std::string call = ExtractToolCallSummary(call_content);
+            const std::string tool_name = call.substr(0, call.find(' '));
             const WriteCall write_call = failed ? WriteCall{} : SummarizeWriteCall(call_content);
             const std::string compact_call = write_call.summary.empty() ? CompactExecCall(call_content) : std::string();
             const std::string call_text = ReplaceInvalidUtf8(
@@ -1162,15 +1248,17 @@ json TaskMemoBuilder::BuildRuleLayer(
                 : !compact_call.empty()     ? compact_call
                                             : safe_utf8_truncate(call, 200, "..."));
             if (failed) {
+                if (episode_active && episode_tool != tool_name)
+                    close_episode(false, "");
                 episode_active = true;
+                episode_tool = tool_name;
                 ++episode_attempt_count;
                 const std::string failure_line = FirstFailureLineImpl(m.content);
                 AppendCapped(entry["_episode_attempts"], call_text + " -> " +
                     (failure_line.empty() ? preview : failure_line), kMaxRecoveryAttempts);
-            } else if (episode_active) {
+            } else if (episode_active && tool_name == episode_tool) {
                 close_episode(true, call_text + " -> " + preview);
             }
-            const std::string tool_name = call.substr(0, call.find(' '));
             const bool reads_content = IsReadLikeToolName(tool_name) || tool_name.find("fetch") != std::string::npos;
             std::string action_source;
             if (!indexed_read && !reads_content && !call.empty()) {
@@ -1234,6 +1322,10 @@ json TaskMemoBuilder::BuildRuleLayer(
             if (!call.empty() && !reads_content) {
                 const std::string query_path = ExtractAnyToolPathArg(call_content);
                 if (!query_path.empty()) {
+                    const std::string lower_tool = task_memo_scan::Lower(tool_name);
+                    if (query_path.rfind("cmd:", 0) != 0 &&
+                        (lower_tool.find("write") != std::string::npos || lower_tool.find("edit") != std::string::npos))
+                        task_memo_scan::DropBodyForPath(entry["read_files"], query_path);
                     if (!entry.contains("tried_queries") || !entry["tried_queries"].is_object())
                         entry["tried_queries"] = json::object();
                     json& bucket = entry["tried_queries"][query_path];
@@ -1303,6 +1395,7 @@ json TaskMemoBuilder::BuildRuleLayer(
                                                              << kMaxPendingRefs << std::endl;
                         }
                         task_memo_scan::EvictReadFilesByValue(entry["read_files"], kMaxItemsPerField);
+                        task_memo_scan::TrimSmallBodies(entry["read_files"], task_memo_scan::kMaxSmallBodies);
                     }
                     if (!entry.contains("hard_rules") || !entry["hard_rules"].is_array())
                         entry["hard_rules"] = json::array();
@@ -1323,6 +1416,7 @@ json TaskMemoBuilder::BuildRuleLayer(
 
     entry["_episode_active"] = episode_active;
     entry["_episode_attempt_count"] = episode_attempt_count;
+    entry["_episode_tool"] = episode_tool;
 
     size_t folded_before = entry.value("_folded_count", (size_t)0);
     size_t folded = folded_before + dropped_messages.size();
@@ -1655,7 +1749,9 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         return oss.str();
     };
 
-    auto render_list_fit = [&](const char* label, const char* key, size_t budget) -> std::string {
+    auto render_list_fit = [&](const char* label, const char* key, size_t budget, size_t* kept_out = nullptr) -> std::string {
+        if (kept_out)
+            *kept_out = 0;
         if (!entry.contains(key) || !entry[key].is_array() || entry[key].empty())
             return "";
         const std::string head = std::string(label) + " (some rows omitted to fit):\n";
@@ -1679,8 +1775,11 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         }
         std::string result;
         for (size_t i = 0; i < n; ++i)
-            if (keep[i])
+            if (keep[i]) {
                 result += "- " + entry[key][i].get<std::string>() + "\n";
+                if (kept_out)
+                    ++*kept_out;
+            }
         return result.empty() ? result : head + result;
     };
 
@@ -1811,14 +1910,27 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
     const std::string tried_queries_summary = (entry.contains("tried_queries") && entry["tried_queries"].is_object())
         ? task_memo_scan::RenderTriedQueriesSummary(entry["tried_queries"], tried_queries_count_safe) : std::string();
 
+    const std::string completed_block = render_list("Completed", "completed");
+    const std::string intent_block = render_list("Recent intent (your own reasoning before earlier calls, most recent last)", "intent_trail");
+    std::string recovery_block = render_list("Recovery episodes recorded from earlier context", "recovery_ledger");
+    if (entry.value("_episode_active", false) && entry.contains("_episode_attempts") &&
+            entry["_episode_attempts"].is_array() && !entry["_episode_attempts"].empty() &&
+            entry["_episode_attempts"].back().is_string()) {
+        if (recovery_block.empty())
+            recovery_block = "Recovery episodes recorded from earlier context:\n";
+        recovery_block += "- 未解决（进行中）：同类尝试 " + std::to_string(entry.value("_episode_attempt_count", (size_t) 0)) +
+            " 次失败，最近一次：" +
+            safe_utf8_truncate(entry["_episode_attempts"].back().get<std::string>(), 360, "...") + "\n";
+    }
     const std::string blocks[] = {
         render_list("Rules from documents you read (still in force)", "hard_rules"),
         pending_refs_block,
-        render_list("Recovery episodes recorded from earlier context", "recovery_ledger"),
+        recovery_block,
         artifacts_block,
         last_success_block,
+        completed_block,
+        intent_block,
         exec_cache_block,
-        render_list("Completed", "completed"),
         render_list("Next actions", "next_actions"),
         render_list("Facts / constraints", "facts_constraints"),
         render_list("Open questions", "open_questions"),
@@ -1828,7 +1940,7 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         page_directory_block,
     };
     static const char* kBlockNames[] = {
-        "hard_rules", "pending_refs", "recovery_ledger", "artifacts", "last_success", "exec_cache", "completed", "next_actions",
+        "hard_rules", "pending_refs", "recovery_ledger", "artifacts", "last_success", "completed", "intent_trail", "exec_cache", "next_actions",
         "facts_constraints", "open_questions", "read_files", "tried_queries", "tool_state", "page_directory",
     };
     const size_t kBlockCount = sizeof(blocks) / sizeof(blocks[0]);
@@ -1854,9 +1966,44 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         budget_for_high_priority = (max_chars > reserved_for_memory) ? (max_chars - reserved_for_memory) : 0;
     }
 
+    const size_t progress_reserve = (max_chars > 0)
+        ? std::min(last_success_block.size() + completed_block.size() + intent_block.size(), max_chars * 3 / 20) : 0;
+
+    auto fit_tail_rows = [](const std::string& block, size_t budget) -> std::string {
+        std::vector<std::string> rows;
+        size_t start = 0;
+        while (start < block.size()) {
+            size_t end = block.find('\n', start);
+            end = (end == std::string::npos) ? block.size() : end + 1;
+            rows.push_back(block.substr(start, end - start));
+            start = end;
+        }
+        if (rows.empty() || rows.front().size() >= budget)
+            return "";
+        std::string result = rows.front();
+        std::vector<std::string> tail;
+        size_t used = result.size();
+        for (size_t i = rows.size(); i-- > 1;) {
+            if (used + rows[i].size() > budget)
+                break;
+            used += rows[i].size();
+            tail.push_back(rows[i]);
+        }
+        for (auto it = tail.rbegin(); it != tail.rend(); ++it)
+            result += *it;
+        return result;
+    };
+
+    size_t completed_kept_rows = 0;
     auto degrade_block = [&](const char* block_name, size_t available) -> std::string {
+        if (std::strcmp(block_name, "last_success") == 0)
+            return fit_tail_rows(last_success_block, available);
+        if (std::strcmp(block_name, "artifacts") == 0)
+            return fit_tail_rows(artifacts_block, available);
         if (std::strcmp(block_name, "completed") == 0)
-            return render_list_fit("Completed", "completed", available);
+            return render_list_fit("Completed", "completed", available, &completed_kept_rows);
+        if (std::strcmp(block_name, "intent_trail") == 0)
+            return render_list_fit("Recent intent (your own reasoning before earlier calls, most recent last)", "intent_trail", available);
         if (std::strcmp(block_name, "tried_queries") == 0
                 && !tried_queries_summary.empty() && tried_queries_summary.size() <= available)
             return tried_queries_summary;
@@ -1881,7 +2028,15 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
         const bool is_reserved_block = (std::strcmp(block_name, "read_files") == 0
                                          || std::strcmp(block_name, "tried_queries") == 0
                                          || std::strcmp(block_name, "tool_state") == 0);
-        const size_t slot_budget = is_reserved_block ? max_chars : budget_for_high_priority;
+        const bool is_progress_donor = (std::strcmp(block_name, "hard_rules") == 0
+                                        || std::strcmp(block_name, "pending_refs") == 0
+                                        || std::strcmp(block_name, "recovery_ledger") == 0
+                                        || std::strcmp(block_name, "artifacts") == 0);
+        const size_t donor_budget = std::max(
+            (budget_for_high_priority > progress_reserve) ? budget_for_high_priority - progress_reserve : size_t(0),
+            budget_for_high_priority / 2);
+        const size_t slot_budget = is_reserved_block ? max_chars
+            : (is_progress_donor ? donor_budget : budget_for_high_priority);
 
         std::string candidate = block;
         if (max_chars > 0 && out_used + block.size() > slot_budget) {
@@ -1924,6 +2079,17 @@ std::string TaskMemoBuilder::Render(const json& entry, size_t max_chars)
     for (size_t slot = 0; slot < kBlockCount; ++slot) {
         out += slot_text[slot];
         layout += layout_entries[slot];
+        if (max_chars > 0 && std::strcmp(kBlockNames[slot], "completed") == 0
+                && slot_text[slot].size() < blocks[slot].size()) {
+            const size_t total_rows = (entry.contains("completed") && entry["completed"].is_array())
+                ? entry["completed"].size() : 0;
+            My_Log{My_Log::Level::kInfo}
+                << "[TaskMemo] Completed rows trimmed to fit: kept_rows="
+                << (slot_text[slot].empty() ? size_t(0) : completed_kept_rows)
+                << ", total_rows=" << total_rows
+                << ", shown_chars=" << slot_text[slot].size()
+                << ", full_chars=" << blocks[slot].size() << std::endl;
+        }
     }
     if (max_chars > 0)
         My_Log{My_Log::Level::kInfo}
@@ -2001,8 +2167,17 @@ std::string TaskMemoBuilder::BuildRereadFromTopNote(const std::string& read_ref,
     oss << "Note: you are reading " << path << " from the beginning again, but lines "
         << JoinLineRanges(seen) << " of it were already shown earlier in this task.";
     const size_t next_offset = task_memo_scan::NextUnreadOffset(file_entry);
-    if (next_offset > 0)
+    if (next_offset > 0) {
         oss << " The first part you have not seen yet starts at line " << next_offset << ".";
+    } else if (task_memo_scan::IsFileFullyRead(file_entry)) {
+        oss << " It is fully read, so do not page through it again.";
+        std::string cursor = task_memo_scan::RenderCursorSuffix(file_entry);
+        if (cursor.rfind("; ", 0) == 0)
+            cursor.erase(0, 2);
+        if (!cursor.empty())
+            oss << " Where you left off: " << cursor << ".";
+        oss << " Read only the single section you need by passing its offset, or act on what you already know.";
+    }
     oss << "\n";
     const std::string fact = task_memo_scan::RenderNearCursorFact(path, file_entry);
     if (!fact.empty())

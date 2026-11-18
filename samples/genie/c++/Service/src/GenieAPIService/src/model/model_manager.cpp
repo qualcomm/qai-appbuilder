@@ -17,6 +17,7 @@
 #include "../response/response_tools.h"
 #include "../chat_request_handler/summary_cache.h"
 #include "../chat_request_handler/task_memo_store.h"
+#include "../chat_request_handler/task_memo_doc_scan.h"
 #include "../chat_request_handler/tool_call_circuit_breaker_store.h"
 #include "../chat_request_handler/tool_call_repetition_store.h"
 #include "../chat_request_handler/request_trace_writer.h"
@@ -1484,6 +1485,7 @@ bool ModelManager::InitializeConfig()
                     at_cfg.enabled = at.value("enabled", at_cfg.enabled);
                     at_cfg.time_budget_s = at.value("time_budget_s", at_cfg.time_budget_s);
                     at_cfg.min_tokens = at.value("min_tokens", at_cfg.min_tokens);
+                    at_cfg.loop_min_tokens = at.value("loop_min_tokens", at_cfg.loop_min_tokens);
                     at_cfg.max_per_signature = at.value("max_per_signature", at_cfg.max_per_signature);
                     at_cfg.max_think_turn_share = at.value("max_think_turn_share", at_cfg.max_think_turn_share);
                     at_cfg.error_repeat_window = at.value("error_repeat_window", at_cfg.error_repeat_window);
@@ -1551,6 +1553,7 @@ bool ModelManager::InitializeConfig()
                         rg_cfg.hard_block_threshold = rg.value("hard_block_threshold", 3);
                         rg_cfg.hard_block_stop_after = rg.value("hard_block_stop_after", 2);
                         rg_cfg.soft_retry_enabled = rg.value("soft_retry_enabled", false);
+                        rg_cfg.hard_block_retry_enabled = rg.value("hard_block_retry_enabled", true);
                         rg_cfg.max_signatures_per_entry = rg.value("max_signatures_per_entry", 256);
                         rg_cfg.note_min_interval_turns = rg.value("note_min_interval_turns", 4);
                         rg_cfg.overlap_reread_threshold = rg.value("overlap_reread_threshold", 2);
@@ -1579,6 +1582,8 @@ bool ModelManager::InitializeConfig()
                              << tool_call_repair_config_.redundant_call_guard.hard_block_threshold
                              << ", redundant_call_guard.soft_retry_enabled="
                              << tool_call_repair_config_.redundant_call_guard.soft_retry_enabled
+                             << ", redundant_call_guard.hard_block_retry_enabled="
+                             << tool_call_repair_config_.redundant_call_guard.hard_block_retry_enabled
                              << std::endl;
                 }
 
@@ -1605,11 +1610,14 @@ bool ModelManager::InitializeConfig()
                     const auto &grg = pe_json["generation_repeat_guard"];
                     grg_cfg.enabled = grg.value("enabled", grg_cfg.enabled);
                     grg_cfg.max_period_tokens = grg.value("max_period_tokens", grg_cfg.max_period_tokens);
+                    grg_cfg.min_span_bytes = grg.value("min_span_bytes", grg_cfg.min_span_bytes);
                 }
                 LLAMACppBuilder::SetDegenerateRepeatGuardEnabled(grg_cfg.enabled);
                 LLAMACppBuilder::SetDegenerateRepeatGuardMaxPeriod(grg_cfg.max_period_tokens);
+                LLAMACppBuilder::SetDegenerateRepeatGuardMinSpanBytes(grg_cfg.min_span_bytes);
                 My_Log{} << "[Config] generation_repeat_guard loaded: enabled=" << grg_cfg.enabled
-                         << ", max_period_tokens=" << grg_cfg.max_period_tokens << std::endl;
+                         << ", max_period_tokens=" << grg_cfg.max_period_tokens
+                         << ", min_span_bytes=" << grg_cfg.min_span_bytes << std::endl;
                 {
                     bool prefix_cache_enabled = true;
                     int head_checkpoints = 2;
@@ -1679,6 +1687,12 @@ bool ModelManager::InitializeConfig()
                         fid_cfg.json_head_items = fid.value("json_head_items", (size_t) 3);
                         fid_cfg.json_tail_items = fid.value("json_tail_items", (size_t) 1);
                         fid_cfg.max_token_probe_per_message = fid.value("max_token_probe_per_message", (size_t) 8);
+                        fid_cfg.read_footer_directory = fid.value("read_footer_directory", true);
+                        fid_cfg.footer_section_hints = fid.value("footer_section_hints", true);
+                        fid_cfg.footer_outline_max_bytes = fid.value("footer_outline_max_bytes", (size_t) 150);
+                        fid_cfg.eviction_low_water_ratio = fid.value("eviction_low_water_ratio", 0.5f);
+                        fid_cfg.full_section_map = fid.value("full_section_map", false);
+                        task_memo_scan::SetFullSectionMap(fid_cfg.full_section_map);
                         fid_cfg.cjk_bytes_per_token = fid.value("cjk_bytes_per_token", 3.0);
                         fid_cfg.ascii_bytes_per_token = fid.value("ascii_bytes_per_token", 4.0);
                         My_Log{} << "[Config] fidelity loaded: "
@@ -1690,6 +1704,11 @@ bool ModelManager::InitializeConfig()
                                  << ", json_head_items=" << fid_cfg.json_head_items
                                  << ", json_tail_items=" << fid_cfg.json_tail_items
                                  << ", max_token_probe_per_message=" << fid_cfg.max_token_probe_per_message
+                                 << ", read_footer_directory=" << fid_cfg.read_footer_directory
+                                 << ", footer_section_hints=" << fid_cfg.footer_section_hints
+                                 << ", footer_outline_max_bytes=" << fid_cfg.footer_outline_max_bytes
+                                 << ", eviction_low_water_ratio=" << fid_cfg.eviction_low_water_ratio
+                                 << ", full_section_map=" << fid_cfg.full_section_map
                                  << ", cjk_bytes_per_token=" << fid_cfg.cjk_bytes_per_token
                                  << ", ascii_bytes_per_token=" << fid_cfg.ascii_bytes_per_token
                                  << std::endl;
@@ -1728,6 +1747,8 @@ bool ModelManager::InitializeConfig()
                                 rf.value("tag_weight", (size_t) 2);
                         prompt_optimization_config_.relevance_filter.anchor_first_user_message =
                                 rf.value("anchor_first_user_message", true);
+                        prompt_optimization_config_.relevance_filter.session_stable =
+                                rf.value("session_stable", true);
                         prompt_optimization_config_.relevance_filter.keep_all_tools_ratio =
                                 rf.value("keep_all_tools_ratio", 0.15);
                         prompt_optimization_config_.relevance_filter.protect_core_capability_tools =
@@ -1753,6 +1774,7 @@ bool ModelManager::InitializeConfig()
                                  << ", intent_aliases_enabled=" << prompt_optimization_config_.relevance_filter.intent_aliases_enabled
                                  << ", tag_weight=" << prompt_optimization_config_.relevance_filter.tag_weight
                                  << ", anchor_first_user_message=" << prompt_optimization_config_.relevance_filter.anchor_first_user_message
+                                 << ", session_stable=" << prompt_optimization_config_.relevance_filter.session_stable
                                  << ", protect_core_capability_tools=" << prompt_optimization_config_.relevance_filter.protect_core_capability_tools
                                  << ", core_capability_keywords_count=" << prompt_optimization_config_.relevance_filter.core_capability_keywords.size()
                                  << std::endl;
@@ -1800,7 +1822,6 @@ bool ModelManager::InitializeConfig()
                             sum_cfg.cache.enabled = ca.value("enabled", true);
                             sum_cfg.cache.max_entries = ca.value("max_entries", (size_t) 500);
                             sum_cfg.cache.max_memory_mb = ca.value("max_memory_mb", (size_t) 50);
-                            sum_cfg.cache.ttl_minutes = ca.value("ttl_minutes", 60);
                         }
 
                         My_Log{My_Log::Level::kInfo}
@@ -1812,7 +1833,6 @@ bool ModelManager::InitializeConfig()
                                 << ", summarize_tool=" << sum_cfg.summarize_tool_responses
                                 << ", cache.enabled=" << sum_cfg.cache.enabled
                                 << ", cache.max_entries=" << sum_cfg.cache.max_entries
-                                << ", cache.ttl_minutes=" << sum_cfg.cache.ttl_minutes
                                 << std::endl;
 
                         if (sum_cfg.enabled && sum_cfg.cache.enabled)
@@ -1822,7 +1842,6 @@ bool ModelManager::InitializeConfig()
                                     << "[LongTextSummarization] SummaryCache configured: max_entries="
                                     << sum_cfg.cache.max_entries
                                     << ", max_memory_mb=" << sum_cfg.cache.max_memory_mb
-                                    << ", ttl_minutes=" << sum_cfg.cache.ttl_minutes
                                     << std::endl;
                         }
                     }

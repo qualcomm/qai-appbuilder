@@ -15,14 +15,17 @@
 #include <nlohmann/json.hpp>
 #include "prompt_optimizer.h"
 #include "prompt_stats_helper.h"
+#include "log_table.h"
 #include "message_pre_filter.h"
 #include "long_text_summarizer.h"
 #include "summary_cache.h"
 #include "task_memo_builder.h"
 #include "task_memo_doc_scan.h"
 #include "prompt_ledger.h"
+#include "session_continuity.h"
 #include "tool_call_circuit_breaker_store.h"
 #include "tool_call_repetition_store.h"
+#include "../response/repeat_gate.h"
 #include <chrono>
 #include <deque>
 #include <functional>
@@ -89,6 +92,24 @@ inline std::string ExtractLatestAssistantReadRef(const json &messages)
     for (auto it = messages.rbegin(); it != messages.rend(); ++it) {
         if (!it->is_object() || it->value("role", "") != "assistant")
             continue;
+        if (it->contains("tool_calls") && (*it)["tool_calls"].is_array()) {
+            const auto &calls = (*it)["tool_calls"];
+            for (auto call = calls.rbegin(); call != calls.rend(); ++call) {
+                if (!call->is_object() || !call->contains("function") || !(*call)["function"].is_object())
+                    continue;
+                const auto &fn = (*call)["function"];
+                if (!fn.contains("name") || !fn["name"].is_string())
+                    continue;
+                std::string args = "{}";
+                if (fn.contains("arguments"))
+                    args = fn["arguments"].is_string() ? fn["arguments"].get<std::string>() : fn["arguments"].dump();
+                const std::string ref = TaskMemoBuilder::ExtractReadToolPath(
+                    "<tool_call>\n{\"name\": \"" + fn["name"].get<std::string>() + "\", \"arguments\": " + args +
+                    "}\n</tool_call>");
+                if (!ref.empty())
+                    return ref;
+            }
+        }
         return TaskMemoBuilder::ExtractReadToolPath(get_json_value<std::string>(*it, "content", ""));
     }
     return "";
@@ -110,6 +131,8 @@ public:
     {
         request_data_ = request_data;
     }
+
+    void ForceThinkOnNextBuild() { force_think_ = true; }
 
     ModelInput &Build(json &data, bool &is_tool,
                       std::function<bool()> is_alive_fn = nullptr)
@@ -470,18 +493,7 @@ private:
         }
 
         auto compute_tool_call_signature = [](const json& element) {
-            if (!element.contains("tool_calls") || !element["tool_calls"].is_array()
-                || element["tool_calls"].empty() || !element["tool_calls"][0].contains("function"))
-                return std::string();
-            const auto& fn = element["tool_calls"][0]["function"];
-            std::string args = "{}";
-            try {
-                if (fn.contains("arguments") && fn["arguments"].is_string())
-                    args = json::parse(fn["arguments"].get<std::string>()).dump();
-                else if (fn.contains("arguments") && fn["arguments"].is_object())
-                    args = fn["arguments"].dump();
-            } catch (...) {}
-            return fn.value("name", "") + "|" + args;
+            return TaskMemoBuilder::AssistantToolCallSignature(element);
         };
         const json& raw_messages = request_data_.is_object() && request_data_.contains("messages")
                 && request_data_["messages"].is_array() ? request_data_["messages"] : msg;
@@ -666,11 +678,12 @@ private:
         {
             bool failure_trigger = false;
             bool forced_unblock_trigger = false;
+            bool loop_trigger = force_think_;
             if (instance_config_->getenableThinking())
             {
                 systemDefaultPrompt += "/think";
             }
-            else if (ShouldThinkThisTurn(&failure_trigger, &forced_unblock_trigger))
+            else if (force_think_ || ShouldThinkThisTurn(&failure_trigger, &forced_unblock_trigger, &loop_trigger))
             {
                 const auto &at_cfg = instance_config_->i_model_config_.GetAdaptiveThinkingConfig();
                 systemDefaultPrompt += "/no_think";
@@ -678,7 +691,7 @@ private:
                 if (failure_trigger && at_cfg.goal_reminder_chars > 0)
                     think_goal_reminder = BuildGoalReminder(at_cfg.goal_reminder_chars);
                 model_input_.think_time_budget_s_ = at_cfg.time_budget_s;
-                model_input_.think_min_tokens_ = at_cfg.min_tokens;
+                model_input_.think_min_tokens_ = loop_trigger ? std::max(at_cfg.min_tokens, at_cfg.loop_min_tokens) : at_cfg.min_tokens;
                 model_input_.think_max_tokens_ = at_cfg.max_tokens;
                 model_input_.think_ctx_reserve_ = at_cfg.ctx_reserve_tokens;
                 model_input_.think_force_min_floor_ = forced_unblock_trigger;
@@ -1783,9 +1796,19 @@ private:
 
         const int repeat_count = store.GetRepeatCount(key);
         if (cfg.repeat_threshold > 0 && repeat_count >= cfg.repeat_threshold) {
+            int forewarn_threshold = cfg.hard_block_threshold;
+            if (!last_signature.empty()) {
+                std::vector<size_t> dropped_raw;
+                if (MessagePreFilter::GetDroppedRawIndices(session_key, messages, dropped_raw)) {
+                    const int visible_executions = static_cast<int>(RepeatGateLogic::CountVisibleExecutions(
+                        RepeatGateLogic::CollectExecutedOutcomes(messages), last_signature, dropped_raw));
+                    if (visible_executions + 1 < cfg.hard_block_threshold)
+                        forewarn_threshold = 0;
+                }
+            }
             candidates.emplace_back("sig:" + last_signature,
                                     TaskMemoBuilder::RenderRedundantToolCallNote(repeat_count, preview, digest_stable,
-                                                                                  cfg.hard_block_threshold));
+                                                                                  forewarn_threshold));
         }
         const int non_contiguous_count = store.GetNonContiguousRepeatCount(key);
         const int non_contiguous_threshold = ToolCallRepetitionStore::EffectiveNonContiguousNoticeThreshold(
@@ -1821,12 +1844,21 @@ private:
                 candidates.emplace_back("overlap:" + overlap_path, note);
         }
 
+        const uint64_t memo_epoch = entry ? static_cast<uint64_t>(entry->value("refresh_count", (size_t) 0)) : 0;
         for (const auto& candidate : candidates) {
             if (candidate.second.empty())
                 continue;
 
-            const uint64_t content_digest = static_cast<uint64_t>(std::hash<std::string>{}(candidate.second));
-            if (store.TryMarkNoteSlot(key, candidate.first, content_digest))
+            uint64_t content_digest = static_cast<uint64_t>(std::hash<std::string>{}(candidate.second));
+            const bool is_reread = candidate.first.rfind("reread:", 0) == 0;
+            if (is_reread)
+                content_digest ^= (memo_epoch + 1) * 0x9E3779B97F4A7C15ULL;
+            const bool accepted = store.TryMarkNoteSlot(key, candidate.first, content_digest);
+            if (is_reread)
+                My_Log{My_Log::Level::kInfo} << "[TaskMemo] RereadFromTop note: slot=" << candidate.first
+                                             << ", refresh_count=" << memo_epoch
+                                             << ", accepted=" << (accepted ? 1 : 0) << std::endl;
+            if (accepted)
                 return "\n\n## Task Memo\n" + candidate.second;
         }
         return "";
@@ -1928,7 +1960,8 @@ private:
         return keys;
     }
 
-    bool ShouldThinkThisTurn(bool *failure_trigger = nullptr, bool *forced_unblock_trigger = nullptr) const
+    bool ShouldThinkThisTurn(bool *failure_trigger = nullptr, bool *forced_unblock_trigger = nullptr,
+                             bool *loop_trigger = nullptr) const
     {
         const auto &at_cfg = instance_config_->i_model_config_.GetAdaptiveThinkingConfig();
         if (!at_cfg.enabled || at_cfg.time_budget_s <= 0)
@@ -1984,7 +2017,7 @@ private:
                 candidates.push_back({"near_repeat", "near:" + near_tpl, false});
         }
 
-        constexpr size_t kCycleWindow = 12;
+        constexpr size_t kCycleWindow = 48;
         const std::vector<std::string> cycle_keys = CollectCycleToolCallKeys(messages);
         const std::string cycle_signature = BuildCycleRepeatSignature(cycle_keys, kCycleWindow);
         if (!cycle_signature.empty())
@@ -2011,18 +2044,12 @@ private:
             int tool_turns = 0;
 
             int failure_reserve_used = 0;
-            std::chrono::steady_clock::time_point touched;
+            ContinuityMark mark;
         };
         static std::mutex s_mu;
-        static std::unordered_map<std::string, SessionThinkState> s_state;
-        const auto now = std::chrono::steady_clock::now();
+        static LruSessionTable<SessionThinkState> s_state(512);
         std::lock_guard<std::mutex> lk(s_mu);
-        if (s_state.size() > 512)
-            s_state.clear();
-        auto &st = s_state[session_key];
-        if (now - st.touched >= std::chrono::hours(2))
-            st = SessionThinkState{};
-        st.touched = now;
+        auto &st = TouchContinuing(s_state, session_key, messages);
         ++st.tool_turns;
         if (repeat_count_checked && repeat_count < 2)
         {
@@ -2041,7 +2068,7 @@ private:
                 blocked = "signature_limit";
             else if (paced && st.last_think_msg_count > 0 && messages.size() <= st.last_think_msg_count + 2)
                 blocked = "cooldown";
-            else if (paced && at_cfg.max_think_turn_share > 0.0 &&
+            else if ((paced || candidate.reason == "cycle_repeat") && at_cfg.max_think_turn_share > 0.0 &&
                      st.think_turns >= static_cast<int>(at_cfg.max_think_turn_share * st.tool_turns))
                 blocked = "turn_share";
 
@@ -2092,6 +2119,8 @@ private:
                 *failure_trigger = candidate.failure;
             if (forced_unblock_trigger)
                 *forced_unblock_trigger = forced_unblock || reserve_unblock;
+            if (loop_trigger)
+                *loop_trigger = !candidate.failure;
             My_Log{} << "[AdaptiveThinking] enabling /think for this turn: " << candidate.reason
                      << " (sig_count=" << sig_count << ", think_turns=" << st.think_turns
                      << "/" << st.tool_turns << ")" << std::endl;
@@ -2455,42 +2484,42 @@ private:
         }
 
         {
-            My_Log{} << "--- [Summarization] Token Summary Start ---" << std::endl;
+            LogTable table{"Token Summary [Summarization]"};
             auto profile = context_->HandleProfile();
             if (!profile.empty())
             {
                 try
                 {
-                    My_Log{} << "Time to First Token: "
-                             << std::fixed << std::setprecision(2)
-                             << profile.at("time_to_first_token").get<std::string>()
-                             << " s" << std::endl;
-                    My_Log{} << "Token Generation Time: "
-                             << std::fixed << std::setprecision(2)
-                             << profile.at("token_generation_time").get<std::string>()
-                             << " s" << std::endl;
-                    My_Log{} << "Num Prompt Tokens: "
-                             << profile.at("num_prompt_tokens")
-                             << ", Prompt Length: " << prompt.size() << " chars" << std::endl;
-                    My_Log{} << "Prompt Processing Rate: "
-                             << std::fixed << std::setprecision(2)
-                             << profile.at("prompt_processing_rate").get<std::string>()
-                             << " toks/sec" << std::endl;
-                    My_Log{} << "Num Generated Tokens: "
-                             << profile.at("num_generated_tokens")
-                             << ", Summary Length: " << result.size() << " chars" << std::endl;
-                    My_Log{} << "Token Generation Rate: "
-                             << std::fixed << std::setprecision(2)
-                             << profile.at("token_generation_rate").get<std::string>()
-                             << " toks/sec" << std::endl;
+                    const std::vector<std::string> prompt_row{
+                        "Prompt (TTFT)",
+                        LogTable::JsonText(profile.at("num_prompt_tokens")),
+                        std::to_string(prompt.size()),
+                        profile.at("time_to_first_token").get<std::string>(),
+                        profile.at("prompt_processing_rate").get<std::string>()};
+                    const std::vector<std::string> generation_row{
+                        "Generation",
+                        LogTable::JsonText(profile.at("num_generated_tokens")),
+                        std::to_string(result.size()),
+                        profile.at("token_generation_time").get<std::string>(),
+                        profile.at("token_generation_rate").get<std::string>()};
+
+                    table.SetHeader({"Phase", "Tokens", "Text Length", "Time (s)", "Rate (toks/s)"},
+                                    {LogTable::Align::kLeft, LogTable::Align::kRight, LogTable::Align::kRight,
+                                     LogTable::Align::kRight, LogTable::Align::kRight});
+                    table.AddRow(prompt_row).AddRow(generation_row);
                 }
                 catch (const std::exception& e)
                 {
                     My_Log{My_Log::Level::kWarning}
                         << "[RunSummarizationInference] PrintProfile failed: " << e.what() << std::endl;
+                    table.SetTitle("Token Summary [Summarization] - profile unavailable");
                 }
             }
-            My_Log{} << "--- [Summarization] Token Summary End ---" << std::endl;
+            else
+            {
+                table.SetTitle("Token Summary [Summarization] - no profile data");
+            }
+            My_Log{}.original() << table.Str() << std::flush;
         }
 
         if (timed_out)
@@ -2551,6 +2580,8 @@ private:
     std::unordered_map<std::string, std::string> tool_call_id_to_name_;
 
     json request_data_;
+
+    bool force_think_ = false;
 
     PromptLedger last_ledger_;
 };

@@ -209,6 +209,8 @@ struct ToolCallRepairConfig {
 
         bool soft_retry_enabled = false;
 
+        bool hard_block_retry_enabled = true;
+
         int max_signatures_per_entry = 256;
 
         int note_min_interval_turns = 4;
@@ -236,6 +238,7 @@ struct AdaptiveThinkingConfig {
     bool enabled = true;
     int time_budget_s = 15;
     int min_tokens = 320;
+    int loop_min_tokens = 640;
     int max_per_signature = 2;
     double max_think_turn_share = 0.4;
     int error_repeat_window = 4;
@@ -252,7 +255,8 @@ struct AdaptiveThinkingConfig {
 
 struct GenerationRepeatGuardConfig {
     bool enabled = true;
-    int max_period_tokens = 48;
+    int max_period_tokens = 128;
+    int min_span_bytes = 256;
 };
 
 struct CloudModelConfig {
@@ -427,6 +431,7 @@ struct PromptOptimizationConfig {
 
         size_t tag_weight = 2;
         bool anchor_first_user_message = true;
+        bool session_stable = true;
         double keep_all_tools_ratio = 0.15;
         bool protect_core_capability_tools = true;
         std::vector<std::string> core_capability_keywords = {
@@ -478,6 +483,11 @@ struct PromptOptimizationConfig {
         size_t json_head_items = 3;
         size_t json_tail_items = 1;
         size_t max_token_probe_per_message = 8;
+        bool read_footer_directory = true;
+        bool footer_section_hints = true;
+        size_t footer_outline_max_bytes = 150;
+        float eviction_low_water_ratio = 0.5f;
+        bool full_section_map = false;
 
         double cjk_bytes_per_token = 3.0;
         double ascii_bytes_per_token = 4.0;
@@ -513,7 +523,6 @@ struct PromptOptimizationConfig {
         bool enabled = true;
         size_t max_entries = 500;
         size_t max_memory_mb = 50;
-        int ttl_minutes = 60;
     };
 
     struct LongTextSummarizationConfig {
