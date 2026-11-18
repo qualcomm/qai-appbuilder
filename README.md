@@ -30,6 +30,9 @@
 > **On Windows**, just download the EXE installer (`*-setup.exe`, available for ARM64 and x64)
 > from the release page and run it — no manual environment setup is needed.
 >
+> **On Linux**, download the `*-linux.tar.gz` package from the release page, extract it, then run
+> `bash setup.sh` (one-time environment setup) followed by `bash start.sh` to launch the WebUI.
+>
 > QAI AppBuilder is provided "as is", without warranty of any kind — please evaluate it for your
 > use case and test thoroughly before relying on it in critical systems.
 
