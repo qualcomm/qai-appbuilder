@@ -139,7 +139,7 @@ QAIAppBuilder-<版本>-qairt<A.B.C>-<架构>-setup.exe
 ## 包里有什么(白名单)
 
 `src` `apps` `factory` `scripts` `interfaces` `skills` `frontend\dist` `pyproject.toml` `build_info.json`
-`desktop\QAIAppBuilder.exe`(桌面版窗口,见下)、`_setup_env.bat` `Start.bat` `qai.bat` `Console.bat` `Uninstall.bat` `clean_env.bat` 及 README,
+`desktop\QAIAppBuilder.exe`(桌面版窗口,见下)、`_setup_env.bat` `Start.bat` `qaiAppbuilder.bat` `Console.bat` `Uninstall.bat` `clean_env.bat` 及 README,
 外加 `data\bin\uv\uv.exe`(**按目标架构**从 PyPI 取)、`data\bin\aria2c\aria2c.exe`,以及 **FileGuard 的 `vendor\bin\<arch>\guard64.dll`**(ARM64 另有 `guard-injector.exe`)和标记文件 `vendor\bin\guard.source`。
 
 guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 约 0.7 MB、ARM64 约 0.7 MB;整个 zip 有 30 MB,因为里面还带两个架构的 ast-grep)。`guard.source` 写的是 `_setup_env.bat` 自己会下载的那个 URL,脚本看到标记与 URL 一致且 dll 在,就跳过下载,所以**安装时不再联网下载 guard.zip**。来源顺序:`-GuardZip` 参数、`Downloads\guard.zip`、发布页 URL;都拿不到时只打印一行提示,安装时仍由 `_setup_env.bat` 下载。发布标签变了,改 `scripts\qairt_release.json` 的 `qairt_version` 后重新打包即可(guard.zip 的标签单独固定,见下);旧包里的标记和新标签不一致时,安装会重新下载并替换。

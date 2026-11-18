@@ -108,7 +108,7 @@ REM      installs on WoS ("Setup.bat --arch x64" installs the x64 stack under
 REM      Prism emulation for validation).
 REM   2. data\config\host_arch file left by a prior Setup run (single-line
 REM      lowercase arm64/x64). Locks the arch across re-runs and lets sibling
-REM      launchers (Start.bat / qai.bat / Console.bat) agree on the arch
+REM      launchers (Start.bat / qaiAppbuilder.bat / Console.bat) agree on the arch
 REM      without re-probing PROCESSOR_ARCHITECTURE (which lies under Prism).
 REM   3. Auto-detect via %PROCESSOR_ARCHITECTURE% / %PROCESSOR_ARCHITEW6432%.
 REM      Snapdragon/WoS hosts report ARM64; native x64 hosts report AMD64
@@ -736,7 +736,7 @@ REM registers no console-script entry points (qai / qai-serve /
 REM qai-uninstall) -- the shared venv is used by every installation on this
 REM machine, so binding it to one project's source tree would make every
 REM OTHER installation load the wrong code. Instead, every launcher
-REM (Start.bat / qai.bat / Console.bat) sets PYTHONPATH to ITS OWN
+REM (Start.bat / qaiAppbuilder.bat / Console.bat) sets PYTHONPATH to ITS OWN
 REM %ROOT_DIR%src before invoking ``python -m apps.cli`` /
 REM ``apps.cli.serve`` / ``scripts.init.uninstall`` directly, so each
 REM installation always resolves its own source regardless of which project
@@ -1517,16 +1517,16 @@ echo  +--------------------------------------------------+
 echo  ^|   Next steps:                                    ^|
 echo  ^|                                                  ^|
 echo  ^|     Start server:  Start.bat                     ^|
-echo  ^|     Run a CLI cmd: qai.bat ^<args^>                 ^|
+echo  ^|     Run a CLI cmd: qaiAppbuilder.bat ^<args^>                 ^|
 echo  ^|     Open console:  Console.bat                   ^|
 echo  +--------------------------------------------------+
 echo.
 echo [INFO] The "qai" command-line tool is now installed in this environment.
 echo [INFO] Quick ways to use it:
-echo [INFO]     qai.bat --help                 ^(one-shot, no shell needed^)
-echo [INFO]     qai.bat config provider list   ^(configure cloud model providers^)
-echo [INFO]     qai.bat app ^<pack^> --image x.png   ^(run an App Builder model^)
-echo [INFO]     qai.bat build                  ^(Model Builder conversion session^)
+echo [INFO]     qaiAppbuilder.bat --help                 ^(one-shot, no shell needed^)
+echo [INFO]     qaiAppbuilder.bat config provider list   ^(configure cloud model providers^)
+echo [INFO]     qaiAppbuilder.bat app ^<pack^> --image x.png   ^(run an App Builder model^)
+echo [INFO]     qaiAppbuilder.bat build                  ^(Model Builder conversion session^)
 echo [INFO]
 echo [INFO] To install extra Python packages or run ad-hoc Python commands,
 echo [INFO] use Console.bat ^(drops you into the activated venv^).
@@ -1548,7 +1548,7 @@ REM Written only on the success path so an aborted / half-broken install does
 REM not leave a misleading record behind. Uninstall.bat deletes this file.
 REM Contents: single ASCII line, lowercase "arm64" or "x64", no BOM (cmd's
 REM `echo >` is a plain-bytes redirect), no trailing whitespace. Downstream
-REM readers (Start.bat, qai.bat, Console.bat, onnxwrapper._get_actual_architecture)
+REM readers (Start.bat, qaiAppbuilder.bat, Console.bat, onnxwrapper._get_actual_architecture)
 REM strip whitespace defensively regardless.
 if not exist "%~dp0data\config" mkdir "%~dp0data\config" >nul 2>&1
 <nul set /p "=%HOST_ARCH%" >"%~dp0data\config\host_arch"
@@ -2009,7 +2009,7 @@ echo                     Snapdragon/WoS host to install the x64 stack under
 echo                     Prism emulation for validation ^(Setup.bat --arch x64^),
 echo                     or vice versa. The resolved value is written to
 echo                     data\config\host_arch and picked up by sibling
-echo                     launchers ^(Start.bat / qai.bat / Console.bat^).
+echo                     launchers ^(Start.bat / qaiAppbuilder.bat / Console.bat^).
 echo.
 echo      --help, -h, /? Show this help and exit ^(installs nothing^).
 echo.
@@ -2021,7 +2021,7 @@ echo      Setup.bat --full              Everything ^(slowest, ~old default^).
 echo      Setup.bat --dev               Add the developer / test toolchain.
 echo      Setup.bat --desktop           Also Rust + tauri-cli ^(implies --builder^).
 echo.
-echo  After setup:  Start.bat ^(run server^)  ^|  qai.bat ^(CLI^)  ^|  Console.bat ^(venv shell^)
+echo  After setup:  Start.bat ^(run server^)  ^|  qaiAppbuilder.bat ^(CLI^)  ^|  Console.bat ^(venv shell^)
 echo.
 exit /b 0
 

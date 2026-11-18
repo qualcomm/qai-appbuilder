@@ -282,9 +282,20 @@ class Container:
     # ``qairt_env.json`` (that file is what the install creates). ``None`` only in
     # stripped-down test containers; the routes then answer 404 ``builder_env.unavailable``.
     builder_env_service: "BuilderEnvService | None" = field(init=False, default=None)
+    # Tail-appended (scripted runs): an in-memory provider overlay loaded from
+    # ``qai agent run --provider-file``. ``None`` for the API server and every
+    # other CLI command, so provider routing is unchanged unless a caller
+    # explicitly supplies one. Never persisted.
+    provider_overlay: Any = field(init=False, default=None)
 
     @classmethod
-    def build(cls, *, settings: Settings, repo_root: Path) -> Container:
+    def build(
+        cls,
+        *,
+        settings: Settings,
+        repo_root: Path,
+        provider_overlay: Any = None,
+    ) -> Container:
         data_paths = settings.data_paths()
         data_paths.ensure_top_levels()
 
@@ -312,6 +323,7 @@ class Container:
             events=events,
             repo_root=repo_root,
         )
+        c.provider_overlay = provider_overlay
         # Three explicit phases (architecture cleanup — byte-for-byte the
         # same wiring/order as the former single body, just grouped so the
         # cross-context dependency edge — chat → ai_coding → wire — reads

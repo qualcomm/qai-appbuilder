@@ -91,7 +91,7 @@ Server 启动时自动选取可用端口，实际 URL 写入
 
 | 命令 | 用途 |
 |---|---|
-| `qai.bat <args>` | 不进 venv 直接跑 CLI（`qai --help` / `qai config provider list` / `qai build`…） |
+| `qaiAppbuilder.bat <args>` | 不进 venv 直接跑 CLI（`qai --help` / `qai config provider list` / `qai build`…） |
 | `Console.bat` | 双击进入激活好的 venv 交互 shell，用 `pip install <pkg>` 装额外包 / 跑 ad-hoc Python |
 | `Uninstall.bat` | 卸载 Setup.bat 装到项目外的东西（venv / PortableGit / Node）；**不动 `data/`** |
 | `Uninstall.bat --all` | 上面 + uv 缓存 + QAIRT SDK + Playwright Chromium + `vendor/` 运行时缓存 |
@@ -129,8 +129,8 @@ Build.bat --install
 | `node_modules` 坏了 | `Build.bat --clean` |
 | 写贡献者测试 / 跑 pytest | `Setup.bat --dev` 一次，之后 `Console.bat` 进 venv 跑测试 |
 | 打包给最终用户 | `Build.bat --install`，然后将 `tools\qaiappbuilder\` 压缩为 `qaiappbuilder.zip` |
-| 一次性敲 CLI 命令 | `qai.bat <args>` |
+| 一次性敲 CLI 命令 | `qaiAppbuilder.bat <args>` |
 | 装额外 Python 包临时试试 | `Console.bat` 进 venv，`pip install <pkg>` |
 | 彻底清理（保留 `data/`） | `Uninstall.bat`（或 `--all` 更深度） |
 
-> **`Setup.bat` / `Build.bat` / `Uninstall.bat` 支持 `--help` / `-h` / `/?`** ——例如 `Build.bat --help` 看全部开关。`Start.bat` / `qai.bat` 会将额外参数透传给底层 Python 入口。
+> **`Setup.bat` / `Build.bat` / `Uninstall.bat` 支持 `--help` / `-h` / `/?`** ——例如 `Build.bat --help` 看全部开关。`Start.bat` / `qaiAppbuilder.bat` 会将额外参数透传给底层 Python 入口。

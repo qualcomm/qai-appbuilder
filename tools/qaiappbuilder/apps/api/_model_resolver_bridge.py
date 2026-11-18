@@ -153,7 +153,12 @@ class ModelCatalogProviderLookupBridge(ProviderConfigLookupPort, ModelContextWin
       for ``local::`` metadata lookup by :meth:`context_window`.
     """
 
-    __slots__ = ("_provider_registry", "_secret_store", "_local_models")
+    __slots__ = (
+        "_provider_registry",
+        "_secret_store",
+        "_local_models",
+        "_provider_overlay",
+    )
 
     def __init__(
         self,
@@ -161,10 +166,25 @@ class ModelCatalogProviderLookupBridge(ProviderConfigLookupPort, ModelContextWin
         provider_registry: Any,
         secret_store: "SecretStore | None" = None,
         local_models: Any = None,
+        provider_overlay: Any = None,
     ) -> None:
         self._provider_registry = provider_registry
         self._secret_store = secret_store
         self._local_models = local_models
+        # In-memory providers from ``qai agent run --provider-file``. Consulted
+        # BEFORE the persisted registry; ``None`` keeps behaviour unchanged.
+        self._provider_overlay = provider_overlay
+
+    async def _provider_rows(self) -> list[dict[str, Any]]:
+        """Overlay providers first, then the persisted ones.
+
+        Raises whatever the registry raises, exactly like the direct call it
+        replaces, so each caller keeps its own failure handling.
+        """
+        persisted = await self._provider_registry.list_provider_configs()
+        if self._provider_overlay is None:
+            return persisted
+        return [*self._provider_overlay.rows(), *(persisted or ())]
 
     async def lookup_for_model(
         self, model_id: str
@@ -172,7 +192,7 @@ class ModelCatalogProviderLookupBridge(ProviderConfigLookupPort, ModelContextWin
         if not model_id:
             return None
         try:
-            rows = await self._provider_registry.list_provider_configs()
+            rows = await self._provider_rows()
         except Exception as exc:  # noqa: BLE001 — never crash chat routing
             logger.warning(
                 "chat.model_resolver_bridge.list_providers_failed",
@@ -237,7 +257,7 @@ class ModelCatalogProviderLookupBridge(ProviderConfigLookupPort, ModelContextWin
         if self._provider_registry is None:
             raise MissingModelContextLengthError(model_id)
         try:
-            rows = await self._provider_registry.list_provider_configs()
+            rows = await self._provider_rows()
         except Exception as exc:
             raise MissingModelContextLengthError(model_id) from exc
 
@@ -414,6 +434,15 @@ class ModelCatalogProviderLookupBridge(ProviderConfigLookupPort, ModelContextWin
         #    a clean auth error telling the user to sign in again.
         if self._is_service_token_provider(provider_id):
             return _resolve_service_jwt()
+        # File-supplied provider (``--provider-file``): its key lives only in
+        # memory. A provider id owned by the overlay NEVER falls through to the
+        # secret store, so a stored key for the same id cannot be sent to the
+        # file's endpoint.
+        if (
+            self._provider_overlay is not None
+            and self._provider_overlay.has_provider(provider_id)
+        ):
+            return self._provider_overlay.api_key_for(provider_id)
         if (store := self._secret_store) is None:
             return None
         # 1) Dedicated per-provider record.

@@ -61,6 +61,7 @@ _D2_GROUPS = (
     "skill",            # J1: qai skill list/policy/toggle/mode/reload
     "dep",              # J2: qai dep pending/approve/reject + exec profiles
     "service_release",  # K: qai service-release versions/models/install/aria2c/...
+    "agent",            # K2: qai agent run (scriptable chat-agent SDK surface)
     "build",            # L1: qai build (Model Builder agentic session, REPL)
     "app",              # L2: qai app <pack> (App Builder inference, one-shot + REPL)
 )

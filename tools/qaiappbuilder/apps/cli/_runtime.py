@@ -42,7 +42,7 @@ import contextlib
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from qai.platform.config import Settings, load_settings
 from qai.platform.logging import configure_logging, get_logger
@@ -147,6 +147,7 @@ async def cli_container(
     *,
     config_file: Path | None = None,
     repo_root: Path | None = None,
+    provider_overlay: Any = None,
 ) -> AsyncIterator[Container]:
     """Build, start, yield, then tear down a :class:`Container` for one CLI call.
 
@@ -159,6 +160,10 @@ async def cli_container(
         Repository root (the directory containing ``src/`` / ``apps/``).
         ``None`` auto-detects from this module's location, matching the API
         server's behaviour.
+    provider_overlay:
+        Optional in-memory provider overlay (``qai agent run
+        --provider-file``). Consulted before the persisted providers and
+        never written anywhere. ``None`` (every other command) changes nothing.
 
     Yields
     ------
@@ -194,7 +199,11 @@ async def cli_container(
         mute_http_urls=settings.logging.mute_http_urls,
     )
 
-    container = Container.build(settings=settings, repo_root=resolved_root)
+    container = Container.build(
+        settings=settings,
+        repo_root=resolved_root,
+        provider_overlay=provider_overlay,
+    )
     migrations_dir = _resolve_migrations_dir(resolved_root)
 
     await container.database.start()
