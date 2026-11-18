@@ -294,6 +294,21 @@ credential_key = "web_anthropic"
 endpoint = "https://api.anthropic.com/v1/messages"
 priority_hint = 52
 description_i18n_key = "search.engines.anthropic.desc"
+
+[[search_engines]]
+engine_id = "keenable"
+display_name = "Keenable"
+engine_type = "http_api"
+handler_class = "qai.platform.web_search.independent.engines.keenable:KeenableEngine"
+enabled_by_default = false
+# Keyless: uses /v1/search/public and X-Keenable-Title. A saved key switches
+# to the keyed /v1/search endpoint.
+requires_credential = false
+credential_key = "web_keenable"
+endpoint = "https://api.keenable.ai/v1/search/public"
+priority_hint = 95
+description_i18n_key = "search.engines.keenable.desc"
+
 # Aggregator + browser + health-scoring knobs (platform-operator tuning; users
 # cannot override these from forge_config). Read by the ``web`` provider via
 # get_independent_search_config().

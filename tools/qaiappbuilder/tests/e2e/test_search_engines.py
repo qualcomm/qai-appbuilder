@@ -25,7 +25,7 @@ engine is ever contacted; the OS keyring is only READ.
 
 Observed behaviour worth pinning:
 
-* The roster has 20 engines. Defaults: ``google_browser`` and ``mojeek`` are disabled by default (``manual_state`` ``forced_off``,
+* The roster has 21 engines. Defaults: ``google_browser``, ``mojeek`` and ``keenable`` are disabled by default (``manual_state`` ``forced_off``,
   status ``disabled``); every engine that requires a credential and has none stored shows ``needs_config`` whatever its manual state;
   keyless / no-credential engines (baidu, bing, duckduckgo, exa, firecrawl) are ``enabled``.
 * ``manual_state`` accepts exactly ``auto`` / ``forced_on`` / ``forced_off`` (case-sensitive); anything else is 422, a missing or
@@ -59,7 +59,7 @@ ROW_KEYS = {
     "quota_exhausted", "quota_notify_enabled",
 }
 ENGINE_TYPES = {"http_keyless", "http_api", "browser"}
-DEFAULT_OFF = {"google_browser", "mojeek"}
+DEFAULT_OFF = {"google_browser", "mojeek", "keenable"}
 NO_CREDENTIAL_ENABLED = {"baidu", "bing", "duckduckgo", "exa", "firecrawl"}
 STATES = ("auto", "forced_on", "forced_off")
 UNKNOWN = "e2e-no-such-engine"
@@ -122,7 +122,7 @@ def test_list_returns_the_roster_with_a_stable_row_shape(cl: httpx.Client) -> No
     r = cl.get(P)
     assert r.status_code == 200 and list(r.json()) == ["engines"]
     rows = r.json()["engines"]
-    assert len(rows) == 20 and len({e["engine_id"] for e in rows}) == 20
+    assert len(rows) == 21 and len({e["engine_id"] for e in rows}) == 21
     for e in rows:
         assert set(e) == ROW_KEYS, e["engine_id"]
         assert e["engine_type"] in ENGINE_TYPES and e["status"] in {"enabled", "disabled", "needs_config"}
@@ -338,7 +338,7 @@ def test_an_unknown_engine_id_never_shows_up_in_the_list_or_status(cl: httpx.Cli
     cl.post(f"{P}/{UNKNOWN}/manual_state", json={"state": "forced_on"})
     assert UNKNOWN not in [e["engine_id"] for e in cl.get(P).json()["engines"]]
     assert UNKNOWN not in [e["engine_id"] for e in cl.get(f"{P}/status").json()["engines"]]
-    assert len(cl.get(P).json()["engines"]) == 20
+    assert len(cl.get(P).json()["engines"]) == 21
 
 
 def test_a_keyless_engine_can_be_given_a_quota_row_although_the_list_hides_it(cl: httpx.Client) -> None:
@@ -356,4 +356,4 @@ def test_a_long_and_a_non_ascii_engine_id_are_accepted_as_opaque_ids(cl: httpx.C
     for eid in ("x" * 300, "%E4%B8%AD"):
         r = cl.post(f"{P}/{eid}/manual_state", json={"state": "auto"})
         assert r.status_code == 200 and r.json()["manual_state"] == "auto"
-    assert len(cl.get(P).json()["engines"]) == 20
+    assert len(cl.get(P).json()["engines"]) == 21

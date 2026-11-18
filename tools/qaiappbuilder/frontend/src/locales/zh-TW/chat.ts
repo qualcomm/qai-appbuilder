@@ -1155,6 +1155,9 @@ const chat = {
       anthropic: {
         desc: "Claude 原生 web_search 工具。由模型搜尋並附引用來源。需 API 金鑰。",
       },
+      keenable: {
+        desc: "Keenable 搜尋。預設關閉。可不填金鑰使用公開端點；填寫 API 金鑰後走帶金鑰接口。",
+      },
     },
   },
 };

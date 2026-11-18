@@ -1215,6 +1215,9 @@ const chat = {
       anthropic: {
         desc: "Claude's built-in web_search tool. Model-cited sources. Requires an API key.",
       },
+      keenable: {
+        desc: "Keenable Search. Off by default. Works keyless; an API key unlocks the keyed endpoint.",
+      },
     },
   },
 };

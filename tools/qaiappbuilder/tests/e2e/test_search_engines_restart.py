@@ -19,7 +19,7 @@ from tests.e2e._owned_backend import owned_backend
 pytestmark = pytest.mark.e2e
 
 P = "/api/search/engines"
-DEFAULT_OFF = {"google_browser", "mojeek"}
+DEFAULT_OFF = {"google_browser", "mojeek", "keenable"}
 
 
 def _row(c, eid: str) -> dict:
