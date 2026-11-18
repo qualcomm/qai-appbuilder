@@ -109,6 +109,7 @@ foreach ($idx in $idxList) {
         if ($Aria2cExe -and (Test-Path -LiteralPath $Aria2cExe)) { $dargs += @('-Aria2cExe', $Aria2cExe) }
         if ($ProxyUrl) { $dargs += @('-ProxyUrl', $ProxyUrl) }
         & powershell.exe @dargs
+        Write-Host '[DLEND]'
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $whl)) { Say "download failed (exit $LASTEXITCODE) - next index"; continue }
 
         if ($w.Sha256) {

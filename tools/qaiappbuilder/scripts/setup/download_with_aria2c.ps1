@@ -267,6 +267,17 @@ try {
 $OutDir = [System.IO.Path]::GetDirectoryName($OutFileAbs)
 $OutName = [System.IO.Path]::GetFileName($OutFileAbs)
 
+# Machine-readable "what is being downloaded from where" line. The installer wizard shows the latest one under
+# the progress bar (until the caller prints [DLEND]). Format: [DLFILE] <file> | <source> | <url>. A GitHub proxy URL
+# (https://proxy/https://github.com/...) is reported as "<proxy host> (proxy for <github host>)".
+$DlSource = $Url
+try {
+    $DlSource = ([Uri]$Url).Host
+    $inner = [regex]::Match($Url.Substring(8), 'https?://([^/]+)/')
+    if ($inner.Success) { $DlSource = '{0} (proxy for {1})' -f $DlSource, $inner.Groups[1].Value }
+} catch { }
+Write-Host ('[DLFILE] {0} | {1} | {2}' -f $OutName, $DlSource, $Url)
+
 if (-not (Test-Path -LiteralPath $OutDir)) {
     try {
         New-Item -ItemType Directory -Path $OutDir -Force | Out-Null
