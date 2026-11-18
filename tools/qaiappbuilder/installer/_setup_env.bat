@@ -225,8 +225,12 @@ REM Always `uv python install` (idempotent, fast when complete). A `uv python fi
 REM versioned folder cpython-3.13.<patch>-... alone and would never recreate a missing cpython-3.13-...-none link -
 REM the path every venv's pyvenv.cfg points at - leaving those venvs unable to start.
 echo [INFO] installing / checking %PY_SPEC% ...
+set "_PYSRC=github.com (python-build-standalone)"
+if defined UV_PYTHON_INSTALL_MIRROR set "_PYSRC=%UV_PYTHON_INSTALL_MIRROR%"
+echo [DLFILE] Python %PY_SPEC% ^(uv^) ^| %_PYSRC%
 set UR_CMD="%UV_EXE%" python install --no-bin --no-registry %PY_SPEC%
 call :uv_retry python-install
+echo [DLEND]
 if errorlevel 1 goto :fail_python
 call :tick "3a Python 3.13 interpreter"
 set "_VENV_OK=0"
@@ -293,8 +297,10 @@ if not errorlevel 1 if "%WITH_BROWSER%"=="0" if "%WITH_BUILDER%"=="0" (
 set "_IDX=%UV_DEFAULT_INDEX%"
 if not defined _IDX set "_IDX=pypi.org"
 echo [INFO] uv pip install -r pyproject.toml %_EXTRAS% ^(index=%_IDX%^)
+echo [DLFILE] Python packages ^(pyproject.toml %_EXTRAS%^) ^| %_IDX%
 set UR_CMD="%UV_EXE%" pip install -r pyproject.toml %_EXTRAS% %_FL%
 call :uv_retry deps
+echo [DLEND]
 if errorlevel 1 goto :fail_install
 :deps_done
 call :tick "5b pyproject deps (uv pip install)"
@@ -304,8 +310,10 @@ REM per-user cache %LOCALAPPDATA%\ms-playwright. The backend points Playwright a
 if "%WITH_BROWSER%"=="1" (
     echo [INFO] installing Playwright Chromium into %ENVS_DIR%\ms-playwright ^(non-fatal^)...
     set "PLAYWRIGHT_BROWSERS_PATH=%ENVS_DIR%\ms-playwright"
+    if defined PLAYWRIGHT_DOWNLOAD_HOST ( echo [DLFILE] Chromium ^(Playwright^) ^| %PLAYWRIGHT_DOWNLOAD_HOST% ) else ( echo [DLFILE] Chromium ^(Playwright^) ^| cdn.playwright.dev )
     "%VPY%" -m playwright install chromium
     if errorlevel 1 echo [WARN] Chromium download failed; browser tools stay disabled. Retry later with --with-browser.
+    echo [DLEND]
     call :tick "5c Playwright Chromium"
 )
 
@@ -551,6 +559,7 @@ if exist "data\bin\aria2c\aria2c.exe" set "_ARIA=-Aria2cExe "data\bin\aria2c\ari
 echo [INFO] GET %_UU%
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\download_with_aria2c.ps1" -Url "%_UU%" -OutFile "%~2" %_ARIA% -MinSize %~3 -MaxRetries %_RETRY% -StallTimeoutSec 60 -AttemptTimeoutSec %~4 %_DLX%
 set "_DLRC=%errorlevel%"
+echo [DLEND]
 if "%_ISGH%"=="1" if not "%_DLRC%"=="0" if not exist "%~2" if not defined QAI_GITHUB_MIRROR if not defined GH_PROXY_TRIED if "%_DLTRY%"=="0" (
     REM Direct github.com failed and no proxy is configured yet: pick one (once per run) and retry through it.
     set "_DLTRY=1"
