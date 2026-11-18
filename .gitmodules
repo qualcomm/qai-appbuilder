@@ -12,7 +12,7 @@
 	url = https://github.com/curl/curl.git
 [submodule "samples/genie/c++/External/llama.cpp"]
 	path = samples/genie/c++/External/llama.cpp
-	url = https://github.com/ggml-org/llama.cpp.git
+	url = https://github.com/qualcomm/llama.cpp.git
 [submodule "samples/genie/c++/External/MNN"]
 	path = samples/genie/c++/External/MNN
 	url = https://github.com/alibaba/MNN.git
