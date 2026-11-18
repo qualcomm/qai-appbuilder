@@ -166,7 +166,10 @@ private:
 
     std::vector<ScoredSkill> AssignSkillDetailLevels(const RuntimeSkillMappings& all_skills,
                                                      const std::vector<std::string>& keywords,
-                                                     size_t skills_token_budget) const;
+                                                     size_t skills_token_budget,
+                                                     const std::string& session_key) const;
+
+    std::string LatchKey(const nlohmann::ordered_json& request_data) const;
 
     std::string RenderSkillEntry(const ScoredSkill& skill) const;
 
@@ -174,7 +177,8 @@ private:
 
     nlohmann::ordered_json FilterToolsByRelevance(const nlohmann::ordered_json& tools_array,
                                                   const std::vector<std::string>& keywords,
-                                                  size_t token_budget) const;
+                                                  size_t token_budget,
+                                                  const std::string& session_key) const;
 
     size_t ComputeRelevanceTokenBudget(BudgetPartitionKind kind = BudgetPartitionKind::kTools,
                                        const nlohmann::ordered_json* request_data = nullptr) const;

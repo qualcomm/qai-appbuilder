@@ -70,6 +70,9 @@ public:
 
     const std::vector<TaskMemoBuilder::RepeatDetection>& GetRepeatDetections() const { return repeat_detections_; }
 
+    static bool GetDroppedRawIndices(const std::string& evict_key, const nlohmann::ordered_json& raw_messages,
+                                     std::vector<size_t>& dropped_out);
+
     std::string CleanMessageContent(const std::string& content);
 
 private:

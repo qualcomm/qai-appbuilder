@@ -39,7 +39,8 @@ static std::atomic<bool> g_llama_prefix_cache_enabled{true};
 static std::atomic<int> g_llama_prefix_head_checkpoints{2};
 static std::atomic<bool> g_llama_prefix_head_checkpoints_explicit{false};
 static std::atomic<bool> g_degenerate_repeat_guard_enabled{true};
-static std::atomic<int> g_degenerate_repeat_guard_max_period{48};
+static std::atomic<int> g_degenerate_repeat_guard_max_period{128};
+static std::atomic<int> g_degenerate_repeat_guard_min_span_bytes{256};
 static std::mutex g_llama_backend_mutex;
 static std::atomic<int> g_llama_backend_refs{0};
 
@@ -313,6 +314,27 @@ public:
                  << " | prompt_prefix=\"" << prompt_prefix << "\""
                  << " @" << My_Log::GetTimeString() << "\n";
 
+        if (!is_aux_inference)
+        {
+            const auto &sampling_params = params_.sampling;
+            std::string draft_fields;
+            if (is_speculative_)
+            {
+                draft_fields = " | draft_n_max=" + std::to_string(params_.speculative.draft.n_max)
+                             + " | draft_p_min=" + std::to_string(params_.speculative.draft.p_min);
+            }
+            My_Log{} << "[LLAMACpp] " << query_type << " Sampler"
+                     << " | temp=" << sampling_params.temp
+                     << " | top_k=" << sampling_params.top_k
+                     << " | top_p=" << sampling_params.top_p
+                     << " | min_p=" << sampling_params.min_p
+                     << " | penalty_repeat=" << sampling_params.penalty_repeat
+                     << " | penalty_last_n=" << sampling_params.penalty_last_n
+                     << " | seed=" << sampling_params.seed
+                     << " | speculative=" << (is_speculative_ ? 1 : 0)
+                     << draft_fields << "\n";
+        }
+
         {
             std::lock_guard<std::mutex> lk(m);
             done = false;
@@ -323,6 +345,7 @@ public:
         };
 
         stopped_by_output_limit_ = false;
+        stopped_by_repeat_guard_ = false;
         if (!is_aux_inference)
         {
             std::lock_guard<std::mutex> metrics_lock(trace_metrics_mutex_);
@@ -423,6 +446,17 @@ public:
         {
             n_reuse = MatchPrefixCache(ctx, ctx_dft, effective_prompt_len - 1);
         }
+        if (skip_checkpoint_save_ && n_reuse == 0)
+        {
+            prefix_cache_valid_ = had_prefix_cache;
+            My_Log{My_Log::Level::kWarning}
+                << "[LLAMACpp] " << query_type
+                << " internal retry found no reusable checkpoint; abandoning it to keep the prefix cache\n";
+            std::lock_guard<std::mutex> lk(m);
+            done = true;
+            cv.notify_one();
+            return false;
+        }
         if (n_reuse == 0)
         {
             prefix_ckpts_.clear();
@@ -442,13 +476,6 @@ public:
             n_past = n_reuse;
             n_consumed = n_reuse;
             prefix_cache_valid_ = true;
-        }
-        int ckpt_target = FindCheckpointPos(effective_prompt_len, n_reuse);
-        std::vector<int> ckpt_points = prefix_cache_on
-                ? FindHeadCheckpointPos(effective_prompt_len, n_reuse, ckpt_target) : std::vector<int>{};
-        if (ckpt_target > 0)
-        {
-            ckpt_points.push_back(ckpt_target);
         }
         int ckpt_end = prefix_cache_on ? FindCheckpointPos(effective_prompt_len, n_reuse, 1) : -1;
         if (prefix_cache_on) {
@@ -480,19 +507,26 @@ public:
                     ckpt_end = tail_start;
             }
         }
-        if (ckpt_end > ckpt_target)
+        std::vector<int> ckpt_points = prefix_cache_on
+                ? FindHeadCheckpointPos(effective_prompt_len, n_reuse, ckpt_end) : std::vector<int>{};
+        std::string head_str;
+        for (size_t i = 0; i < ckpt_points.size(); ++i)
+        {
+            head_str += (i ? "," : "") + std::to_string(ckpt_points[i]);
+        }
+        if (ckpt_end > n_reuse)
         {
             ckpt_points.push_back(ckpt_end);
         }
-        std::string head_str;
-        for (size_t i = 0; i + 1 < ckpt_points.size(); ++i)
+        if (skip_checkpoint_save_)
         {
-            head_str += (i ? "," : "") + std::to_string(ckpt_points[i]);
+            ckpt_points.clear();
+            My_Log{} << "[LLAMACpp] " << query_type << " checkpoint saving skipped for this internal retry\n";
         }
         My_Log{} << "[LLAMACpp] " << query_type
                  << " Prefix cache: enabled=" << prefix_cache_on
                  << " | reused_tokens=" << n_reuse
-                 << " | checkpoint_at=" << ckpt_target
+                 << " | checkpoint_at=" << ckpt_end
                  << " | head_checkpoints=" << head_str
                  << " | prompt_tokens=" << embd_inp.size() << "\n";
 
@@ -535,9 +569,11 @@ public:
             }
         }
 
+        size_t last_piece_chars = 0;
         auto emit_generated_token = [&](llama_token id) -> bool
         {
             std::string token_str = common_token_to_piece(ctx, id, params_.special);
+            last_piece_chars = degenerate_repeat_guard::CountUtf8Chars(token_str);
 
             if (token_str == "<|im_end|>")
             {
@@ -605,60 +641,28 @@ public:
 
         degenerate_repeat_guard::StreamGuard repeat_guard(
                 g_degenerate_repeat_guard_enabled.load(),
-                std::max(0, g_degenerate_repeat_guard_max_period.load()));
-        std::vector<std::pair<llama_token, int>> guard_pending;
-        bool degenerate_loop_hit = false;
+                std::max(0, g_degenerate_repeat_guard_max_period.load()),
+                static_cast<size_t>(std::max(0, g_degenerate_repeat_guard_min_span_bytes.load())));
 
-        auto flush_guard_pending = [&]() -> bool
+        auto guarded_emit = [&](llama_token id) -> bool
         {
-            for (const auto &pending : guard_pending)
+            if (!emit_generated_token(id))
             {
-                if (!emit_generated_token(pending.first))
-                {
-                    guard_pending.clear();
-                    return false;
-                }
+                return false;
             }
-            guard_pending.clear();
-            return true;
-        };
-
-        auto guarded_emit = [&](llama_token id, int kv_pos) -> bool
-        {
-
-            const bool terminal = (params_.n_predict > 0 && n_remain <= 0)
-                                  || llama_vocab_is_eog(vocab, id);
-            const auto decision = repeat_guard.Observe(static_cast<int32_t>(id), terminal);
-            switch (decision.action)
+            const auto decision = repeat_guard.Observe(static_cast<int32_t>(id), last_piece_chars);
+            if (!decision.abort)
             {
-                case degenerate_repeat_guard::Action::kEmit:
-                    return emit_generated_token(id);
-                case degenerate_repeat_guard::Action::kHold:
-                    guard_pending.emplace_back(id, kv_pos);
-                    return true;
-                case degenerate_repeat_guard::Action::kFlush:
-                    guard_pending.emplace_back(id, kv_pos);
-                    return flush_guard_pending();
-                case degenerate_repeat_guard::Action::kAbort:
-                {
-                    guard_pending.emplace_back(id, kv_pos);
-                    const int rollback_pos = guard_pending.front().second;
-                    guard_pending.clear();
-                    n_past = rollback_pos;
-                    if (!is_speculative_)
-                    {
-                        llama_memory_seq_rm(mem, 0, rollback_pos, -1);
-                    }
-                    degenerate_loop_hit = true;
-                    should_stop = true;
-                    My_Log{My_Log::Level::kWarning}
-                        << "[LLAMACpp] " << query_type
-                        << " Degenerate repeat guard stopped period=" << decision.period
-                        << " rollback_pos=" << rollback_pos << "\n";
-                    return false;
-                }
+                return true;
             }
-            return true;
+            stopped_by_repeat_guard_ = true;
+            should_stop = true;
+            My_Log{My_Log::Level::kWarning}
+                << "[LLAMACpp] " << query_type
+                << " Degenerate repeat guard stopped period=" << decision.period
+                << " span_chars=" << decision.span_chars
+                << " n_generated=" << n_generated << "\n";
+            return false;
         };
 
         while (n_remain != 0)
@@ -686,7 +690,6 @@ public:
                     llama_memory_seq_rm(mem, 0, n_keep, n_keep + n_discard);
                     llama_memory_seq_add(mem, 0, n_keep + n_discard, n_past, -n_discard);
                     n_past -= n_discard;
-                    ckpt_target = -1;
                     ckpt_points.clear();
                     prefix_cache_valid_ = false;
                     My_Log{My_Log::Level::kWarning}
@@ -821,7 +824,7 @@ public:
             {
                 for (auto id: embd)
                 {
-                    if (!guarded_emit(id, n_past))
+                    if (!guarded_emit(id))
                     {
                         break;
                     }
@@ -977,7 +980,6 @@ public:
                     draft_accept_hist.resize(ids.size(), 0);
                 }
                 draft_accept_hist[ids.size() - 1]++;
-                const int round_base = n_past;
                 n_past += (int) ids.size() - 1;
 
                 bool stop_now = false;
@@ -987,7 +989,7 @@ public:
                     spec_prompt.push_back(id_last);
                     id_last = next_id;
                     --n_remain;
-                    if (!guarded_emit(id_last, round_base + static_cast<int>(j)))
+                    if (!guarded_emit(id_last))
                     {
                         stop_now = true;
                         break;
@@ -1009,7 +1011,8 @@ public:
 
             llama_batch_free(batch_tgt);
 
-            if (!decode_failed && eog_hit && prefix_cache_on && !is_aux_inference && (int) spec_prompt.size() == n_past)
+            if (!decode_failed && eog_hit && prefix_cache_on && !is_aux_inference && !skip_checkpoint_save_
+                && (int) spec_prompt.size() == n_past)
             {
                 SavePrefixCheckpoint(ctx, ctx_dft, n_past, &spec_prompt);
             }
@@ -1036,12 +1039,6 @@ public:
                          << " EOG token detected after " << n_generated << " tokens. Stopping.\n";
             }
         }
-
-        for (const auto &pending : guard_pending)
-        {
-            emit_generated_token(pending.first);
-        }
-        guard_pending.clear();
 
         auto t_query_end = std::chrono::steady_clock::now();
         int64_t total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1080,7 +1077,7 @@ public:
                               " | verify_ms=" + std::to_string(spec_verify_ms) +
                               " | readback_ms=" + std::to_string(spec_readback_ms) +
                               " | post_ms=" + std::to_string(spec_post_ms)) : std::string())
-                 << (degenerate_loop_hit ? " | degenerate_repeat_guard=1" : "")
+                 << (stopped_by_repeat_guard_ ? " | degenerate_repeat_guard=1" : "")
                  << "\n";
 
         if (is_aux_inference && !generated_text_buf.empty()) {
@@ -1113,6 +1110,7 @@ public:
             aux_calls_accum_ = 0;
             metrics["ttft_ms"] = ttft_ms;
             metrics["prefill_ms"] = prefill_ms;
+            metrics["prefill_tokens"] = total_prefill_tokens;
             metrics["prefill_tok_s"] = prefill_tok_s;
             metrics["decode_ms"] = gen_elapsed_ms;
             metrics["decode_tok_s"] = gen_rate;
@@ -1216,6 +1214,7 @@ public:
 
     int max_length_ = 0;
     bool stopped_by_output_limit_ = false;
+    bool stopped_by_repeat_guard_ = false;
 
     mutable std::mutex trace_metrics_mutex_;
     json last_trace_metrics_ = nullptr;
@@ -1226,6 +1225,7 @@ public:
     int think_ctx_reserve_ = 0;
 
     bool think_force_min_floor_ = false;
+    bool skip_checkpoint_save_ = false;
     int64_t aux_ms_accum_ = 0;
     int64_t aux_calls_accum_ = 0;
 
@@ -1287,7 +1287,7 @@ public:
                llama_state_seq_set_data_ext(c, buf.data(), buf.size(), 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) > 0;
     }
 
-    int FindCheckpointPos(int effective_prompt_len, int n_reuse, int nth = 2) const
+    int FindCheckpointPos(int effective_prompt_len, int n_reuse, int nth) const
     {
         const llama_token bos = llama_vocab_bos(vocab);
         llama_token msg_start = LLAMA_TOKEN_NULL;
@@ -1711,21 +1711,21 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
         {
             arg_strings.insert(arg_strings.end(), {"-fitt", std::to_string(fit_target_mib)});
         }
-        if (!draft_config.samplers.empty())
+        if (!draft_config.target_samplers.empty())
         {
-            arg_strings.insert(arg_strings.end(), {"--samplers", draft_config.samplers});
+            arg_strings.insert(arg_strings.end(), {"--samplers", draft_config.target_samplers});
         }
-        if (draft_config.temp >= 0.0f)
+        if (draft_config.target_temp >= 0.0f)
         {
-            arg_strings.insert(arg_strings.end(), {"--temp", std::to_string(draft_config.temp)});
+            arg_strings.insert(arg_strings.end(), {"--temp", std::to_string(draft_config.target_temp)});
         }
-        if (draft_config.top_k >= 0)
+        if (draft_config.target_top_k >= 0)
         {
-            arg_strings.insert(arg_strings.end(), {"--top-k", std::to_string(draft_config.top_k)});
+            arg_strings.insert(arg_strings.end(), {"--top-k", std::to_string(draft_config.target_top_k)});
         }
-        if (draft_config.top_p >= 0.0f)
+        if (draft_config.target_top_p >= 0.0f)
         {
-            arg_strings.insert(arg_strings.end(), {"--top-p", std::to_string(draft_config.top_p)});
+            arg_strings.insert(arg_strings.end(), {"--top-p", std::to_string(draft_config.target_top_p)});
         }
         if (draft_config.ngram_mod_n_min >= 0)
         {
@@ -2010,10 +2010,12 @@ bool LLAMACppBuilder::Query(const ModelInput &model_input, const Callback& callb
     impl_->think_max_tokens_ = model_input.think_max_tokens_;
     impl_->think_ctx_reserve_ = model_input.think_ctx_reserve_;
     impl_->think_force_min_floor_ = model_input.think_force_min_floor_;
+    impl_->skip_checkpoint_save_ = model_input.skip_checkpoint_save_;
     bool result = impl_->Query(prompt, callback, prefill_heartbeat,
                                 query_type_bracketed.c_str(), is_aux_inference,
                                 stop_epoch_, query_scope.epoch());
     stopped_by_output_limit_ = impl_->stopped_by_output_limit_;
+    stopped_by_repeat_guard_ = impl_->stopped_by_repeat_guard_;
     return result;
 }
 
@@ -2048,6 +2050,11 @@ void LLAMACppBuilder::SetDegenerateRepeatGuardEnabled(bool enabled)
 void LLAMACppBuilder::SetDegenerateRepeatGuardMaxPeriod(int max_period)
 {
     g_degenerate_repeat_guard_max_period.store(max_period);
+}
+
+void LLAMACppBuilder::SetDegenerateRepeatGuardMinSpanBytes(int min_span_bytes)
+{
+    g_degenerate_repeat_guard_min_span_bytes.store(min_span_bytes);
 }
 
 void LLAMACppBuilder::SetPrefixHeadCheckpoints(int n, bool from_config)
@@ -2120,6 +2127,8 @@ json LLAMACppBuilder::HandleProfile()
         result["prompt_processing_rate"] = FormatFixed2(m.value("prefill_tok_s", 0.0));
         result["token_generation_rate"] = FormatFixed2(m.value("decode_tok_s", 0.0));
         result["num_prompt_tokens"] = m.value("prompt_tokens", 0);
+        result["num_prefill_tokens"] = m.value("prefill_tokens", 0);
+        result["prefill_time"] = FormatFixed2(m.value("prefill_ms", (int64_t) 0) / 1000.0);
         result["num_generated_tokens"] = m.value("gen_tokens", 0);
         return result;
     }

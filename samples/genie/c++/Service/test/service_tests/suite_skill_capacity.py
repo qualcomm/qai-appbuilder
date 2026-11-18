@@ -99,7 +99,7 @@ _SC_ANCHOR_TOPICS = [
 ]
 
 # _SC_FILLER_TOPICS —— 填充项名单：这 18 条的名字侧关键词命中数**恒为 0**
-# （离线复算自 _SC_DISTRACTOR_TOPICS，见 step5_stage_c.anchor_pool_offline_validation），
+# （离线复算自 _SC_DISTRACTOR_TOPICS），
 # 只拿与全体技能相同的描述侧 9 分，因此恒排在目标与锚点之后，改变 N 只会增删
 # 它们、不会挤动目录前三位。仍保留真实感十足的主题词（不是 filler-000 这种
 # 明显合成名），以维持单条目录条目体量与真实场景接近。
@@ -145,8 +145,7 @@ def _sc_build_capacity_pool(n, target_index=None):
       * 目标固定为 `_SC_TARGET_TOPIC`（"flux-capacitor-calibration"，18 分，
         name 侧 flux/capacitor/calibration 三词全命中）。
       * `_SC_CAP_NEAR_TOPICS`（k=2，恒在池内）：与目标共享 flux+capacitor 两个
-        子词但不含 "calibration"，分数**严格低于**目标（离线复算见
-        skill_capacity_baseline.json 的 step5_final.capacity_pool_offline_validation），
+        子词但不含 "calibration"，分数**严格低于**目标，
         用于证明"严格最高"不是没有近似分数的对照组、而是真的验证过目标仍然胜出。
       * 其余为填充项（复用 `_SC_FILLER_TOPICS`，name 侧关键词命中数恒为 0，
         分数恒最低），改变 N 只增删它们，不影响目标/near 的相对排序。
@@ -511,7 +510,7 @@ def _sc_single_trial(args, model, probe, n, target_skill, skills_xml, all_metas,
 #   selection —— 正常 D2+D4 自选流程（即 _sc_single_trial 的两轮判据）；
 #   nobody    —— 选中技能后不回填正文，只凭目录（技能名 + 描述）作答。
 #
-# 判据（写入 skill_capacity_baseline.json 供 Step 5 使用）：
+# 判据（供 Step 5 使用）：
 #   oracle 就失败                        → 答题能力瓶颈（P2/D6/分页拉取都救不了）
 #   oracle 成 / selection 败              → 长目录选择瓶颈（分页拉取路线对症）
 #   selection 选对但读正文后失败、oracle 成 → 回填后二次溢出/注意力退化（P2 对症）

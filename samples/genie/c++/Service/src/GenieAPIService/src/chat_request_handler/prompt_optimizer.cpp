@@ -9,6 +9,9 @@
 #include "prompt_optimizer.h"
 #include "prompt_stats_helper.h"
 #include "../context/context_base.h"
+#include "relevance_latch.h"
+#include "task_memo_builder.h"
+#include <set>
 #include "../gateway/security/security_utils.h"
 #include "log.h"
 #include "utils.h"
@@ -169,7 +172,7 @@ std::string PromptOptimizer::BuildSystemContext(const nlohmann::ordered_json& re
         if (use_leveled_disclosure) {
 
             leveled_skills = AssignSkillDetailLevels(runtime_skills, relevance_keywords,
-                                                     skills_budget_tokens);
+                                                     skills_budget_tokens, LatchKey(request_data));
             filtered_skills.clear();
             for (const auto& scored : leveled_skills) {
                 auto it = runtime_skills.find(scored.name);
@@ -292,7 +295,8 @@ std::string PromptOptimizer::BuildSystemContext(const nlohmann::ordered_json& re
                 if (relevance_cfg.enabled) {
                     nlohmann::ordered_json relevant_tools =
                         FilterToolsByRelevance(request_data["tools"], relevance_keywords,
-                                               ComputeRelevanceTokenBudget(BudgetPartitionKind::kTools, &request_data));
+                                               ComputeRelevanceTokenBudget(BudgetPartitionKind::kTools, &request_data),
+                                               LatchKey(request_data));
                     tool_hit = !relevant_tools.empty();
                 } else {
 
@@ -586,6 +590,15 @@ std::string CollectSkillSignalLines(const std::string& description,
 
 }
 
+namespace
+{
+    bool IsClientSyntheticNudge(const std::string& text)
+    {
+        const size_t first = text.find_first_not_of(" \t\r\n");
+        return first != std::string::npos && text.compare(first, 8, "[SYSTEM]") == 0;
+    }
+}
+
 std::vector<std::string> PromptOptimizer::BuildRelevanceKeywords(
     const nlohmann::ordered_json& request_data) const
 {
@@ -608,6 +621,8 @@ std::vector<std::string> PromptOptimizer::BuildRelevanceKeywords(
 
     const bool anchor_enabled =
         model_config_.GetPromptOptimizationConfig().relevance_filter.anchor_first_user_message;
+    const bool session_stable =
+        model_config_.GetPromptOptimizationConfig().relevance_filter.session_stable;
 
     std::string corpus;
     std::string anchor_text;
@@ -631,6 +646,7 @@ std::vector<std::string> PromptOptimizer::BuildRelevanceKeywords(
             anchor_in_window = is_recent;
         }
         if (!is_recent) continue;
+        if (session_stable && IsClientSyntheticNudge(text)) continue;
         if (!text.empty()) {
             corpus += text;
             corpus += " ";
@@ -842,7 +858,8 @@ RuntimeSkillMappings PromptOptimizer::FilterSkillsByRelevance(
 std::vector<ScoredSkill> PromptOptimizer::AssignSkillDetailLevels(
     const RuntimeSkillMappings& all_skills,
     const std::vector<std::string>& keywords,
-    size_t skills_token_budget) const
+    size_t skills_token_budget,
+    const std::string& session_key) const
 {
     std::vector<ScoredSkill> result;
     if (all_skills.empty()) {
@@ -889,6 +906,9 @@ std::vector<ScoredSkill> PromptOptimizer::AssignSkillDetailLevels(
         }
     }
 
+    RelevanceLatch::Session latch;
+    RelevanceLatch::GetInstance().Snapshot(session_key, latch);
+
     size_t used_tokens = 0;
     size_t dropped = 0;
     size_t zero_score_l0 = 0;
@@ -903,6 +923,12 @@ std::vector<ScoredSkill> PromptOptimizer::AssignSkillDetailLevels(
             }
         } else {
             ++zero_score_l0;
+        }
+
+        const auto latched_level = latch.skill_levels.find(entry.name);
+        if (latched_level != latch.skill_levels.end()) {
+            desired = static_cast<SkillDetailLevel>(
+                std::max(static_cast<int>(desired), latched_level->second));
         }
 
         bool placed = false;
@@ -928,6 +954,25 @@ std::vector<ScoredSkill> PromptOptimizer::AssignSkillDetailLevels(
             dropped = candidates.size() - idx;
             break;
         }
+    }
+
+    if (!session_key.empty()) {
+        std::vector<std::string> next_order = latch.skill_order;
+        std::set<std::string> known(next_order.begin(), next_order.end());
+        for (const auto& s : result) {
+            if (known.insert(s.name).second)
+                next_order.push_back(s.name);
+        }
+        std::unordered_map<std::string, size_t> position;
+        for (size_t i = 0; i < next_order.size(); ++i)
+            position[next_order[i]] = i;
+        std::stable_sort(result.begin(), result.end(), [&position](const ScoredSkill& a, const ScoredSkill& b) {
+            return position[a.name] < position[b.name];
+        });
+        for (const auto& s : result)
+            latch.skill_levels[s.name] = static_cast<int>(s.level);
+        latch.skill_order = std::move(next_order);
+        RelevanceLatch::GetInstance().Commit(session_key, latch);
     }
 
     size_t l2 = 0, l1 = 0, l0 = 0;
@@ -1011,7 +1056,8 @@ std::string PromptOptimizer::BuildLeveledSkillCatalog(const std::vector<ScoredSk
 nlohmann::ordered_json PromptOptimizer::FilterToolsByRelevance(
     const nlohmann::ordered_json& tools_array,
     const std::vector<std::string>& keywords,
-    size_t token_budget) const
+    size_t token_budget,
+    const std::string& session_key) const
 {
     if (!tools_array.is_array() || tools_array.empty()) {
         return nlohmann::ordered_json::array();
@@ -1092,13 +1138,26 @@ nlohmann::ordered_json PromptOptimizer::FilterToolsByRelevance(
         return a.second > b.second;
     });
 
+    RelevanceLatch::Session latch;
+    RelevanceLatch::GetInstance().Snapshot(session_key, latch);
+
     std::vector<size_t> ordered;
-    ordered.reserve(scored.size() + protected_zero.size());
+    ordered.reserve(tools_array.size());
+    std::set<size_t> queued;
+    for (size_t idx = 0; idx < tools_array.size(); ++idx) {
+        const auto& tool = tools_array[idx];
+        if (!tool.contains("function") || !tool["function"].contains("name") || !tool["function"]["name"].is_string())
+            continue;
+        if (latch.tools.count(tool["function"]["name"].get<std::string>()) && queued.insert(idx).second)
+            ordered.push_back(idx);
+    }
     for (const auto& entry : scored) {
-        ordered.push_back(entry.first);
+        if (queued.insert(entry.first).second)
+            ordered.push_back(entry.first);
     }
     for (size_t idx : protected_zero) {
-        ordered.push_back(idx);
+        if (queued.insert(idx).second)
+            ordered.push_back(idx);
     }
 
     size_t used_tokens = 0;
@@ -1115,7 +1174,9 @@ nlohmann::ordered_json PromptOptimizer::FilterToolsByRelevance(
     std::sort(kept.begin(), kept.end());
     for (size_t idx : kept) {
         filtered.push_back(tools_array[idx]);
+        latch.tools.insert(tools_array[idx]["function"]["name"].get<std::string>());
     }
+    RelevanceLatch::GetInstance().Commit(session_key, latch);
 
     const size_t protected_kept =
         filtered.size() > scored.size() ? filtered.size() - scored.size() : 0;
@@ -1126,6 +1187,15 @@ nlohmann::ordered_json PromptOptimizer::FilterToolsByRelevance(
                                   << ", protected=" << protected_kept
                                   << "/" << protected_zero.size() << ")" << std::endl;
     return filtered;
+}
+
+std::string PromptOptimizer::LatchKey(const nlohmann::ordered_json& request_data) const
+{
+    if (!model_config_.GetPromptOptimizationConfig().relevance_filter.session_stable)
+        return "";
+    if (!request_data.contains("messages") || !request_data["messages"].is_array())
+        return "";
+    return TaskMemoBuilder::ComputeFirstMsgKey(request_data["messages"]);
 }
 
 bool PromptOptimizer::HasBudgetContention(const nlohmann::ordered_json& request_data) const
@@ -1333,7 +1403,8 @@ std::string PromptOptimizer::OptimizeToolsPrompt(
             if (relevance_cfg.enabled) {
                 std::vector<std::string> keywords = BuildRelevanceKeywords(request_data);
                 tools_array = FilterToolsByRelevance(tools_array, keywords,
-                                                     ComputeRelevanceTokenBudget(BudgetPartitionKind::kTools, &request_data));
+                                                     ComputeRelevanceTokenBudget(BudgetPartitionKind::kTools, &request_data),
+                                                     LatchKey(request_data));
             }
         }
 
@@ -1466,7 +1537,8 @@ std::string PromptOptimizer::BuildDynamicToolsIntro(const nlohmann::ordered_json
     if (relevance_cfg.enabled) {
         std::vector<std::string> keywords = BuildRelevanceKeywords(request_data);
         tools_array = FilterToolsByRelevance(tools_array, keywords,
-                                             ComputeRelevanceTokenBudget(BudgetPartitionKind::kTools, &request_data));
+                                             ComputeRelevanceTokenBudget(BudgetPartitionKind::kTools, &request_data),
+                                             LatchKey(request_data));
     }
     if (tools_array.empty()) {
         return "";
@@ -1521,7 +1593,8 @@ std::string PromptOptimizer::FilterToolsIntroByRequest(
     if (relevance_cfg.enabled) {
         std::vector<std::string> keywords = BuildRelevanceKeywords(request_data);
         relevant_tools = FilterToolsByRelevance(relevant_tools, keywords,
-                                                ComputeRelevanceTokenBudget(BudgetPartitionKind::kTools, &request_data));
+                                                ComputeRelevanceTokenBudget(BudgetPartitionKind::kTools, &request_data),
+                                                LatchKey(request_data));
     }
 
     std::unordered_set<std::string> client_tools;
@@ -1652,15 +1725,111 @@ std::string PromptOptimizer::InjectSpawnGuard(const std::string& tool_response_c
     return tool_response_content;
 }
 
+#if defined(_MSC_VER)
+static bool IsTrimBlankChar(char c)
+{
+    return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r';
+}
+
+static std::string RemoveBlankLinesLikeMultilineRegex(const std::string& text)
+{
+    const size_t n = text.size();
+    std::string step1;
+    step1.reserve(n);
+
+    size_t i = 0;
+    while (i < n)
+    {
+        if ((i == 0 || text[i - 1] == '\n') && IsTrimBlankChar(text[i]))
+        {
+            size_t j = i;
+            size_t last_nl = std::string::npos;
+            while (j < n && IsTrimBlankChar(text[j]))
+            {
+                if (text[j] == '\n')
+                    last_nl = j;
+                ++j;
+            }
+
+            if (last_nl != std::string::npos)
+            {
+                i = last_nl + 1;
+            }
+            else
+            {
+                step1.append(text, i, j - i);
+                i = j;
+            }
+            continue;
+        }
+
+        step1.push_back(text[i]);
+        ++i;
+    }
+
+    const size_t m = step1.size();
+    std::string result;
+    result.reserve(m);
+
+    i = 0;
+    while (i < m)
+    {
+        if (!IsTrimBlankChar(step1[i]))
+        {
+            result.push_back(step1[i]);
+            ++i;
+            continue;
+        }
+
+        size_t j = i;
+        while (j < m && IsTrimBlankChar(step1[j]))
+            ++j;
+
+        size_t cut = std::string::npos;
+        if (j == m && step1[j - 1] == '\n')
+        {
+            cut = j;
+        }
+        else
+        {
+            for (size_t e = j - 1; e > i; --e)
+            {
+                if (step1[e] == '\n' && step1[e - 1] == '\n')
+                {
+                    cut = e;
+                    break;
+                }
+            }
+        }
+
+        if (cut == std::string::npos)
+            result.append(step1, i, j - i);
+        else
+            result.append(step1, cut, j - cut);
+
+        i = j;
+    }
+
+    return result;
+}
+#endif
+
 std::string PromptOptimizer::OptimizeToolResponse(
     const std::string& tool_response)
 {
 
     std::string trimmed = tool_response;
+#if defined(_MSC_VER)
+    trimmed = RemoveBlankLinesLikeMultilineRegex(trimmed);
+#else
     trimmed = std::regex_replace(trimmed, std::regex(R"(^(\s*\n)+)"), "");
     trimmed = std::regex_replace(trimmed, std::regex(R"((\s*\n)+$)"), "");
+#endif
 
-    trimmed = InjectSpawnGuard(trimmed);
+    if (trimmed.find_first_not_of(" \t\r\n") == std::string::npos)
+        trimmed = "[empty result: the tool returned no text; success or failure is not shown]";
+    else
+        trimmed = InjectSpawnGuard(trimmed);
 
     return "<tool_response>\n" + trimmed + "\n</tool_response>\n";
 }
@@ -1730,7 +1899,8 @@ std::string PromptOptimizer::OptimizeHarmonyDeveloperMessage(
     if (relevance_cfg.enabled && !tools.is_null() && tools.is_array() && !tools.empty()) {
         std::vector<std::string> keywords = BuildRelevanceKeywords(request_data);
         relevant_tools = FilterToolsByRelevance(tools, keywords,
-                                                ComputeRelevanceTokenBudget(BudgetPartitionKind::kTools, &request_data));
+                                                ComputeRelevanceTokenBudget(BudgetPartitionKind::kTools, &request_data),
+                                                LatchKey(request_data));
     }
 
     if (!relevant_tools.is_null() && !relevant_tools.empty()) {
@@ -1810,7 +1980,8 @@ std::string PromptOptimizer::ConvertToolsToOptimizedTypeScript(
     if (relevance_cfg.enabled) {
         std::vector<std::string> keywords = BuildRelevanceKeywords(request_data);
         relevant_tools = FilterToolsByRelevance(tools, keywords,
-                                                ComputeRelevanceTokenBudget(BudgetPartitionKind::kTools, &request_data));
+                                                ComputeRelevanceTokenBudget(BudgetPartitionKind::kTools, &request_data),
+                                                LatchKey(request_data));
     }
 
     for (const auto& tool : relevant_tools) {

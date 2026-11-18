@@ -8,6 +8,7 @@
 
 #include "message_pre_filter.h"
 #include "task_memo_doc_scan.h"
+#include "paged_read_ledger.h"
 #include "content_condenser.h"
 #include "../processor/harmony.h"
 #include "../gateway/security/security_utils.h"
@@ -173,38 +174,68 @@ size_t Utf8Floor(const std::string& s, size_t pos)
     return pos;
 }
 
-bool CapPagedReadHead(const std::string& content, size_t keep_bytes, std::string& out)
+constexpr size_t kOutlineTitleChars = 24;
+constexpr char kOutlineTag[] = "; sections, read with offset = line: ";
+
+std::string BuildOmittedOutline(const std::string& omitted, size_t first_line, size_t max_bytes, size_t& added)
 {
-    constexpr size_t kFooterReserve = 200;
+    std::string out;
+    added = 0;
+    if (max_bytes == 0 || omitted.empty()) return out;
+    for (const task_memo_scan::Heading& heading : task_memo_scan::ExtractHeadings(omitted, first_line)) {
+        if (heading.title.find_first_of("[]<>;|") != std::string::npos) continue;
+        const std::string item = "L" + std::to_string(heading.line) + " " +
+                                 task_memo_scan::ClipHead(heading.title, kOutlineTitleChars);
+        const size_t separator = out.empty() ? 0 : 3;
+        if (out.size() + separator + item.size() > max_bytes) break;
+        if (separator > 0) out += " | ";
+        out += item;
+        added++;
+    }
+    return out;
+}
+
+bool CapPagedReadHead(const std::string& content, size_t keep_bytes, size_t outline_max_bytes, std::string& out,
+                      size_t* outline_sections = nullptr)
+{
+    constexpr size_t kFooterBaseReserve = 200;
+    const size_t footer_reserve = kFooterBaseReserve + outline_max_bytes;
     const size_t marker = content.rfind("showed lines ");
-    if (marker == std::string::npos || keep_bytes <= kFooterReserve) return false;
+    if (marker == std::string::npos || keep_bytes <= footer_reserve) return false;
     size_t first = 0, last = 0, total = 0;
     if (std::sscanf(content.c_str() + marker, "showed lines %zu-%zu of total %zu", &first, &last, &total) != 3)
         return false;
     const size_t footer_nl = content.rfind('\n', marker);
     if (footer_nl == std::string::npos) return false;
-    const size_t body_budget = keep_bytes - kFooterReserve;
+    const size_t body_budget = keep_bytes - footer_reserve;
     if (footer_nl + 1 <= body_budget) return false;
     const size_t cut_nl = content.rfind('\n', Utf8Floor(content, body_budget));
     if (cut_nl == std::string::npos) return false;
     const size_t kept_lines = static_cast<size_t>(std::count(content.begin(), content.begin() + cut_nl + 1, '\n'));
     const size_t shown_last = first + kept_lines - 1;
     if (kept_lines == 0 || shown_last >= last) return false;
+    const std::string omitted = footer_nl > cut_nl + 1
+        ? content.substr(cut_nl + 1, footer_nl - cut_nl - 1) : std::string();
+    size_t outline_added = 0;
+    const std::string outline = BuildOmittedOutline(omitted, shown_last + 1, outline_max_bytes, outline_added);
     const size_t footer_end = content.find('\n', marker);
     out = content.substr(0, cut_nl + 1) + "...[read truncated: context budget; showed lines " + std::to_string(first) +
           "-" + std::to_string(shown_last) + " of total " + std::to_string(total) +
-          "; next offset=" + std::to_string(shown_last + 1) + "]" +
+          "; next offset=" + std::to_string(shown_last + 1) +
+          (outline.empty() ? std::string() : std::string(kOutlineTag) + outline) + "]" +
           (footer_end == std::string::npos ? std::string() : content.substr(footer_end));
+    if (outline_sections) *outline_sections += outline_added;
     return true;
 }
 
-std::string CapToolResultHeadTail(const std::string& content, size_t content_tokens, size_t cap_tokens)
+std::string CapToolResultHeadTail(const std::string& content, size_t content_tokens, size_t cap_tokens,
+                                  size_t outline_max_bytes, size_t* outline_sections = nullptr)
 {
     if (cap_tokens == 0 || content_tokens <= cap_tokens || content.empty()) return content;
     const double keep_ratio = 0.95 * static_cast<double>(cap_tokens) / static_cast<double>(content_tokens);
     const size_t keep_bytes = static_cast<size_t>(static_cast<double>(content.size()) * keep_ratio);
     std::string paged_head;
-    if (CapPagedReadHead(content, keep_bytes, paged_head)) return paged_head;
+    if (CapPagedReadHead(content, keep_bytes, outline_max_bytes, paged_head, outline_sections)) return paged_head;
     const size_t head_target = static_cast<size_t>(static_cast<double>(keep_bytes) * kToolEntryHeadShare);
     const size_t tail_target = keep_bytes - head_target;
     size_t head_end = Utf8Floor(content, head_target);
@@ -244,6 +275,13 @@ bool IsGrepToolName(const std::string& name)
     std::string lower = name;
     std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return (char)tolower(c); });
     return lower == "grep";
+}
+
+bool IsReadToolName(const std::string& name)
+{
+    std::string lower = name;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return (char)tolower(c); });
+    return lower == "read";
 }
 
 bool IsGrepMatchLine(const std::string& line)
@@ -400,12 +438,6 @@ void StripRawIdx(json& messages)
     }
 }
 
-const char kRepeatStubPrefix[] = "[Note: this ";
-const char kRepeatStubSuffix[] =
-    " call returned exactly the same result as the earlier identical call, which is still shown above; "
-    "calling it again will not return anything new. Use that result or change approach.";
-const char kRepeatStubTailHeader[] = "\nIts last lines:\n";
-const char kRepeatStubFullHeader[] = "\nIts full result:\n";
 constexpr size_t kRepeatStubTailLines = 3;
 constexpr size_t kRepeatStubTailMaxBytes = 300;
 constexpr size_t kRepeatStubFullInlineMaxBytes = 500;
@@ -512,7 +544,7 @@ void ApplyRepeatResultStubs(json& msg, const std::string& key, const void* model
         if (ck.empty()) continue;
 
         const std::string content = m["content"].get<std::string>();
-        const size_t h = std::hash<std::string>()(content);
+        const size_t h = static_cast<size_t>(ToolCallRepetitionStore::ResultDigest(content));
         KeyHistory& kh = history[ck];
         const bool has_earlier_full = (kh.full_idx != SIZE_MAX && kh.full_hash == h);
 
@@ -560,14 +592,13 @@ void ApplyRepeatResultStubs(json& msg, const std::string& key, const void* model
         }
 
         if (stub) {
-            const std::string original = msg[kh.full_idx].value("content", std::string());
-            std::string note = std::string(kRepeatStubPrefix) + nm + kRepeatStubSuffix;
-            const size_t trimmed_end = original.find_last_not_of(" \t\r\n");
+            std::string note = std::string(task_memo_scan::kRepeatStubPrefix) + nm + task_memo_scan::kRepeatStubSuffix;
+            const size_t trimmed_end = content.find_last_not_of(" \t\r\n");
             if (trimmed_end != std::string::npos && trimmed_end + 1 <= kRepeatStubFullInlineMaxBytes) {
-                note += kRepeatStubFullHeader + original.substr(0, trimmed_end + 1);
+                note += task_memo_scan::kRepeatStubFullHeader + content.substr(0, trimmed_end + 1);
             } else {
-                const std::string tail = LastLines(original, kRepeatStubTailLines, kRepeatStubTailMaxBytes);
-                if (!tail.empty()) note += kRepeatStubTailHeader + tail;
+                const std::string tail = LastLines(content, kRepeatStubTailLines, kRepeatStubTailMaxBytes);
+                if (!tail.empty()) note += task_memo_scan::kRepeatStubTailHeader + tail;
             }
             m["content"] = note + "]";
         } else {
@@ -772,6 +803,25 @@ MessagePreFilter::MessagePreFilter(IModelConfig& model_config, ContextBase* cont
     : model_config_(model_config), context_override_(context)
 {}
 
+bool MessagePreFilter::GetDroppedRawIndices(const std::string& evict_key, const json& raw_messages,
+                                            std::vector<size_t>& dropped_out)
+{
+    dropped_out.clear();
+    if (evict_key.empty() || !raw_messages.is_array())
+        return false;
+    std::lock_guard<std::mutex> lk(g_eviction_mutex);
+    auto it = g_eviction_states.find(evict_key);
+    if (it == g_eviction_states.end())
+        return false;
+    const EvictionState& st = it->second;
+    if (raw_messages.size() < st.raw_size || st.boundary > raw_messages.size())
+        return false;
+    if (HashRawPrefix(raw_messages, st.boundary) != st.prefix_hash)
+        return false;
+    dropped_out = st.dropped;
+    return true;
+}
+
 bool MessagePreFilter::PrefixCacheActive()
 {
     if (context_override_) {
@@ -824,6 +874,17 @@ void MessagePreFilter::CaptureDroppedMessages(const json& original, const json& 
         return content;
     };
 
+    const std::string session_key = TaskMemoBuilder::ComputeFirstMsgKey(original);
+    std::unordered_map<std::string, size_t> signature_seen;
+    std::vector<std::string> pins(original.size());
+    for (size_t i = 0; i < original.size(); ++i) {
+        if (get_json_value(original[i], "role", BLANK_STRING) != "assistant") continue;
+        const std::string signature = TaskMemoBuilder::AssistantToolCallSignature(original[i]);
+        if (signature.empty()) continue;
+        pins[i] = TaskMemoBuilder::LookupPinnedConclusion(
+            session_key, TaskMemoBuilder::ToolCallOrdinalKey(signature, ++signature_seen[signature]));
+    }
+
     std::unordered_set<size_t> kept_raw;
     for (const auto& m : kept) {
         if (m.is_object() && m.contains(kRawIdxKey)) kept_raw.insert(m[kRawIdxKey].get<size_t>());
@@ -832,7 +893,7 @@ void MessagePreFilter::CaptureDroppedMessages(const json& original, const json& 
         for (size_t i = 0; i < original.size(); ++i) {
             const std::string role = get_json_value(original[i], "role", BLANK_STRING);
             if (role == "system" || role == "developer" || kept_raw.count(i)) continue;
-            prefilter_dropped_messages_.push_back({role, message_content_for_memo(original[i])});
+            prefilter_dropped_messages_.push_back({role, pins[i] + message_content_for_memo(original[i])});
         }
         return;
     }
@@ -842,7 +903,8 @@ void MessagePreFilter::CaptureDroppedMessages(const json& original, const json& 
         std::string content = message_content_for_memo(m);
         kept_signatures.insert(role + "\x01" + content);
     }
-    for (const auto& m : original) {
+    for (size_t i = 0; i < original.size(); ++i) {
+        const auto& m = original[i];
         std::string role = get_json_value(m, "role", BLANK_STRING);
         if (role == "system" || role == "developer")
             continue;
@@ -852,7 +914,7 @@ void MessagePreFilter::CaptureDroppedMessages(const json& original, const json& 
             kept_signatures.erase(it);
             continue;
         }
-        prefilter_dropped_messages_.push_back({role, content});
+        prefilter_dropped_messages_.push_back({role, pins[i] + content});
     }
 }
 
@@ -2580,46 +2642,144 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
         const size_t cap_tokens = std::min(tool_entry_cap_tokens,
             static_cast<size_t>(static_cast<float>(contextSize) * kToolEntryHardCapRatio));
         std::unordered_map<std::string, std::string> call_id_to_path;
+        std::unordered_map<std::string, std::string> call_id_to_tool;
         std::unordered_set<std::string> full_dump_paths;
+        size_t last_tool_idx = 0;
         for (size_t i = 0; i < filtered_msg.size(); i++) {
-            const std::string role_i = get_json_value(filtered_msg[i], "role", BLANK_STRING);
-            if (role_i == "assistant" && filtered_msg[i].contains("tool_calls") && filtered_msg[i]["tool_calls"].is_array()) {
-                for (const auto& tc : filtered_msg[i]["tool_calls"]) {
+            if (get_json_value(filtered_msg[i], "role", BLANK_STRING) == "tool") last_tool_idx = i;
+        }
+        for (size_t i = 0; i < msg.size(); i++) {
+            const std::string role_i = get_json_value(msg[i], "role", BLANK_STRING);
+            if (role_i == "assistant" && msg[i].contains("tool_calls") && msg[i]["tool_calls"].is_array()) {
+                for (const auto& tc : msg[i]["tool_calls"]) {
                     if (!tc.is_object() || !tc.contains("id") || !tc["id"].is_string()) continue;
+                    const std::string call_id = tc["id"].get<std::string>();
                     const std::string path_arg = ExtractJsonPathArgFromToolCall(tc);
-                    if (!path_arg.empty()) call_id_to_path[tc["id"].get<std::string>()] = path_arg;
+                    if (!path_arg.empty()) call_id_to_path[call_id] = path_arg;
+                    if (tc.contains("function") && tc["function"].is_object())
+                        call_id_to_tool[call_id] = get_json_value(tc["function"], "name", BLANK_STRING);
                 }
             } else if (role_i == "tool") {
                 const std::string saved_path = ExtractFullOutputSavedPath(
-                    get_json_value(filtered_msg[i], "content", BLANK_STRING));
+                    get_json_value(msg[i], "content", BLANK_STRING));
                 if (!saved_path.empty()) full_dump_paths.insert(saved_path);
             }
+        }
+        const bool read_footer_directory = model_config_.GetPromptOptimizationConfig().fidelity.read_footer_directory;
+        auto resolve_tool_call = [&](const json& m, std::string& tool_name, std::string& call_path,
+                                     std::string& call_tool_name) {
+            tool_name = get_json_value(m, "name", BLANK_STRING);
+            call_path.clear();
+            const bool has_call_id = m.contains("tool_call_id") && m["tool_call_id"].is_string();
+            if (has_call_id) {
+                const std::string call_id = m["tool_call_id"].get<std::string>();
+                auto path_it = call_id_to_path.find(call_id);
+                if (path_it != call_id_to_path.end()) call_path = path_it->second;
+                if (tool_name.empty() && tool_call_id_to_name) {
+                    auto name_it = tool_call_id_to_name->find(call_id);
+                    if (name_it != tool_call_id_to_name->end()) tool_name = name_it->second;
+                }
+            }
+            call_tool_name = tool_name;
+            if (call_tool_name.empty() && has_call_id) {
+                auto tool_it = call_id_to_tool.find(m["tool_call_id"].get<std::string>());
+                if (tool_it != call_id_to_tool.end()) call_tool_name = tool_it->second;
+            }
+        };
+        auto entry_cap_for = [&](const json& m) -> size_t {
+            if (m.contains("tool_call_id") && m["tool_call_id"].is_string()) {
+                auto path_it = call_id_to_path.find(m["tool_call_id"].get<std::string>());
+                if (path_it != call_id_to_path.end() && full_dump_paths.count(path_it->second))
+                    return tool_entry_cap_tokens;
+            }
+            return cap_tokens;
+        };
+        size_t last_outline_added = 0;
+        size_t outline_pages = 0;
+        size_t outline_sections = 0;
+        auto cap_entry = [&](const std::string& content, const std::string& tool_name,
+                             size_t entry_cap_tokens) -> std::string {
+            last_outline_added = 0;
+            if (content.size() <= entry_cap_tokens) return content;
+            const size_t outline_max_bytes = cfg.fidelity.footer_section_hints
+                ? cfg.fidelity.footer_outline_max_bytes : 0;
+            std::string capped = IsGrepToolName(tool_name)
+                ? CapGrepResultByMatches(content, CountTokens(content), entry_cap_tokens)
+                : CapToolResultHeadTail(content, CountTokens(content), entry_cap_tokens, outline_max_bytes,
+                                        &last_outline_added);
+            return capped.size() < content.size() ? capped : content;
+        };
+        struct ReadPage {
+            std::string text;
+            bool directed = false;
+        };
+        std::unordered_map<size_t, ReadPage> read_pages;
+        if (read_footer_directory) {
+            PagedReadLedger read_ledger;
+            for (size_t i = 0; i < msg.size(); i++) {
+                if (get_json_value(msg[i], "role", BLANK_STRING) != "tool") continue;
+                std::string tool_name, call_path, call_tool_name;
+                resolve_tool_call(msg[i], tool_name, call_path, call_tool_name);
+                if (call_path.empty()) continue;
+                if (!IsReadToolName(call_tool_name)) {
+                    read_ledger.Invalidate(call_path);
+                    continue;
+                }
+                std::string content = get_json_value(msg[i], "content", BLANK_STRING);
+                const std::string cleaned = RemoveToolResponseRedundancy(content);
+                if (cleaned.length() < content.length()) content = cleaned;
+                if (task_memo_scan::IsBinaryContent(content)) continue;
+                std::string text = cap_entry(content, tool_name, entry_cap_for(msg[i]));
+                if (last_outline_added > 0 && !prior_dropped_set.count(i)) {
+                    outline_pages++;
+                    outline_sections += last_outline_added;
+                }
+                bool directed = false;
+                std::string rewritten;
+                if (read_ledger.RewriteFooter(call_path, text, rewritten)) {
+                    text = std::move(rewritten);
+                    directed = true;
+                }
+                read_ledger.Observe(call_path, text);
+                if (!prior_dropped_set.count(i)) read_pages[i] = ReadPage{std::move(text), directed};
+            }
+        }
+        if (outline_pages > 0) {
+            My_Log{My_Log::Level::kInfo} << "[PreFilter] ReadFooter outline: pages=" << outline_pages
+                                          << ", sections=" << outline_sections << std::endl;
         }
         size_t capped_count = 0;
         for (size_t i = 0; i < filtered_msg.size(); i++) {
             if (get_json_value(filtered_msg[i], "role", BLANK_STRING) != "tool") continue;
             std::string content = get_json_value(filtered_msg[i], "content", BLANK_STRING);
+            std::string tool_name, call_path, call_tool_name;
+            resolve_tool_call(filtered_msg[i], tool_name, call_path, call_tool_name);
             if (task_memo_scan::IsBinaryContent(content)) {
                 filtered_msg[i]["content"] = task_memo_scan::BinaryResultStub(content.size());
                 capped_count++;
                 continue;
             }
-            size_t entry_cap_tokens = cap_tokens;
-            if (filtered_msg[i].contains("tool_call_id") && filtered_msg[i]["tool_call_id"].is_string()) {
-                auto path_it = call_id_to_path.find(filtered_msg[i]["tool_call_id"].get<std::string>());
-                if (path_it != call_id_to_path.end() && full_dump_paths.count(path_it->second))
-                    entry_cap_tokens = tool_entry_cap_tokens;
+            if (read_footer_directory && !call_path.empty() && IsReadToolName(call_tool_name) &&
+                filtered_msg[i].contains(kRawIdxKey)) {
+                const auto page = read_pages.find(filtered_msg[i][kRawIdxKey].get<size_t>());
+                if (page != read_pages.end()) {
+                    if (page->second.text != content) {
+                        filtered_msg[i]["content"] = page->second.text;
+                        capped_count++;
+                    }
+                    if (page->second.directed && (i == last_tool_idx || model_config_.getenablePromptDebug())) {
+                        size_t shown_first = 0, shown_last = 0, shown_total = 0;
+                        task_memo_scan::ParsePagedReadFooter(page->second.text, shown_first, shown_last, shown_total);
+                        My_Log{My_Log::Level::kInfo} << "[PreFilter] ReadFooter swapped: file="
+                                                      << task_memo_scan::LastNameOf(call_path)
+                                                      << " msg_idx=" << i
+                                                      << " shown=" << shown_first << "-" << shown_last
+                                                      << " total=" << shown_total << std::endl;
+                    }
+                    continue;
+                }
             }
-            if (content.size() <= entry_cap_tokens) continue;
-            std::string tool_name = get_json_value(filtered_msg[i], "name", BLANK_STRING);
-            if (tool_name.empty() && filtered_msg[i].contains("tool_call_id") &&
-                filtered_msg[i]["tool_call_id"].is_string() && tool_call_id_to_name) {
-                auto name_it = tool_call_id_to_name->find(filtered_msg[i]["tool_call_id"].get<std::string>());
-                if (name_it != tool_call_id_to_name->end()) tool_name = name_it->second;
-            }
-            std::string capped = IsGrepToolName(tool_name)
-                ? CapGrepResultByMatches(content, CountTokens(content), entry_cap_tokens)
-                : CapToolResultHeadTail(content, CountTokens(content), entry_cap_tokens);
+            const std::string capped = cap_entry(content, tool_name, entry_cap_for(filtered_msg[i]));
             if (capped.size() < content.size()) {
                 filtered_msg[i]["content"] = capped;
                 capped_count++;
@@ -2636,7 +2796,9 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
 
     size_t compress_current_tokens = after_phase0_tokens;
     const float high_water_ratio = prefix_cache_active ? kEvictionHighWaterRatio : 1.0f;
-    const float low_water_ratio = prefix_cache_active ? kEvictionLowWaterRatio : 1.0f;
+    const float low_water_ratio = prefix_cache_active
+        ? std::min(kEvictionHighWaterRatio, std::max(0.05f, fidelity_cfg.eviction_low_water_ratio))
+        : 1.0f;
     const size_t evict_high_water = static_cast<size_t>(
         static_cast<float>(available_tokens) * high_water_ratio);
     const size_t tokens_before_evict = compress_current_tokens;
@@ -2645,7 +2807,8 @@ nlohmann::ordered_json MessagePreFilter::PreFilterMessages(
     size_t evict_low_water = static_cast<size_t>(static_cast<float>(available_tokens) * low_water_ratio);
     if (prefix_cache_active && recent_growth > 0) {
         const size_t reserve = static_cast<size_t>(static_cast<float>(recent_growth) * kGrowthReserveRounds);
-        const size_t floor_tokens = static_cast<size_t>(static_cast<float>(available_tokens) * kEvictionLowWaterFloorRatio);
+        const size_t floor_tokens = static_cast<size_t>(static_cast<float>(available_tokens) *
+            std::min(kEvictionLowWaterFloorRatio, low_water_ratio));
         const size_t adaptive = evict_high_water > reserve ? evict_high_water - reserve : 0;
         evict_low_water = std::max(floor_tokens, std::min(evict_low_water, adaptive));
     }

@@ -8,6 +8,7 @@
 
 #include "response_dispatcher.h"
 #include "../chat_request_handler/model_input_builder.h"
+#include "../chat_request_handler/message_pre_filter.h"
 #include "response_tools.h"
 #include "mimicry_recovery.h"
 #include "repeat_gate.h"
@@ -93,6 +94,39 @@ namespace
         size_t start = s.size() - max_bytes;
         while (start < s.size() && (static_cast<unsigned char>(s[start]) & 0xC0) == 0x80) ++start;
         return s.substr(start);
+    }
+
+    struct RepeatGateCounts
+    {
+        int ledger_total = 0;
+        int visible_total = 0;
+        int total = 0;
+        size_t distinct = 0;
+        bool eviction_known = false;
+    };
+
+    RepeatGateCounts ComputeRepeatGateCounts(const std::string &store_key, const std::string &session_key,
+                                             const json &messages, const std::string &signature)
+    {
+        auto &store = ToolCallRepetitionStore::GetInstance();
+        RepeatGateCounts counts;
+        counts.ledger_total = store.PeekTotalCount(store_key, signature);
+        counts.visible_total = counts.ledger_total;
+        counts.total = counts.ledger_total;
+        if (!session_key.empty() && messages.is_array())
+        {
+            std::vector<size_t> dropped_raw;
+            if (MessagePreFilter::GetDroppedRawIndices(session_key, messages, dropped_raw))
+            {
+                counts.eviction_known = true;
+                const auto executed_history = RepeatGateLogic::CollectExecutedOutcomes(messages);
+                counts.visible_total = static_cast<int>(
+                    RepeatGateLogic::CountVisibleExecutions(executed_history, signature, dropped_raw)) + 1;
+                counts.total = std::min(counts.ledger_total, counts.visible_total);
+            }
+        }
+        counts.distinct = static_cast<size_t>(store.PeekDistinctDigestCount(store_key, signature));
+        return counts;
     }
 }
 
@@ -486,12 +520,8 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                 first_query_ok = false;
             }
         }
-        if (!first_query_ok && mimicry_soft_stop && !mimicry_soft_retry_used && !connection_broken
-            && instance_config_ && !retry_request_data_.is_null()
-            && retry_request_data_.contains("messages") && retry_request_data_["messages"].is_array()
-            && RepeatGateLogic::TryConsumeExtraRetry(extra_retry_used))
+        auto run_soft_landing_retry = [&](const std::string &correction_text, const char *label)
         {
-            mimicry_soft_retry_used = true;
             try
             {
                 json scratch_data = retry_request_data_;
@@ -500,7 +530,7 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                 assistant_msg["content"] = response_buffer;
                 json correction_msg;
                 correction_msg["role"] = "user";
-                correction_msg["content"] = MimicryRecovery::BuildCorrectionMessage();
+                correction_msg["content"] = correction_text;
                 scratch_data["messages"].push_back(assistant_msg);
                 scratch_data["messages"].push_back(correction_msg);
 
@@ -529,16 +559,40 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                 harmony_thinking_status_sent = false;
                 last_hold_keepalive_at = std::chrono::steady_clock::now();
 
-                My_Log{} << "--- Query Context Start (mimicry soft-landing retry) ---" << std::endl;
+                My_Log{} << "--- Query Context Start (" << label << " soft-landing retry) ---" << std::endl;
                 first_query_ok = handle->Query(scratch_model_input, genie_callback, prefill_heartbeat);
-                My_Log{} << "--- Query Context End (mimicry soft-landing retry) ---\n" << std::endl;
+                My_Log{} << "--- Query Context End (" << label << " soft-landing retry) ---\n" << std::endl;
             }
             catch (const std::exception &e)
             {
                 My_Log{My_Log::Level::kError}
-                    << "[SendResponse] Exception during mimicry soft-landing retry: " << e.what() << std::endl;
+                    << "[SendResponse] Exception during " << label << " soft-landing retry: " << e.what() << std::endl;
                 first_query_ok = false;
             }
+        };
+        if (mimicry_soft_stop && !mimicry_soft_retry_used && !connection_broken
+            && instance_config_ && !retry_request_data_.is_null()
+            && retry_request_data_.contains("messages") && retry_request_data_["messages"].is_array()
+            && RepeatGateLogic::TryConsumeExtraRetry(extra_retry_used))
+        {
+            mimicry_soft_retry_used = true;
+            run_soft_landing_retry(MimicryRecovery::BuildCorrectionMessage(), "mimicry");
+        }
+        else if (mimicry_soft_stop && !mimicry_soft_retry_used)
+        {
+            My_Log{My_Log::Level::kWarning}
+                << "[SendResponse] Mimicry soft-landing retry skipped: connection_broken=" << connection_broken
+                << " instance_config=" << (instance_config_ != nullptr)
+                << " retry_data_null=" << retry_request_data_.is_null()
+                << " extra_retry_used=" << extra_retry_used << std::endl;
+        }
+        if (first_query_ok && handle->was_stopped_by_repeat_guard() && !connection_broken
+            && instance_config_ && !retry_request_data_.is_null()
+            && retry_request_data_.contains("messages") && retry_request_data_["messages"].is_array()
+            && response_buffer.find("<tool_call>") == std::string::npos
+            && RepeatGateLogic::TryConsumeExtraRetry(extra_retry_used))
+        {
+            run_soft_landing_retry(MimicryRecovery::BuildRepeatGuardCorrectionMessage(), "repeat-guard");
         }
         bool mimicry_degraded = false;
         if (MimicryRecovery::ShouldDegradeInsteadOfAbort(first_query_ok, degenerate_mimicry_stop, connection_broken,
@@ -578,11 +632,13 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
         auto finalize_generation_result = [&]()
         {
 
-            if (handle->was_stopped_by_output_limit())
+            const bool repeat_stopped = handle->was_stopped_by_repeat_guard();
+            if (handle->was_stopped_by_output_limit() || repeat_stopped)
             {
                 finishReason = "length";
                 My_Log{My_Log::Level::kWarning}
-                    << "[SendResponse] Generation stopped due to output token limit. "
+                    << "[SendResponse] Generation stopped due to "
+                    << (repeat_stopped ? "degenerate repetition" : "output token limit") << ". "
                     << "finish_reason = \"length\"" << std::endl;
             }
 
@@ -662,14 +718,15 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
         {
 
             std::string repetition_gate_key;
+            std::string repetition_session_key;
             {
                 const auto &guard_cfg = model_config_.GetToolCallRepairConfig().redundant_call_guard;
                 if (guard_cfg.enabled)
                 {
-                    const std::string session_key =
+                    repetition_session_key =
                         TaskMemoBuilder::ComputeFirstMsgKey(retry_request_data_["messages"]);
                     repetition_gate_key =
-                        ToolCallRepetitionStore::MakeKey(session_key, instance_config_->get_model_name());
+                        ToolCallRepetitionStore::MakeKey(repetition_session_key, instance_config_->get_model_name());
                 }
                 if (!repetition_gate_key.empty())
                 {
@@ -836,37 +893,45 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                 {
 
                     const auto &rg_cfg = repair_cfg.redundant_call_guard;
-                    std::string store_signature;
-                    if (rg_cfg.enabled && rg_cfg.soft_retry_enabled && rg_cfg.internal_retry_threshold > 0
-                        && !repetition_gate_key.empty())
+                    const bool soft_retry_on = rg_cfg.soft_retry_enabled && rg_cfg.internal_retry_threshold > 0;
+                    const bool hard_retry_on = rg_cfg.hard_block_retry_enabled && rg_cfg.hard_block_threshold > 0;
+                    auto call_signature = [](const std::string &converted) -> std::string
                     {
                         try
                         {
-                            json parsed = json::parse(ResponseTools::extractJsonFromToolCall(preview_converted));
+                            json parsed = json::parse(ResponseTools::extractJsonFromToolCall(converted));
                             const std::string tn = parsed.value("name", std::string());
                             if (!tn.empty())
-                                store_signature = tn + "|" + parsed.value("arguments", json::object()).dump();
+                                return tn + "|" + parsed.value("arguments", json::object()).dump();
                         }
                         catch (...) {}
-                    }
+                        return std::string();
+                    };
+                    std::string store_signature;
+                    if (rg_cfg.enabled && (soft_retry_on || hard_retry_on) && !repetition_gate_key.empty())
+                        store_signature = call_signature(preview_converted);
 
                     std::string ledger_preview;
                     int ledger_executed = 0;
                     bool gate_wants_soft_retry = false;
+                    bool hard_block_pending = false;
+                    RepeatGateCounts retry_counts;
                     if (!store_signature.empty())
                     {
                         auto &store = ToolCallRepetitionStore::GetInstance();
                         bool digest_stable = false;
                         store.GetOutcomeSummary(repetition_gate_key, store_signature,
                                                 ledger_preview, ledger_executed, digest_stable);
+                        retry_counts = ComputeRepeatGateCounts(
+                            repetition_gate_key, repetition_session_key, retry_request_data_["messages"],
+                            store_signature);
+                        const auto retry_decision = ToolCallRepetitionStore::DecideRepeatGate(
+                            retry_counts.total, retry_counts.distinct, extra_retry_used,
+                            soft_retry_on ? rg_cfg.internal_retry_threshold : 0, rg_cfg.hard_block_threshold);
+                        hard_block_pending = retry_decision == ToolCallRepetitionStore::RepeatGate::kHardBlock;
                         gate_wants_soft_retry =
-                            ToolCallRepetitionStore::DecideRepeatGate(
-                                store.PeekTotalCount(repetition_gate_key, store_signature),
-                                static_cast<size_t>(store.PeekDistinctDigestCount(repetition_gate_key, store_signature)),
-                                extra_retry_used,
-                                rg_cfg.internal_retry_threshold,
-                                rg_cfg.hard_block_threshold)
-                            == ToolCallRepetitionStore::RepeatGate::kSoftRetry;
+                            retry_decision == ToolCallRepetitionStore::RepeatGate::kSoftRetry
+                            || (hard_retry_on && hard_block_pending);
                     }
 
                     if (gate_wants_soft_retry && !ledger_preview.empty()
@@ -874,8 +939,13 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                     {
                         My_Log{My_Log::Level::kWarning}
                             << "[ToolCallRepair][Layer2b] Non-progressing repeat detected (executed="
-                            << ledger_executed << ", result unchanged). Attempting 1 internal invisible "
-                               "retry with the ledger's recorded result (server-side, not visible to client)."
+                            << ledger_executed << ", total=" << retry_counts.total
+                            << ", visible_total=" << retry_counts.visible_total
+                            << ", ledger_total=" << retry_counts.ledger_total
+                            << ", eviction_known=" << (retry_counts.eviction_known ? 1 : 0)
+                            << ", hard_block_pending=" << (hard_block_pending ? 1 : 0)
+                            << ", result unchanged). Attempting 1 internal invisible retry with the ledger's "
+                               "recorded result (server-side, not visible to client, no prefix checkpoints saved)."
                             << std::endl;
 
                         const std::string snapshot_response_buffer = response_buffer;
@@ -898,6 +968,8 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                             auto *mutable_instance_config = const_cast<ModelInstanceConfig *>(instance_config_);
                             ChatHistory scratch_chat_history(*mutable_instance_config);
                             ModelInputBuilder scratch_builder(scratch_chat_history, mutable_instance_config, scratch_data);
+                            if (hard_block_pending)
+                                scratch_builder.ForceThinkOnNextBuild();
 
                             bool scratch_is_tool = false;
                             std::function<bool()> scratch_is_alive_fn = nullptr;
@@ -905,6 +977,8 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                                 scratch_is_alive_fn = [sink]() -> bool { return sink->is_writable(); };
                             ModelInput scratch_model_input =
                                 scratch_builder.Build(scratch_data, scratch_is_tool, scratch_is_alive_fn);
+                            scratch_model_input.skip_checkpoint_save_ = true;
+                            const bool retry_think_open = scratch_model_input.think_time_budget_s_ > 0;
 
                             capture_harmony_history_snapshot();
 
@@ -925,9 +999,15 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                             if (retry_query_ok && !connection_broken)
                             {
                                 finalize_generation_result();
+                                const std::string retried_signature = isToolResponse
+                                    ? call_signature(ResponseTools::convertToolCallJson(toolResponse))
+                                    : std::string();
                                 My_Log{} << "[ToolCallRepair][Layer2b] Repetition retry completed; "
                                              "replacing repeated call with model's reconsidered response "
-                                             "(invisible to client)." << std::endl;
+                                             "(invisible to client). tool_call=" << (isToolResponse ? 1 : 0)
+                                         << ", same_call=" << (retried_signature == store_signature ? 1 : 0)
+                                         << ", think_open=" << (retry_think_open ? 1 : 0)
+                                         << std::endl;
                             }
                             else
                             {
@@ -1004,7 +1084,8 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                 repetition_key = ToolCallRepetitionStore::MakeKey(session_key, instance_config_->get_model_name());
             }
             const bool redundant_guard_enabled = model_config_.GetToolCallRepairConfig().redundant_call_guard.enabled;
-            const bool output_truncated = handle->was_stopped_by_output_limit();
+            const bool repeat_truncated = handle->was_stopped_by_repeat_guard();
+            const bool output_truncated = handle->was_stopped_by_output_limit() || repeat_truncated;
 
             if (!IsUnknowToolCallJson(toolResponse))
             {
@@ -1028,9 +1109,13 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                 {
                     const auto &gate_cfg = model_config_.GetToolCallRepairConfig().redundant_call_guard;
                     auto &gate_store = ToolCallRepetitionStore::GetInstance();
-                    const int gate_total = gate_store.PeekTotalCount(repetition_key, gate_signature);
-                    const size_t gate_distinct =
-                        static_cast<size_t>(gate_store.PeekDistinctDigestCount(repetition_key, gate_signature));
+                    const auto gate_counts = ComputeRepeatGateCounts(
+                        repetition_key, think_session_key, retry_request_data_["messages"], gate_signature);
+                    const int ledger_total = gate_counts.ledger_total;
+                    const int gate_total = gate_counts.total;
+                    const int gate_visible_total = gate_counts.visible_total;
+                    const bool gate_eviction_known = gate_counts.eviction_known;
+                    const size_t gate_distinct = gate_counts.distinct;
 
                     const auto gate_decision = ToolCallRepetitionStore::DecideRepeatGate(
                         gate_total, gate_distinct, extra_retry_used, 0, gate_cfg.hard_block_threshold);
@@ -1059,9 +1144,81 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                             << " time(s) with an unchanged result (total=" << gate_total
                             << ", distinct_digests=" << gate_distinct
                             << ", blocked_count=" << gate_blocked
+                            << ", visible_total=" << gate_visible_total << ", ledger_total=" << ledger_total
+                            << ", eviction_known=" << (gate_eviction_known ? 1 : 0)
                             << "); the call is NOT forwarded to the client. Downgrading to plain text with "
                                "finish_reason=\"" << finishReason << "\"" << (gate_final ? " (final stop)" : "")
                             << ". Generated tail: " << TailBytes(response_buffer, 200) << std::endl;
+
+                        try
+                        {
+                            int tail_identical_calls = 0;
+                            size_t history_msgs = 0;
+                            std::string last_role;
+                            bool last_is_system_nudge = false;
+                            if (retry_request_data_.contains("messages") && retry_request_data_["messages"].is_array())
+                            {
+                                const auto &hist = retry_request_data_["messages"];
+                                history_msgs = hist.size();
+                                if (!hist.empty() && hist.back().is_object())
+                                {
+                                    const auto &last_msg = hist.back();
+                                    last_role = last_msg.value("role", std::string());
+                                    std::string last_text;
+                                    if (last_msg.contains("content") && last_msg["content"].is_string())
+                                        last_text = last_msg["content"].get<std::string>();
+                                    else if (last_msg.contains("content") && last_msg["content"].is_array())
+                                    {
+                                        for (const auto &part : last_msg["content"])
+                                        {
+                                            if (part.is_object() && part.contains("text") && part["text"].is_string())
+                                            {
+                                                last_text = part["text"].get<std::string>();
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    last_is_system_nudge = last_role == "user" && last_text.rfind("[SYSTEM]", 0) == 0;
+                                }
+                                for (auto it = hist.rbegin(); it != hist.rend(); ++it)
+                                {
+                                    if (!it->is_object() || it->value("role", std::string()) != "assistant"
+                                        || !it->contains("tool_calls") || !(*it)["tool_calls"].is_array()
+                                        || (*it)["tool_calls"].empty() || !(*it)["tool_calls"][0].is_object()
+                                        || !(*it)["tool_calls"][0].contains("function"))
+                                        continue;
+                                    const auto &fn = (*it)["tool_calls"][0]["function"];
+                                    std::string hist_args = "{}";
+                                    if (fn.contains("arguments") && fn["arguments"].is_string())
+                                    {
+                                        const json parsed_args = json::parse(fn["arguments"].get<std::string>(), nullptr, false);
+                                        if (!parsed_args.is_discarded())
+                                            hist_args = parsed_args.dump();
+                                    }
+                                    else if (fn.contains("arguments") && fn["arguments"].is_object())
+                                        hist_args = fn["arguments"].dump();
+                                    if (fn.value("name", std::string()) + "|" + hist_args != gate_signature)
+                                        break;
+                                    ++tail_identical_calls;
+                                }
+                            }
+                            const size_t think_end = response_buffer.find("</think>");
+                            const size_t think_begin = response_buffer.find("<think>");
+                            const long long think_chars = think_end == std::string::npos ? -1
+                                : static_cast<long long>(think_end) - (think_begin == std::string::npos ? 0 : static_cast<long long>(think_begin + 7));
+                            const size_t think_conclusion_chars = TaskMemoBuilder::ExtractThinkConclusion(response_buffer).size();
+                            const size_t call_pos = response_buffer.find("<tool_call>");
+                            My_Log{My_Log::Level::kWarning}
+                                << "[ToolCallRepair][Layer2b] DIAG: tail_identical_calls=" << tail_identical_calls
+                                << ", history_msgs=" << history_msgs
+                                << ", last_msg_role=" << (last_role.empty() ? "?" : last_role)
+                                << ", last_msg_is_system_nudge=" << (last_is_system_nudge ? 1 : 0)
+                                << ", think_chars=" << think_chars
+                                << ", think_conclusion_chars=" << think_conclusion_chars
+                                << ", chars_before_call=" << (call_pos == std::string::npos ? -1LL : static_cast<long long>(call_pos))
+                                << ", generated_chars=" << response_buffer.size() << std::endl;
+                        }
+                        catch (...) {}
                     }
                 }
 
@@ -1086,8 +1243,14 @@ bool ResponseDispatcher::SendResponse(size_t, httplib::DataSink *sink, httplib::
                                 ? std::string()
                                 : TaskMemoBuilder::ExtractThinkConclusion(response_buffer);
                             if (output_truncated && !reasoning_note_mimicry)
-                                conclusion += (conclusion.empty() ? "" : " ") + std::string("this call was cut off by the output token limit after ")
-                                    + std::to_string(response_buffer.size()) + " characters, so its arguments are incomplete; split the content into several smaller calls";
+                                conclusion += (conclusion.empty() ? "" : " ")
+                                    + std::string(repeat_truncated
+                                                      ? "this call was cut off because the output started repeating itself after "
+                                                      : "this call was cut off by the output token limit after ")
+                                    + std::to_string(response_buffer.size()) + " characters, so its arguments are incomplete; "
+                                    + std::string(repeat_truncated
+                                                      ? "do not repeat content, send a shorter call"
+                                                      : "split the content into several smaller calls");
                             if (!conclusion.empty()) {
                                 auto compute_tool_call_signature = [](const json& call) {
                                     std::string args = "{}";

@@ -12,6 +12,7 @@
 #include "../chat_request_handler/tool_call_repetition_store.h"
 
 #include <nlohmann/json.hpp>
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -24,6 +25,7 @@ namespace RepeatGateLogic
     {
         std::string signature;
         std::string content;
+        size_t msg_index = 0;
     };
 
     std::string MakeSignature(const Json& function_obj);
@@ -31,6 +33,9 @@ namespace RepeatGateLogic
     std::string ExtractContentText(const Json& content);
 
     std::vector<ExecutedOutcome> CollectExecutedOutcomes(const Json& messages, size_t* orphan_tool_results = nullptr);
+
+    size_t CountVisibleExecutions(const std::vector<ExecutedOutcome>& executed, const std::string& signature,
+                                  const std::vector<size_t>& dropped_msg_indices);
 
     Outcome ClassifyOutcome(const std::string& content);
 

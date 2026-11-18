@@ -30,10 +30,10 @@ struct DraftModelConfig
     bool required = true;
     std::string flash_attn;
     std::string draft_flash_attn;
-    std::string samplers;
-    float temp = 0.0f;
-    int top_k = 1;
-    float top_p = -1.0f;
+    std::string target_samplers;
+    float target_temp = 0.2f;
+    int target_top_k = 10;
+    float target_top_p = -1.0f;
     int ngram_mod_n_min = -1;
     int ngram_mod_n_match = 16;
     bool ngram_mod = true;

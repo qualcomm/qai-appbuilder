@@ -405,6 +405,188 @@ def check_status_shape(client):
     require(body.get("loaded_models", 0) >= 1, f"loaded_models: {body}")
 
 
+GUARD_MIN_REPEATS = 3
+GUARD_SENTENCE = "The model repeats this exact sentence again and again without ever making any progress at all. "
+GUARD_PARAGRAPH = (
+    "Inception v3 expects a 299x299 RGB input and produces 1000 class logits, so the exported graph "
+    "needs a fixed input shape and a softmax head that is stripped before quantization to W8A8 format. "
+    "Calibration data should be representative of the deployment domain; otherwise accuracy drops. ")
+
+
+def guard_char_count(piece):
+    return sum(1 for b in piece if (b & 0xC0) != 0x80)
+
+
+class GuardStream:
+    def __init__(self, enabled, max_period, min_span_chars):
+        self.enabled = bool(enabled and max_period > 0 and min_span_chars > 0)
+        self.max_period = max_period if self.enabled else 0
+        self.min_span_chars = min_span_chars
+        ring = self.max_period + 1
+        self.ids = [0] * ring
+        self.cumulative = [0] * ring
+        self.run = [0] * ring
+        self.observed = 0
+        self.total_chars = 0
+
+    def observe(self, piece_id, piece_chars):
+        if not self.enabled:
+            return 0
+        ring = len(self.ids)
+        index = self.observed
+        for period in range(1, self.max_period + 1):
+            same = index >= period and self.ids[(index - period) % ring] == piece_id
+            self.run[period] = self.run[period] + 1 if same else 0
+        self.total_chars += piece_chars
+        self.ids[index % ring] = piece_id
+        self.cumulative[index % ring] = self.total_chars
+        self.observed += 1
+        for period in range(1, self.max_period + 1):
+            repeats = (self.run[period] + period) // period
+            if repeats < GUARD_MIN_REPEATS:
+                continue
+            before_unit = self.cumulative[(index - period) % ring] if index >= period else 0
+            span_chars = (self.total_chars - before_unit) * repeats
+            required = max(1, self.min_span_chars // 2) if period == 1 else self.min_span_chars
+            if span_chars >= required:
+                return period
+        return 0
+
+
+def guard_tokenize(text):
+    data = text.encode("utf-8")
+    tokens = []
+    i = 0
+    while i < len(data):
+        j = i + 1 if data[i] == 0x20 else i
+        if j < len(data) and bytes([data[j]]).isalpha():
+            while j < len(data) and bytes([data[j]]).isalpha():
+                j += 1
+            tokens.append(data[i:j])
+            i = j
+            continue
+        j = i + 1
+        while j < len(data) and (data[j] & 0xC0) == 0x80:
+            j += 1
+        tokens.append(data[i:j])
+        i = j
+    return tokens
+
+
+def guard_run(text, enabled=True, max_period=128, min_span=256):
+    guard = GuardStream(enabled, max_period, min_span)
+    vocab = {}
+    for index, token in enumerate(guard_tokenize(text), 1):
+        period = guard.observe(vocab.setdefault(token, len(vocab)), guard_char_count(token))
+        if period:
+            return index, period
+    return 0, 0
+
+
+def check_guard_legit_repeats(client):
+    cases = [
+        ("1000 in prose", "Output is 1000 classes"),
+        ("2000", "Output is 2000 classes"),
+        ("999", "Output is 999 classes"),
+        ("0.000123", "value 0.000123"),
+        ("directory 1111", "C:\\WoS_AI\\1111\\model"),
+        ("0000", "id=0000"),
+        ("0.0.0.0", "bind 0.0.0.0:8080"),
+        ("1.1.1.1", "dns 1.1.1.1"),
+        ("80 dashes", "-" * 80),
+        ("100 equals", "=" * 100),
+        ("table separator", "|---|---|---|---|"),
+        ("blank lines", "a\n\n\nb"),
+        ("16 space indent", "x" + " " * 16 + "y"),
+        ("ellipsis", "wait..."),
+        ("closing brackets", "a[[[[1]]]]"),
+        ("closing parens", "f(g(h(i(1))))"),
+        ("zero array", "[0, 0, 0, 0, 0, 0, 0, 0]"),
+        ("64 zeros", "0" * 64),
+        ("100 zeros", "0" * 100),
+        ("base64 tail", "QUJDAAAA=="),
+        ("same code line x3", "x += 1\n" * 3),
+        ("same table row x5", "| a | b |\n" * 5),
+        ("sentence x2", GUARD_SENTENCE * 2),
+        ("paragraph x2", GUARD_PARAGRAPH * 2),
+        ("48 box-drawing chars (3 bytes each)", "═" * 48),
+        ("100 box-drawing chars", "═" * 100),
+        ("CJK sentence x2", "这是一段中文说明文字。" * 2),
+    ]
+    bad = []
+    for name, text in cases:
+        abort_at, _ = guard_run(text)
+        if abort_at:
+            bad.append(f"{name}: stopped at {abort_at}")
+    require(not bad, "; ".join(bad))
+
+
+def check_guard_real_loops(client):
+    cases = [
+        ("zero x300", "0" * 300, 130),
+        ("newline x400", "\n" * 400, 130),
+        ("'ha ' x100", "ha " * 100, 50),
+        ("'the ' x100", "the " * 100, 40),
+        ("', ' x200", ", " * 200, 260),
+        ("sentence x4", " " + GUARD_SENTENCE * 4, 60),
+        ("paragraph x4", " " + GUARD_PARAGRAPH * 4, 3 * len(guard_tokenize(GUARD_PARAGRAPH)) + 2),
+        ("CJK char x300", "哈" * 300, 130),
+        ("box-drawing x130", "═" * 130, 130),
+    ]
+    bad = []
+    for name, text, limit in cases:
+        abort_at, _ = guard_run(text)
+        if not 0 < abort_at <= limit:
+            bad.append(f"{name}: stopped at {abort_at} (limit {limit})")
+    if guard_run("0" * 300)[1] != 1:
+        bad.append("zero x300 should report period 1")
+    if guard_run("哈" * 300)[1] != 1:
+        bad.append("CJK char x300 should report span in characters (period 1)")
+    require(not bad, "; ".join(bad))
+
+
+def check_guard_log9_form(client):
+    guard = GuardStream(True, 128, 256)
+    piece_chars = guard_char_count("══════".encode("utf-8"))
+    stopped = any(guard.observe(5, piece_chars) for _ in range(8))
+    require(not stopped, "6-char box-drawing piece x8 (48 chars) was stopped")
+
+
+def check_guard_utf8_count(client):
+    cases = [(b"", 0), (b"abc", 3), ("═".encode("utf-8"), 1), ("中a".encode("utf-8"), 2), (b"\x80\xbf", 0)]
+    bad = [f"{raw!r}: {guard_char_count(raw)} != {want}" for raw, want in cases if guard_char_count(raw) != want]
+    require(not bad, "; ".join(bad))
+
+
+def check_guard_edge_cases(client):
+    bad = []
+    if guard_run("0" * 1000, False)[0]:
+        bad.append("disabled guard stopped")
+    if guard_run("0" * 1000, True, 0)[0]:
+        bad.append("zero max_period stopped")
+    if guard_run("0" * 1000, True, 128, 0)[0]:
+        bad.append("zero min_span stopped")
+    if guard_run("abc def ghi jkl mno pqr stu vwx " * 40, True, 4)[0]:
+        bad.append("period above max_period was not ignored")
+    if guard_run("0" * 1000, True, 128, 1024)[0] <= guard_run("0" * 1000)[0]:
+        bad.append("larger min_span did not delay the stop")
+
+    guard = GuardStream(True, 8, 64)
+    aborted_at = 0
+    for i in range(5000):
+        piece_id = 7 if i >= 4000 else ((i * 2654435761) & 0xFFFFFFFF) % 100003 + 100
+        if guard.observe(piece_id, 1):
+            aborted_at = i
+            break
+    if not 4000 <= aborted_at <= 4000 + 64:
+        bad.append(f"ring buffer wrap: stopped at {aborted_at}")
+
+    zero_width = GuardStream(True, 8, 64)
+    if any(zero_width.observe(5, 0) for _ in range(1000)):
+        bad.append("zero-width pieces tripped the character span")
+    require(not bad, "; ".join(bad))
+
+
 GROUPS = {
     "api_contract": [
         ("model_required", check_model_required),
@@ -424,7 +606,15 @@ GROUPS = {
         ("disconnect_prefill", check_disconnect_prefill),
         ("disconnect_queued", check_disconnect_queued),
     ],
+    "guard_offline": [
+        ("legit_repeats", check_guard_legit_repeats),
+        ("real_loops", check_guard_real_loops),
+        ("log9_form", check_guard_log9_form),
+        ("utf8_count", check_guard_utf8_count),
+        ("edge_cases", check_guard_edge_cases),
+    ],
 }
+OFFLINE_GROUPS = {"guard_offline"}
 
 
 def pick_model(client):
@@ -442,7 +632,8 @@ def pick_model(client):
 
 def main():
     parser = argparse.ArgumentParser(description="GenieAPIService HTTP black-box contract checks "
-                                                 "against an already running service")
+                                                 "against an already running service, plus service-free "
+                                                 "group(s): " + ",".join(sorted(OFFLINE_GROUPS)))
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8910)
     parser.add_argument("--model", default=None, help="model name; default: first loaded model of /v1/models")
@@ -450,20 +641,22 @@ def main():
     parser.add_argument("--timeout", type=int, default=180)
     args = parser.parse_args()
 
-    client = Client(args.host, args.port, args.model, args.timeout)
-    if not client.alive():
-        print(f"service at {client.base} is not reachable", file=sys.stderr)
-        return 2
-    client.model = args.model or pick_model(client)
-    if not client.model:
-        print("no model available; pass --model", file=sys.stderr)
-        return 2
-
     selected = list(GROUPS) if args.group == "all" else [g.strip() for g in args.group.split(",")]
     unknown = [g for g in selected if g not in GROUPS]
     if unknown:
         print(f"unknown group(s): {unknown}", file=sys.stderr)
         return 2
+
+    client = Client(args.host, args.port, args.model, args.timeout)
+    needs_service = any(g not in OFFLINE_GROUPS for g in selected)
+    if needs_service:
+        if not client.alive():
+            print(f"service at {client.base} is not reachable", file=sys.stderr)
+            return 2
+        client.model = args.model or pick_model(client)
+        if not client.model:
+            print("no model available; pass --model", file=sys.stderr)
+            return 2
 
     failed = 0
     print(f"model={client.model} groups={selected}", flush=True)
@@ -479,7 +672,7 @@ def main():
                 outcome, detail = "FAIL", f"{type(exc).__name__}: {exc}"
                 failed += 1
             print(f"[{outcome}] {group}/{name} ({time.monotonic() - started:.1f}s) {detail}", flush=True)
-            if outcome == "FAIL" and not client.alive():
+            if outcome == "FAIL" and needs_service and not client.alive():
                 print("service is down; aborting remaining checks", flush=True)
                 return 1
     print(f"failed={failed}", flush=True)

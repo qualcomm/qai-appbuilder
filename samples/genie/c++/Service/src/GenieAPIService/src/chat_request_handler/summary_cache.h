@@ -42,7 +42,6 @@ private:
     struct Entry {
         std::string summary;
         size_t original_len = 0;
-        std::chrono::steady_clock::time_point created;
         size_t memory_bytes = 0;
     };
 
@@ -66,8 +65,6 @@ private:
 
     CacheKey MakeKey(const std::string& content) const;
 
-    void EvictExpired();
-
     void EvictIfNeeded();
 
     mutable std::mutex mutex_;
@@ -81,7 +78,6 @@ private:
     bool enabled_ = false;
     size_t max_entries_ = 500;
     size_t max_memory_bytes_ = 50ULL * 1024 * 1024;
-    int ttl_minutes_ = 60;
 };
 
 #endif
