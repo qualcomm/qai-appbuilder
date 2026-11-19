@@ -75,9 +75,8 @@ dependencies = [
   "alembic>=1.13,<2.0",                    # schema migrations (S2/S6)
 
   # crypto / secrets
-  # ARM64 (Windows aarch64) note: vendor/whl/ pins cryptography 45.0.5
-  # (PyPI revoked 45.x cp313 ARM64; the vendored wheel is the only source).
-  # 46.0.x is available on PyPI as a fallback.  47.0+ are sdist-only and
+  # ARM64 (Windows aarch64) note: PyPI publishes cp313 win_arm64 wheels for
+  # cryptography 46.x (45.x was revoked there).  47.0+ are sdist-only and
   # require Rust + OpenSSL toolchain.  Upper bound stays below 47.
   "cryptography>=45,<47",
   "keyring>=25,<26",                       # OS-level credential store (PR-013)
@@ -118,12 +117,15 @@ dependencies = [
   # token counting (chat compaction trigger precise sizing).
   # ``qai.chat.application._token_estimate_helpers.precise_text_tokens`` uses
   # tiktoken to exactly size large new user messages for the compaction-trigger
-  # ``实发`` decision. Loaded OFFLINE: the BPE vocab files are vendored under
-  # ``vendor/tiktoken/`` and the helper sets ``TIKTOKEN_CACHE_DIR`` to that dir,
-  # so no network fetch (offline → SSLError otherwise). The ARM64 cp313 wheel is
-  # vendored in ``vendor/whl/``. Lazily imported + fully try/except-guarded, so a
-  # missing wheel degrades to a coarse ``len//2`` estimate (never crashes chat).
-  "tiktoken>=0.12.0,<1.0",
+  # ``实发`` decision. Loaded OFFLINE when ``vendor/tiktoken/`` exists (the helper
+  # sets ``TIKTOKEN_CACHE_DIR`` to it), otherwise tiktoken tries the network.
+  # Lazily imported + fully try/except-guarded, so a missing package or vocab
+  # degrades to a coarse ``len//2`` estimate (never crashes chat).
+  # Windows ARM64: PyPI publishes NO win_arm64 wheel for tiktoken (the sdist needs
+  # a Rust toolchain), so it is not a hard requirement there; an ARM64 wheel is
+  # only picked up if one is installed separately (e.g. ``Setup.bat --with-vendor``).
+  # ``platform_machine`` is ``ARM64`` on Windows ARM64 and ``AMD64`` on x64.
+  "tiktoken>=0.12.0,<1.0; platform_machine != 'ARM64'",
 
   # Qualcomm AI Hub model compilation and profiling cloud service.
   # China AI Hub currently rejects 0.56.x; keep the CLI/SDK on the newest
