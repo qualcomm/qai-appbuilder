@@ -148,7 +148,7 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 
 ### QAIRT / qai_appbuilder 版本
 
-版本只在一处定:`scripts\qairt_release.json` 的 `qairt_version`(现为 `2.51.40.260930`)。`qai_appbuilder` 跟着它走:取前三段作为发布标签(`2.51.40.260930` → `v2.51.40`),x64 装 `qai_appbuilder-2.51.40.1-…-win_amd64.whl`,ARM64 装 `qai_appbuilder-2.51.40-…-win_arm64.whl`,都从该发布页下载(ARM64 不再用 `vendor-deps.7z` 里的那份,它只带打包时的旧版本)。
+版本只在一处定:`scripts\qairt_release.json` 的 `qairt_version`(现为 `2.51.40.260930`)。`qai_appbuilder` 跟着它走:取前三段作为发布标签(`2.51.40.260930` → `v2.51.40`),x64 装 `qai_appbuilder-2.51.40.1-…-win_amd64.whl`,ARM64 装 `qai_appbuilder-2.51.40-…-win_arm64.whl`,都从该发布页下载(ARM64 默认也不再下载 `vendor-deps.7z`)。
 
 不想改文件、只为这一次打包换版本时用 `-QairtVersion`:它会先在线确认该版本的 wheel 都存在(写错版本在打包开始前就报错),再只改**暂存目录里**的 `qairt_release.json`,工作区的文件不动。格式是 `A.B.C` 或 `A.B.C.build`。
 
@@ -169,10 +169,11 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 2. 向导里可选:镜像(自动 / 官方 / 国内)、HTTP 代理。
 3. 执行 `_setup_env.bat --arch <arch> --no-pause --with-browser --with-astgrep [--mirror ..] [--proxy ..]`(**不带 `--builder`**;两个 `--with-*` 写在 `.iss` 的 `#define SetupComponents` 里,安装和"修复"快捷方式共用):
    建 Python 3.13 运行时 venv(`<安装目录>\app\envs\`,和 `data\` 同级)、装依赖、初始化 `data\`。
-   ARM64 另外会在线下载 `vendor-deps.7z`(约 210 MB,来自 aidevhome.com),取其中除 `qai_appbuilder` 以外的 ARM64 wheel。
+   **不再下载 `vendor-deps.7z`**:ARM64 和 x64 一样,所有依赖都从 PyPI 取。需要旧行为时手动运行 `_setup_env.bat --with-vendor`(仅 ARM64,约 210 MB,来自 aidevhome.com;下载失败只警告,不会中断安装)。
+   ARM64 不用这个包时缺少三样东西,其余功能不受影响:`tiktoken`(PyPI 没有 Windows ARM64 版,token 计数退化为按长度粗估)、Claude Code SDK 后端(`claude-agent-sdk` 在 PyPI 没有 win_arm64 版,自动回退 HTTP 后端)、以及依赖 `pyclipper` 的 App Builder 模型。
    - `--with-browser`:`search` extra(`playwright==1.61.0`、`selectolax`、`lxml`、`cssselect`、`browserforge`,来自 PyPI)+ `python -m playwright install chromium`。
      Chromium 来自 `cdn.playwright.dev`(国内档由 `net_config.ps1` 设 `PLAYWRIGHT_DOWNLOAD_HOST` 指向 npmmirror),装到应用自己的 `app\envs\ms-playwright\`(安装时设 `PLAYWRIGHT_BROWSERS_PATH`;后端启动时发现该目录有浏览器就设同一变量),不用 Playwright 的按用户共享缓存 `%LOCALAPPDATA%\ms-playwright\`。失败不中断安装,只是浏览器工具不可用。
-   - `--with-astgrep`:从 PyPI 的 `ast-grep-cli` 0.45.1 wheel 取出 `ast-grep.exe`、`sg.exe`(各约 49 MB)到 `vendor\bin\<arch>\`;PyPI 不通时回退 GitHub release。ARM64 上 `vendor-deps.7z` 已带这两个文件,会直接 `[SKIP]`。
+   - `--with-astgrep`:从 PyPI 的 `ast-grep-cli` 0.45.1 wheel 取出 `ast-grep.exe`、`sg.exe`(各约 49 MB)到 `vendor\bin\<arch>\`;PyPI 不通时回退 GitHub release。ARM64 也有 `win_arm64` 版,同样走 PyPI(不再依赖 `vendor-deps.7z`)。
    **不装**模型转换环境(`.venv_x64_310`)和 QAIRT SDK。
 4. 环境配置失败时,文件仍已安装;开始菜单有"修复 / 完成环境配置",重跑 `_setup_env.bat`,可断点续。
 5. 成功后可勾选"立即启动",打开**桌面版**窗口(`desktop\QAIAppBuilder.exe`)。开始菜单和桌面快捷方式也指向它;浏览器版仍然是安装目录里的 `Start.bat`(不再有快捷方式)。
