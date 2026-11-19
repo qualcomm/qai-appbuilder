@@ -267,7 +267,7 @@ if /i "%HOST_ARCH%"=="arm64" (
         if exist "vendor\whl\%VENDOR_MARKER_WHL%" set "USE_VENDOR=1"
     ) else (
         echo [INFO] ARM64: the vendor-deps bundle is not used ^(--with-vendor to opt in^); dependencies come from PyPI.
-        echo [INFO]   Not available this way: exact token counting ^(tiktoken: coarse estimate instead^), the Claude Code SDK backend ^(HTTP backend is used^),
+        echo [INFO]   Not available this way: exact token counting ^(tiktoken: coarse estimate instead^)
         echo [INFO]   and App Builder models that need pyclipper.
     )
 ) else (
@@ -283,16 +283,9 @@ REM  Step 5: Python dependencies
 REM ===========================================================================
 echo.
 echo -- Step 5/7: Python dependencies --------------------------------------------
-REM claude-agent-sdk has no win_arm64 wheel on PyPI: its extra is only used on x64, or on ARM64 with the vendor bundle.
-set "_CCSDK=--extra cc-sdk"
-set "_SMOKE=fastapi, uvicorn, structlog, paramiko, claude_agent_sdk"
-if /i "%HOST_ARCH%"=="arm64" if not "%USE_VENDOR%"=="1" (
-    set "_CCSDK="
-    set "_SMOKE=fastapi, uvicorn, structlog, paramiko"
-)
-set "_EXTRAS=%_CCSDK%"
-if "%WITH_BROWSER%"=="1" set "_EXTRAS=%_EXTRAS% --extra search"
-if "%WITH_BUILDER%"=="1" set "_EXTRAS=%_CCSDK% --extra search"
+set "_EXTRAS="
+if "%WITH_BROWSER%"=="1" set "_EXTRAS=--extra search"
+if "%WITH_BUILDER%"=="1" set "_EXTRAS=--extra search"
 set "_FL="
 if "%USE_VENDOR%"=="1" (
     echo [INFO] installing vendored ARM64 wheels ^(--no-deps^)...
@@ -302,7 +295,7 @@ if "%USE_VENDOR%"=="1" (
     set "_FL=--find-links vendor\whl"
     if exist "data\downloads\_constraints.txt" set "_FL=--find-links vendor\whl -c data\downloads\_constraints.txt"
 )
-"%VPY%" -c "import %_SMOKE%" >nul 2>&1
+"%VPY%" -c "import fastapi, uvicorn, structlog, paramiko" >nul 2>&1
 if not errorlevel 1 if "%WITH_BROWSER%"=="0" if "%WITH_BUILDER%"=="0" (
     echo [SKIP] dependency closure already importable.
     goto :deps_done
@@ -1045,7 +1038,7 @@ REM :install_vendor_whls - ARM64 only; the vendor-deps.7z wheels except qai_appb
 REM   GitHub release, see :install_qai_appbuilder: the bundle only carries the version it was built with).
 :install_vendor_whls
 set "W=vendor\whl"
-"%UV_EXE%" pip install --no-deps "%W%\claude_agent_sdk-0.1.72-py3-none-win_arm64.whl" "%W%\ripgrep-15.0.0-py3-none-win_arm64.whl" "%W%\kaldi_native_fbank-1.22.3-cp313-cp313-win_arm64.whl" "%W%\pyclipper-1.4.0-cp313-cp313-win_arm64.whl" "%W%\tiktoken-0.12.0-cp313-cp313-win_arm64.whl" "%W%\opencv_python_headless-4.10.0.84-cp313-cp313-win_arm64.whl" "%W%\httptools-0.7.1-cp313-cp313-win_arm64.whl" "%W%\numpy-2.3.1-cp313-cp313-win_arm64.whl" "%W%\aiohttp-3.13.5-cp313-cp313-win_arm64.whl" "%W%\cryptography-45.0.5-cp313-abi3-win_arm64.whl" "%W%\MarkupSafe-2.1.5-cp313-cp313-win_arm64.whl" "%W%\soundfile-0.13.1-cp313-cp313-win_arm64.whl" "%W%\grimp-3.14-cp313-cp313-win_arm64.whl"
+"%UV_EXE%" pip install --no-deps "%W%\ripgrep-15.0.0-py3-none-win_arm64.whl" "%W%\kaldi_native_fbank-1.22.3-cp313-cp313-win_arm64.whl" "%W%\pyclipper-1.4.0-cp313-cp313-win_arm64.whl" "%W%\tiktoken-0.12.0-cp313-cp313-win_arm64.whl" "%W%\opencv_python_headless-4.10.0.84-cp313-cp313-win_arm64.whl" "%W%\httptools-0.7.1-cp313-cp313-win_arm64.whl" "%W%\numpy-2.3.1-cp313-cp313-win_arm64.whl" "%W%\aiohttp-3.13.5-cp313-cp313-win_arm64.whl" "%W%\cryptography-45.0.5-cp313-abi3-win_arm64.whl" "%W%\MarkupSafe-2.1.5-cp313-cp313-win_arm64.whl" "%W%\soundfile-0.13.1-cp313-cp313-win_arm64.whl" "%W%\grimp-3.14-cp313-cp313-win_arm64.whl"
 if errorlevel 1 exit /b 1
 (
     echo aiohttp==3.13.5
@@ -1057,7 +1050,6 @@ if errorlevel 1 exit /b 1
     echo soundfile==0.13.1
     echo tiktoken==0.12.0
     echo grimp==3.14
-    echo claude-agent-sdk==0.1.72
     echo ripgrep==15.0.0
     echo kaldi-native-fbank==1.22.3
     echo pyclipper==1.4.0

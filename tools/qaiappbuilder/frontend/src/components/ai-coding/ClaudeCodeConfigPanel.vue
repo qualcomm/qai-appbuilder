@@ -63,7 +63,6 @@ interface CcConfig {
   add_dirs: string[];
   effort: string | null;
   thinking: unknown;
-  enable_file_checkpointing: boolean;
   agents: Record<string, CcAgent>;
   include_partial_messages: boolean;
   betas: string[];
@@ -73,7 +72,6 @@ interface CcConfig {
   message_timeout_seconds: number;
   permission_approval_timeout_seconds: number;
   system_prompt: string;
-  cli_path: string;
   session_env: Record<string, string>;
   tool_catalog: { id: string; desc?: string }[];
 }
@@ -89,7 +87,6 @@ const cfg = reactive<CcConfig>({
   add_dirs: [],
   effort: null,
   thinking: null,
-  enable_file_checkpointing: false,
   agents: {},
   include_partial_messages: false,
   betas: [],
@@ -99,7 +96,6 @@ const cfg = reactive<CcConfig>({
   message_timeout_seconds: 3600,
   permission_approval_timeout_seconds: 120,
   system_prompt: "",
-  cli_path: "",
   session_env: {},
   tool_catalog: [],
 });
@@ -250,7 +246,6 @@ async function loadConfig(): Promise<void> {
     if (Array.isArray(c.add_dirs)) cfg.add_dirs = c.add_dirs as string[];
     cfg.effort = typeof c.effort === "string" ? c.effort : null;
     cfg.thinking = c.thinking ?? null;
-    cfg.enable_file_checkpointing = Boolean(c.enable_file_checkpointing);
     if (c.agents && typeof c.agents === "object") cfg.agents = c.agents as Record<string, CcAgent>;
     cfg.include_partial_messages = Boolean(c.include_partial_messages);
     if (Array.isArray(c.betas)) cfg.betas = c.betas as string[];
@@ -260,7 +255,6 @@ async function loadConfig(): Promise<void> {
     if (typeof c.message_timeout_seconds === "number") cfg.message_timeout_seconds = c.message_timeout_seconds;
     if (typeof c.permission_approval_timeout_seconds === "number") cfg.permission_approval_timeout_seconds = c.permission_approval_timeout_seconds;
     if (typeof c.system_prompt === "string") cfg.system_prompt = c.system_prompt;
-    if (typeof c.cli_path === "string") cfg.cli_path = c.cli_path;
     if (c.session_env && typeof c.session_env === "object") cfg.session_env = c.session_env as Record<string, string>;
     if (Array.isArray(c.tool_catalog)) cfg.tool_catalog = c.tool_catalog as { id: string; desc?: string }[];
     // Hydrate auth_env values into var inputs (V1 parity, owned by useCcAuth).
@@ -287,7 +281,6 @@ async function saveConfig(): Promise<void> {
       add_dirs: cfg.add_dirs,
       effort: cfg.effort,
       thinking: cfg.thinking,
-      enable_file_checkpointing: cfg.enable_file_checkpointing,
       agents: cfg.agents,
       include_partial_messages: cfg.include_partial_messages,
       betas: cfg.betas,
@@ -297,7 +290,6 @@ async function saveConfig(): Promise<void> {
       message_timeout_seconds: cfg.message_timeout_seconds,
       permission_approval_timeout_seconds: cfg.permission_approval_timeout_seconds,
       system_prompt: cfg.system_prompt,
-      cli_path: cfg.cli_path,
       session_env: cfg.session_env,
     };
     await updateCcConfig(payload);
@@ -376,10 +368,6 @@ onMounted(() => {
               {{ t("aiCoding.config.providers", "Providers") }}: {{ health.available_providers.join(", ") }}
             </span>
             <span>{{ t("aiCoding.config.modelsCount", "Models") }}: {{ health.models?.length ?? 0 }}</span>
-            <span v-if="health.sdk_available !== undefined">
-              {{ t("aiCoding.config.sdk", "SDK") }}:
-              <span :style="{ color: health.sdk_available ? '#4ade80' : '#f87171' }">{{ health.sdk_available ? "✅ " + (health.sdk_version || "") : "❌" }}</span>
-            </span>
             <span v-if="health.auth_configured !== undefined">
               {{ t("aiCoding.config.auth", "Auth") }}:
               <span :style="{ color: health.auth_configured ? '#4ade80' : '#f87171' }">{{ health.auth_configured ? "✅ " + (health.auth_source || "") : "❌" }}</span>
@@ -941,19 +929,6 @@ onMounted(() => {
             ></textarea>
           </div>
           <div class="config-field">
-            <label class="config-label">{{ t("aiCoding.config.cliPath", "CLI Path") }}</label>
-            <!-- V1 parity (ClaudeCodeConfigPanel.js:1340-1342): desc + placeholder. -->
-            <div class="config-comment">
-              {{ t("claudeCode.config.cliPathDesc", "Custom path to the Claude Code CLI executable. Leave empty to use the bundled CLI.") }}
-            </div>
-            <input
-              v-model="cfg.cli_path"
-              type="text"
-              class="config-input mono"
-              :placeholder="t('claudeCode.config.cliPathPlaceholder', 'Leave empty to use the bundled CLI')"
-            />
-          </div>
-          <div class="config-field">
             <label class="config-label">{{ t("aiCoding.config.sessionEnv", "Session Environment (KEY=VALUE)") }}</label>
             <!-- V1 parity (ClaudeCodeConfigPanel.js:1344-1366): rich
                  description (format hint + scope hint + use case + warning) +
@@ -1066,49 +1041,6 @@ onMounted(() => {
                 {{ o.label }}
               </option>
             </select>
-          </div>
-        </div>
-      </div>
-
-      <!-- ═══ ⏪ File Checkpointing ═══ -->
-      <div class="config-group">
-        <div
-          class="config-group-header"
-          @click="toggleGroup('checkpoint')"
-        >
-          <span>⏪ {{ t("aiCoding.config.fileCheckpointing", "File Checkpointing") }}</span>
-          <span
-            class="collapse-arrow"
-            :class="{ collapsed: collapsed.has('checkpoint') }"
-          >▼</span>
-        </div>
-        <div
-          v-show="!collapsed.has('checkpoint')"
-          class="config-group-body"
-        >
-          <div class="config-field qai-cc__row">
-            <label
-              class="config-label"
-              style="margin-bottom: 0;"
-            >{{ t("aiCoding.config.enableCheckpointing", "Enable File Checkpointing") }}</label>
-            <label class="toggle">
-              <input
-                v-model="cfg.enable_file_checkpointing"
-                type="checkbox"
-              />
-              <span class="toggle-slider"></span>
-            </label>
-          </div>
-          <!-- V1 parity (ClaudeCodeConfigPanel.js:1436-1441): describe the
-               feature + a yellow disk-I/O warning. -->
-          <div class="config-field">
-            <div class="config-comment">
-              {{ t("claudeCode.config.checkpointingDesc1", "When enabled, the SDK creates a file checkpoint on every user message. From the chat history, click the ") }}
-              <b>⏪ {{ t("aiCoding.panel.rewindLabel", "Rewind") }}</b>
-              {{ t("claudeCode.config.checkpointingDesc2", " button to roll files back to any historical state.") }}
-              <br />
-              <span class="cc-warning">⚠️ {{ t("claudeCode.config.checkpointingWarning", "Enabling adds disk I/O — recommend only when you actually need the \"undo Claude file edits\" feature.") }}</span>
-            </div>
           </div>
         </div>
       </div>
