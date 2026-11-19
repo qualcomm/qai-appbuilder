@@ -412,11 +412,16 @@ if ($ProbeAll) {
         @('pyfiles',  'files.pythonhosted.org',           'core',     'https://files.pythonhosted.org/',                    ''),
         @('python',   'Python 3.13 interpreter',          'core',     'https://github.com/astral-sh/python-build-standalone/releases/latest', 'https://registry.npmmirror.com/-/binary/python-build-standalone/'),
         @('github',   'GitHub releases (qai_appbuilder x64, aria2c, guard...)', 'optional', 'https://github.com/astral-sh/uv/releases/latest',  '@github'),
-        @('vendor',   'ARM64 vendor bundle',              'arm64',    'https://www.aidevhome.com/data/adh2/attr/vendor-deps.7z', ''),
         @('chromium', 'Chromium (browser tools)',         'browser',  'https://cdn.playwright.dev/',                        ($CN.Playwright + '/')),
         @('node',     'Node.js (WebUI build)',            'frontend', 'https://nodejs.org/dist/index.json',                 ($CN.Node + '/')),
         @('npm',      'npm registry (pnpm packages)',     'frontend', 'https://registry.npmjs.org/pnpm',                    ($CN.Npm + '/pnpm'))
     )
+    # The ARM64 vendor-deps bundle is no longer part of a normal install: probe its host only when it was
+    # asked for (QAI_WITH_VENDOR=1, set for --with-vendor) or explicitly selected with -Only vendor.
+    $vendorWanted = ($env:QAI_WITH_VENDOR -eq '1') -or ($Only -and (@($Only -split ',' | ForEach-Object { $_.Trim() }) -contains 'vendor'))
+    if ($vendorWanted) {
+        $items += ,@('vendor', 'ARM64 vendor bundle (opt-in)', 'arm64', 'https://www.aidevhome.com/data/adh2/attr/vendor-deps.7z', '')
+    }
     if ($Only) { $want = @($Only -split ',' | ForEach-Object { $_.Trim() }); $items = @($items | Where-Object { $want -contains $_[0] }) }
     $jobs = @()
     foreach ($it in $items) {
@@ -460,7 +465,7 @@ if ($ProbeAll) {
     }
 
     # Recommendation. GitHub is optional (aria2c / guard / ast-grep only): uv comes from a
-    # PyPI wheel, Python from the mirror in cn mode, the app wheel from PyPI or the vendor host.
+    # PyPI wheel, Python from the mirror in cn mode, the app wheel from PyPI or GitHub.
     $offOk = $res['pypi|official'].ok -and $res['pyfiles|official'].ok -and $res['python|official'].ok
     $cnOk  = $res['pypi|cn'].ok -and $res['python|cn'].ok
     if ($Only) { $rec = 'partial'; $why = 'subset probed (-Only); caller decides' }

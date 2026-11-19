@@ -7,7 +7,8 @@ REM _setup_env.bat - lean, network-tolerant environment setup for QAI AppBuilder
 REM
 REM Differences from Setup.bat (which is left untouched):
 REM   * network preflight + proxy / mirror profile (scripts\setup\net_config.ps1)
-REM   * x64 never downloads the ARM64-only vendor wheels (~170MB) or openblas
+REM   * the vendor-deps.7z bundle is NOT used any more: every dependency comes from PyPI
+REM     (ARM64 included). --with-vendor brings the old bundle back (ARM64 only)
 REM   * only the pieces needed to run the server are installed by default;
 REM     everything heavy is opt-in
 REM   * same layout as Setup.bat, so Start.bat / qai.bat / Console.bat / Uninstall.bat
@@ -33,6 +34,7 @@ set "WITH_BROWSER=0"
 set "WITH_ASTGREP=0"
 set "WITH_APPS=0"
 set "WITH_BUILDER=0"
+set "WITH_VENDOR=0"
 set "NO_PROBE=0"
 set "NO_PAUSE=0"
 
@@ -47,6 +49,7 @@ if /i "%~1"=="--with-browser" ( set "WITH_BROWSER=1" & shift & goto :parse )
 if /i "%~1"=="--with-astgrep" ( set "WITH_ASTGREP=1" & shift & goto :parse )
 if /i "%~1"=="--with-apps"    ( set "WITH_APPS=1"    & shift & goto :parse )
 if /i "%~1"=="--builder"      ( set "WITH_BUILDER=1" & shift & goto :parse )
+if /i "%~1"=="--with-vendor"  ( set "WITH_VENDOR=1"  & shift & goto :parse )
 if /i "%~1"=="--arch"   goto :opt_arch
 if /i "%~1"=="--proxy"  goto :opt_proxy
 if /i "%~1"=="--mirror" goto :opt_mirror
@@ -254,14 +257,20 @@ echo.
 echo -- Step 4/7: vendor wheels / native helpers ---------------------------------
 set "USE_VENDOR=0"
 if /i "%HOST_ARCH%"=="arm64" (
-    if not exist "vendor\whl\%VENDOR_MARKER_WHL%" (
-        call :fetch_vendor
-        if errorlevel 1 goto :fail_vendor
+    if "%WITH_VENDOR%"=="1" (
+        if not exist "vendor\whl\%VENDOR_MARKER_WHL%" (
+            call :fetch_vendor
+            if errorlevel 1 echo [WARN] vendor bundle unavailable - continuing without it ^(dependencies come from PyPI^).
+        )
+        call :tick "4a vendor-deps bundle (arm64)"
+        if exist "vendor\whl\%VENDOR_MARKER_WHL%" set "USE_VENDOR=1"
+    ) else (
+        echo [INFO] ARM64: the vendor-deps bundle is not used ^(--with-vendor to opt in^); dependencies come from PyPI.
+        echo [INFO]   Not available this way: exact token counting ^(tiktoken: coarse estimate instead^), the Claude Code SDK backend ^(HTTP backend is used^),
+        echo [INFO]   and App Builder models that need pyclipper.
     )
-    call :tick "4a vendor-deps bundle (arm64)"
-    if exist "vendor\whl\%VENDOR_MARKER_WHL%" set "USE_VENDOR=1"
 ) else (
-    echo [SKIP] x64: ARM64 vendor wheels / openblas are not needed ^(saves ~190MB^).
+    echo [SKIP] x64: the vendor-deps bundle is ARM64-only and is not used.
 )
 call :fetch_guard
 call :tick "4b guard.zip"
@@ -273,9 +282,16 @@ REM  Step 5: Python dependencies
 REM ===========================================================================
 echo.
 echo -- Step 5/7: Python dependencies --------------------------------------------
-set "_EXTRAS=--extra cc-sdk"
+REM claude-agent-sdk has no win_arm64 wheel on PyPI: its extra is only used on x64, or on ARM64 with the vendor bundle.
+set "_CCSDK=--extra cc-sdk"
+set "_SMOKE=fastapi, uvicorn, structlog, paramiko, claude_agent_sdk"
+if /i "%HOST_ARCH%"=="arm64" if not "%USE_VENDOR%"=="1" (
+    set "_CCSDK="
+    set "_SMOKE=fastapi, uvicorn, structlog, paramiko"
+)
+set "_EXTRAS=%_CCSDK%"
 if "%WITH_BROWSER%"=="1" set "_EXTRAS=%_EXTRAS% --extra search"
-if "%WITH_BUILDER%"=="1" set "_EXTRAS=--extra cc-sdk --extra search"
+if "%WITH_BUILDER%"=="1" set "_EXTRAS=%_CCSDK% --extra search"
 set "_FL="
 if "%USE_VENDOR%"=="1" (
     echo [INFO] installing vendored ARM64 wheels ^(--no-deps^)...
@@ -285,7 +301,7 @@ if "%USE_VENDOR%"=="1" (
     set "_FL=--find-links vendor\whl"
     if exist "data\downloads\_constraints.txt" set "_FL=--find-links vendor\whl -c data\downloads\_constraints.txt"
 )
-"%VPY%" -c "import fastapi, uvicorn, structlog, paramiko, claude_agent_sdk" >nul 2>&1
+"%VPY%" -c "import %_SMOKE%" >nul 2>&1
 if not errorlevel 1 if "%WITH_BROWSER%"=="0" if "%WITH_BUILDER%"=="0" (
     echo [SKIP] dependency closure already importable.
     goto :deps_done
@@ -412,14 +428,6 @@ echo [ERROR] Could not create the Python virtual environment ^(see the uv messag
 echo [ERROR] If it is a download error ^(HTTP 403 / 404 / timeout^): check the network, then try --mirror cn / --mirror official, or --proxy http://host:port
 echo [ERROR] Re-running _setup_env.bat is safe: it only fetches what is missing.
 goto :fail
-:fail_vendor
-echo [ERROR] The ARM64 vendor bundle ^(vendor-deps.7z^) could not be downloaded or unpacked, so the install is stopped:
-echo [ERROR] ARM64 needs its wheels ^(aiohttp, cryptography, numpy, qai_appbuilder ...^) and they are not on PyPI.
-echo [ERROR]   * Just run _setup_env.bat again ^(a damaged archive is deleted automatically^).
-echo [ERROR]   * Slow or blocked link: use --proxy http://host:port
-echo [ERROR]   * Manual download: %VDEPS_URL%
-echo [ERROR]     save it as  %ROOT_DIR%%DL_DIR%\vendor-deps.7z  and run _setup_env.bat again.
-goto :fail
 :fail_install
 echo [ERROR] dependency install failed. Re-run is safe ^(resumes^). Try --mirror cn or --proxy http://host:port
 goto :fail
@@ -447,13 +455,15 @@ echo   --no-probe             skip the connectivity probe
 echo   --with-browser         Playwright + Chromium ^(~150MB; browser search / browser tool^)
 echo   --with-astgrep         ast-grep CLI ^(ast_grep / ast_edit tools^)
 echo   --with-apps            App Builder pack deps ^(whisper / melotts / ocr^)
+echo   --with-vendor          ARM64 only: also download the vendor-deps.7z bundle ^(~210MB, aidevhome.com^).
+echo                          Off by default: every dependency is taken from PyPI instead.
 echo   --builder              model-conversion environment ^(ONNX -^> NPU .bin^): QAIRT SDK ~2GB,
 echo                          x86_64 Python 3.10 converter venv, qairt_env.json ^(no Visual Studio needed^)
 echo   --no-pause             do not pause at the end
 echo.
 echo Environment variables:
 echo   QAI_NO_PYPI_EXE=1      do not take uv / ast-grep from their PyPI wheels; use the GitHub releases
-echo   QAI_UNPACK=7zr         unpack vendor-deps.7z with 7zr.exe instead of the built-in tar.exe
+echo   QAI_UNPACK=7zr         with --with-vendor: unpack vendor-deps.7z with 7zr.exe instead of the built-in tar.exe
 echo   QAI_GITHUB_MIRROR=URL  prefix for github.com downloads ^(set automatically for --mirror cn, and for auto when github.com is unreachable^)
 echo.
 echo uv and ast-grep come from PyPI wheels ^(pypi.org, or the tuna mirror first for cn^), so a blocked
@@ -686,7 +696,7 @@ if not exist "%DL_DIR%\vendor-deps.7z" (
     call :dl "%VDEPS_URL%" "%DL_DIR%\vendor-deps.7z" 20000000 1800
 )
 if not exist "%DL_DIR%\vendor-deps.7z" (
-    echo [ERROR] vendor-deps.7z download failed.
+    echo [WARN] vendor-deps.7z download failed.
     exit /b 1
 )
 REM Unpack: the Windows built-in tar.exe ^(bsdtar^) reads .7z, so no extra download. The archive uses an
@@ -709,7 +719,7 @@ if /i not "%QAI_UNPACK%"=="7zr" if exist "%SystemRoot%\System32\tar.exe" (
 )
 if not defined _UNPACKED call :unpack_7zr
 if not defined _UNPACKED (
-    echo [ERROR] vendor-deps.7z could not be unpacked ^(damaged download?^). The file was deleted so the next run fetches a fresh copy.
+    echo [WARN] vendor-deps.7z could not be unpacked ^(damaged download?^). The file was deleted so the next run fetches a fresh copy.
     del /f /q "%DL_DIR%\vendor-deps.7z" 2>nul
     rmdir /s /q "%_VD%" 2>nul
     exit /b 1
@@ -718,7 +728,7 @@ if not exist "vendor" mkdir "vendor"
 powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$t='%_VD%'; $s= if (Test-Path (Join-Path $t 'vendor')) { Join-Path $t 'vendor' } else { $t }; foreach ($n in 'whl','tiktoken','nltk_data','g2p_data') { $p=Join-Path $s $n; if (Test-Path $p) { Copy-Item -LiteralPath $p -Destination 'vendor' -Recurse -Force } }; New-Item -ItemType Directory -Force 'vendor\bin\arm64' | Out-Null; $b=Join-Path $s 'bin\arm64'; if (Test-Path $b) { Copy-Item -Path (Join-Path $b '*') -Destination 'vendor\bin\arm64' -Recurse -Force -Exclude 'guard64.dll','guard-injector.exe' }"
 rmdir /s /q "%_VD%" 2>nul
 if not exist "vendor\whl\%VENDOR_MARKER_WHL%" (
-    echo [ERROR] the unpacked bundle has no vendor\whl\%VENDOR_MARKER_WHL% ^(wrong or incomplete archive^).
+    echo [WARN] the unpacked bundle has no vendor\whl\%VENDOR_MARKER_WHL% ^(wrong or incomplete archive^).
     del /f /q "%DL_DIR%\vendor-deps.7z" 2>nul
     exit /b 1
 )
