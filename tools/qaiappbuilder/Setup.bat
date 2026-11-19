@@ -255,7 +255,6 @@ REM revoked from PyPI for cp313 ARM64 and the local copies are the only
 REM source.  See vendor\whl\README.md.
 REM qai_appbuilder is NOT vendored any more: its version follows scripts\qairt_release.json and it is downloaded from
 REM the GitHub release (see Step 4e), so the bundled vendor\whl copy (an older version) is ignored.
-set "WHL_CLAUDE_AGENT_SDK=vendor\whl\claude_agent_sdk-0.1.72-py3-none-win_arm64.whl"
 set "WHL_RIPGREP=vendor\whl\ripgrep-15.0.0-py3-none-win_arm64.whl"
 set "WHL_KALDI=vendor\whl\kaldi_native_fbank-1.22.3-cp313-cp313-win_arm64.whl"
 set "WHL_PYCLIPPER=vendor\whl\pyclipper-1.4.0-cp313-cp313-win_arm64.whl"
@@ -605,7 +604,7 @@ REM State-Truth-First (AGENTS.md): probe the REAL completion marker, not a
 REM proxy. The old check imported only ``fastapi`` -- but fastapi is one of
 REM the FIRST packages to land during ``uv pip install -r pyproject.toml``,
 REM so a run that was interrupted after fastapi but before the rest
-REM (structlog, claude_agent_sdk, ...) would leave a HALF-installed venv that
+REM (structlog, croniter, ...) would leave a HALF-installed venv that
 REM still passed ``import fastapi`` -- and the skip below then made that
 REM broken state permanent (Setup printed SUCCESS but Start.bat crashed with
 REM ``No module named 'structlog'``).
@@ -614,14 +613,6 @@ REM Fix: require the WHOLE dependency closure to import -- NOT ``qai`` itself
 REM (the app source is never installed into this venv; it is loaded via
 REM PYTHONPATH from %ROOT_DIR%src, see above) -- and ``structlog`` (a
 REM late-installed runtime dep). If ANY is missing we do NOT skip; we fall
-REM
-REM ``claude_agent_sdk`` is included in the probe too: Step 4a installs its
-REM vendored wheel with ``--no-deps`` and Step 4b2 resolves its ``mcp`` (and
-REM sub-deps) via the ``[cc-sdk]`` extra. A venv left by an OLDER Setup.bat that
-REM installed the SDK wheel but never pulled ``mcp`` imports ``fastapi/.../qai``
-REM fine yet fails ``import claude_agent_sdk`` (``No module named 'mcp'``) and
-REM degrades the CC backend to pure-HTTP. Probing it here makes such a venv
-REM fall through to the (idempotent) install so the missing ``mcp`` is healed.
 REM
 REM ``croniter`` is probed for the same self-heal reason: it is a runtime dep
 REM (pyproject [project].dependencies) added with the scheduled-task feature,
@@ -648,12 +639,9 @@ REM ``browserforge`` is probed for the same reason: it generates the dynamic
 REM per-request browser fingerprint the keyless scrapers use to evade bot
 REM detection (import-guarded, so its absence only drops back to a static
 REM header set), and ships a pure-Python wheel so probing it forces no rebuild.
-REM claude_agent_sdk has no win_arm64 wheel on PyPI: on ARM64 without --with-vendor it is not part of the closure.
-set "_CHECK_MODS=fastapi, uvicorn, structlog, claude_agent_sdk, croniter, playwright, selectolax, lxml, browserforge, paramiko"
-if /i "%HOST_ARCH%"=="arm64" if not "%WITH_VENDOR%"=="1" set "_CHECK_MODS=fastapi, uvicorn, structlog, croniter, playwright, selectolax, lxml, browserforge, paramiko"
-"%VENV_DIR%\Scripts\python.exe" -c "import %_CHECK_MODS%" >nul 2>&1
+"%VENV_DIR%\Scripts\python.exe" -c "import fastapi, uvicorn, structlog, croniter, playwright, selectolax, lxml, browserforge, paramiko" >nul 2>&1
 if not errorlevel 1 (
-    echo [SKIP] Dependencies already installed and complete ^(fastapi, uvicorn, structlog, claude_agent_sdk, croniter, playwright, paramiko^). Skipping pip steps.
+    echo [SKIP] Dependencies already installed and complete ^(fastapi, uvicorn, structlog, croniter, playwright, paramiko^). Skipping pip steps.
     goto :skip_all_installs
 )
 echo [INFO] Dependency closure incomplete or missing; running full install to ^(re^)complete it...
@@ -674,8 +662,7 @@ REM sdist (and fail because the dev box has no native toolchain).
 REM
 REM ``--no-deps`` is critical: a couple of these wheels declare
 REM transitive dependencies that PyPI only ships as sdist on ARM64
-REM (e.g. claude-agent-sdk -> mcp -> pyjwt[crypto] -> cryptography sdist
-REM for newer versions).  We just want the wheel file unpacked into the
+REM (e.g. a wheel that needs a newer cryptography sdist).  We just want the wheel file unpacked into the
 REM venv; the proper resolution of all transitives happens in step 4b2.
 REM
 REM IMPORTANT: vendor\whl\ files are precious - three wheels
@@ -692,14 +679,13 @@ set "VENDOR_WHLS_INSTALLED=0"
 if /i "%HOST_ARCH%"=="x64" goto :skip_vendor_whls
 if not "%WITH_VENDOR%"=="1" (
     echo [INFO] ARM64: the vendor-deps bundle is not used ^(pass --with-vendor to opt in^); dependencies come from PyPI.
-    echo [INFO]   Not available this way: exact token counting ^(tiktoken: coarse estimate instead^), the Claude Code SDK backend ^(HTTP backend is used^),
+    echo [INFO]   Not available this way: exact token counting ^(tiktoken: coarse estimate instead^)
     echo [INFO]   and App Builder models that need pyclipper.
     goto :skip_vendor_whls
 )
 if not exist "%WHL_DIR%" goto :skip_vendor_whls
 echo [INFO] Installing pre-built ARM64 wheels from %WHL_DIR%...
 uv pip install --no-deps ^
-    "%WHL_CLAUDE_AGENT_SDK%" ^
     "%WHL_RIPGREP%" ^
     "%WHL_KALDI%" ^
     "%WHL_PYCLIPPER%" ^
@@ -726,7 +712,6 @@ REM upgrade them and rebuild from sdist.
     echo soundfile==0.13.1
     echo tiktoken==0.12.0
     echo grimp==3.14
-    echo claude-agent-sdk==0.1.72
     echo ripgrep==15.0.0
     echo kaldi-native-fbank==1.22.3
     echo pyclipper==1.4.0
@@ -761,26 +746,7 @@ REM %ROOT_DIR%src before invoking ``python -m apps.cli`` /
 REM ``apps.cli.serve`` / ``scripts.init.uninstall`` directly, so each
 REM installation always resolves its own source regardless of which project
 REM last ran Setup.bat in this venv.
-REM
-REM The ``[cc-sdk]`` extra is included so the Claude Code SDK backend
-REM (``claude_agent_sdk``, V1 file checkpoint/rewind parity) is actually
-REM USABLE: Step 4a pre-installs the vendored ARM64 ``claude_agent_sdk`` wheel
-REM with ``--no-deps``, which deliberately skips its transitive dependencies
-REM (chiefly ``mcp``). Without this extra, ``import claude_agent_sdk`` fails at
-REM ``from mcp.types import ToolAnnotations`` with ``No module named 'mcp'`` and
-REM the CC backend silently degrades to the pure-HTTP adapter. Resolving the
-REM ``[cc-sdk]`` extra here pulls ``mcp`` (and its sub-deps: httpx-sse /
-REM jsonschema / pyjwt / pywin32 / sse-starlette / rpds-py, all wheels on PyPI
-REM / vendor\whl) so the SDK imports cleanly. ``claude_agent_sdk`` itself stays
-REM satisfied by the already-installed vendored wheel (``--find-links``).
-REM The extra remains OPTIONAL in pyproject.toml (cloud-only / Linux installs
-REM that never run Setup.bat are not forced to pull it; the SDK provider is
-REM import-guarded) -- Setup.bat is the Windows full-install entry point, so it
-REM enables the extra explicitly here.
-REM claude-agent-sdk has no win_arm64 wheel on PyPI: the cc-sdk extra is only used on x64, or on ARM64 with the vendored wheel.
-set "CC_EXTRA=--extra cc-sdk"
-if /i "%HOST_ARCH%"=="arm64" if not "%VENDOR_WHLS_INSTALLED%"=="1" set "CC_EXTRA="
-echo [INFO] Installing dependencies ^(uv pip install -r pyproject.toml %CC_EXTRA% --extra search^)...
+echo [INFO] Installing dependencies ^(uv pip install -r pyproject.toml --extra search^)...
 REM The ``search`` extra (playwright + selectolax + lxml) is a RUNTIME extra
 REM installed by DEFAULT (not gated on --dev). TWO runtime features depend on
 REM it: (1) the ``web`` search provider's browser-backed ``google_browser``
@@ -790,10 +756,10 @@ REM control). Both share the SAME pinned ``playwright==1.61.0`` + the Chromium
 REM binary fetched in Step 4d, so installing this by default gives end users
 REM both the browser search path AND the browser tool out of the box.
 if exist "_constraints_tmp.txt" (
-    uv pip install -r pyproject.toml %CC_EXTRA% --extra search --find-links "%WHL_DIR%" -c "_constraints_tmp.txt"
+    uv pip install -r pyproject.toml --extra search --find-links "%WHL_DIR%" -c "_constraints_tmp.txt"
 ) else (
     REM x64, or ARM64 without the vendor bundle: resolve everything from PyPI.
-    uv pip install -r pyproject.toml %CC_EXTRA% --extra search
+    uv pip install -r pyproject.toml --extra search
 )
 if errorlevel 1 goto :install_error
 
@@ -817,10 +783,10 @@ if not "%DEV_EXTRAS%"=="1" (
 )
 echo [INFO] Installing dev + e2e extras from pyproject.toml...
 if exist "_constraints_tmp.txt" (
-    uv pip install --find-links "%WHL_DIR%" -c "_constraints_tmp.txt" -r pyproject.toml --extra dev --extra e2e %CC_EXTRA%
+    uv pip install --find-links "%WHL_DIR%" -c "_constraints_tmp.txt" -r pyproject.toml --extra dev --extra e2e
 ) else (
     REM x64, or ARM64 without the vendor bundle: resolve everything from PyPI.
-    uv pip install -r pyproject.toml --extra dev --extra e2e %CC_EXTRA%
+    uv pip install -r pyproject.toml --extra dev --extra e2e
 )
 if errorlevel 1 goto :install_error
 
