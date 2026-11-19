@@ -16,6 +16,7 @@
 #include "log.h"
 #include "utils.h"
 #include "llama_speculative_config.h"
+#include "llama_placement.h"
 #include "degenerate_repeat_guard.h"
 #include "think_budget_floor.h"
 #include "watermark_provider_host.h"
@@ -30,8 +31,18 @@
 #include <chrono>
 #include <atomic>
 #include <cstddef>
+#include <cstdlib>
+#include <mutex>
+#include <string>
 #include <utility>
 #include <vector>
+
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace fs = std::filesystem;
 
@@ -43,6 +54,220 @@ static std::atomic<int> g_degenerate_repeat_guard_max_period{128};
 static std::atomic<int> g_degenerate_repeat_guard_min_span_bytes{256};
 static std::mutex g_llama_backend_mutex;
 static std::atomic<int> g_llama_backend_refs{0};
+
+#if defined(_WIN32)
+static std::wstring ModuleDirectory(HMODULE module)
+{
+    std::wstring buffer(MAX_PATH * 2, L'\0');
+    const DWORD length = GetModuleFileNameW(module, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (length == 0 || length >= buffer.size())
+    {
+        return {};
+    }
+    buffer.resize(length);
+    return fs::path(buffer).parent_path().wstring();
+}
+
+static std::string WideToUtf8(const std::wstring &wide)
+{
+    if (wide.empty())
+    {
+        return {};
+    }
+    const int size = WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()),
+                                         nullptr, 0, nullptr, nullptr);
+    if (size <= 0)
+    {
+        return {};
+    }
+    std::string utf8(static_cast<size_t>(size), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()),
+                        utf8.data(), size, nullptr, nullptr);
+    return utf8;
+}
+
+static std::wstring TrimTrailingSeparators(std::wstring path)
+{
+    while (!path.empty() && (path.back() == L'\\' || path.back() == L'/'))
+    {
+        path.pop_back();
+    }
+    return path;
+}
+
+static bool PathListContains(const std::wstring &list, const std::wstring &dir)
+{
+    const std::wstring target = TrimTrailingSeparators(dir);
+    size_t start = 0;
+    while (start <= list.size())
+    {
+        size_t end = list.find(L';', start);
+        if (end == std::wstring::npos)
+        {
+            end = list.size();
+        }
+        const std::wstring segment = TrimTrailingSeparators(list.substr(start, end - start));
+        if (!segment.empty() &&
+            CompareStringOrdinal(segment.c_str(), -1, target.c_str(), -1, TRUE) == CSTR_EQUAL)
+        {
+            return true;
+        }
+        start = end + 1;
+    }
+    return false;
+}
+#endif
+
+static void LogHexagonError(const char *what) noexcept
+{
+    try
+    {
+        My_Log{My_Log::Level::kWarning} << "[Hexagon] environment/device probe failed: " << what << std::endl;
+    }
+    catch (...)
+    {
+    }
+}
+
+static bool PrepareHexagonEnvironment()
+{
+    static std::once_flag once;
+    static bool dll_found = false;
+#if defined(_WIN32)
+    std::call_once(once, []()
+    {
+        try
+        {
+            std::vector<std::wstring> candidates;
+            if (HMODULE loaded = GetModuleHandleW(L"ggml-hexagon.dll"))
+            {
+                candidates.push_back(ModuleDirectory(loaded));
+            }
+            candidates.push_back(ModuleDirectory(nullptr));
+            {
+                std::error_code cwd_ec;
+                const fs::path cwd = fs::current_path(cwd_ec);
+                if (!cwd_ec)
+                {
+                    candidates.push_back(cwd.wstring());
+                }
+            }
+
+            std::wstring dir;
+            for (const auto &candidate: candidates)
+            {
+                std::error_code ec;
+                if (!candidate.empty() && fs::exists(fs::path(candidate) / L"ggml-hexagon.dll", ec))
+                {
+                    dir = candidate;
+                    break;
+                }
+            }
+            if (dir.empty())
+            {
+                return;
+            }
+            dll_found = true;
+
+            std::wstring current;
+            const DWORD needed = GetEnvironmentVariableW(L"ADSP_LIBRARY_PATH", nullptr, 0);
+            if (needed > 1)
+            {
+                current.resize(needed);
+                const DWORD copied = GetEnvironmentVariableW(L"ADSP_LIBRARY_PATH", current.data(), needed);
+                current.resize(copied);
+            }
+            if (PathListContains(current, dir))
+            {
+                My_Log{} << "[Hexagon] ADSP_LIBRARY_PATH already contains " << WideToUtf8(dir) << "\n";
+                return;
+            }
+            std::wstring value = current;
+            if (!value.empty() && value.back() != L';')
+            {
+                value += L';';
+            }
+            value += dir;
+            _wputenv_s(L"ADSP_LIBRARY_PATH", value.c_str());
+            My_Log{} << "[Hexagon] ADSP_LIBRARY_PATH=" << WideToUtf8(value) << "\n";
+        }
+        catch (const std::exception &e)
+        {
+            LogHexagonError(e.what());
+        }
+        catch (...)
+        {
+            LogHexagonError("unknown error");
+        }
+    });
+#else
+    (void) once;
+#endif
+    return dll_found;
+}
+
+void EnsureGgmlBackendsLoaded()
+{
+    static std::once_flag once;
+    std::call_once(once, []()
+    {
+        PrepareHexagonEnvironment();
+        ggml_backend_load_all();
+    });
+}
+
+bool LlamaCppHasHtpDevice()
+{
+    static std::once_flag once;
+    static bool has_htp = false;
+    std::call_once(once, []()
+    {
+        try
+        {
+            const bool dll_found = PrepareHexagonEnvironment();
+            EnsureGgmlBackendsLoaded();
+
+            std::string registered;
+            const size_t count = ggml_backend_dev_count();
+            for (size_t i = 0; i < count; ++i)
+            {
+                const char *name = ggml_backend_dev_name(ggml_backend_dev_get(i));
+                registered += std::string(registered.empty() ? "" : ", ") + (name ? name : "?");
+            }
+
+            ggml_backend_dev_t htp = ggml_backend_dev_by_name("HTP0");
+            has_htp = htp != nullptr;
+            if (has_htp)
+            {
+                const char *desc = ggml_backend_dev_description(htp);
+                My_Log{} << "[Hexagon] HTP0 available (" << (desc ? desc : "") << "); ggml devices: "
+                         << registered << "\n";
+            }
+            else if (!dll_found)
+            {
+                My_Log{My_Log::Level::kWarning}
+                    << "[Hexagon] HTP0 unavailable: ggml-hexagon.dll not found in the host exe directory or the current directory; ggml devices: "
+                    << registered << std::endl;
+            }
+            else
+            {
+                My_Log{My_Log::Level::kWarning}
+                    << "[Hexagon] HTP0 unavailable: ggml-hexagon.dll was found but registered no HTP0 device "
+                       "(check NPU driver, htp skel/.cat next to the dll, test signing); ggml devices: "
+                    << registered << std::endl;
+            }
+        }
+        catch (const std::exception &e)
+        {
+            LogHexagonError(e.what());
+        }
+        catch (...)
+        {
+            LogHexagonError("unknown error");
+        }
+    });
+    return has_htp;
+}
 
 static inline int64_t now_ms()
 {
@@ -1568,8 +1793,9 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
         My_Log{My_Log::Level::kDebug}
             << "[LLAMACpp] Failed to read optional draft_model field from model config.json, ignored\n";
     }
-    const bool speculative_requested = draft_config.present && !draft_config.path.empty();
+    bool speculative_requested = draft_config.present && !draft_config.path.empty();
 
+    PrepareHexagonEnvironment();
 #if defined(_WIN32)
     _putenv_s("GGML_OPENCL_ADRENO_USE_LARGE_BUFFER", "1");
 #else
@@ -1592,6 +1818,68 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
     std::string device = model_config_.get_device();
     std::transform(device.begin(), device.end(), device.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    std::vector<std::string> configured_devices = model_config_.get_devices_effective();
+    if (configured_devices.empty())
+    {
+        configured_devices = {device == "cpu" ? "cpu" : (device == "npu" ? "npu" : "gpu")};
+    }
+    const auto configured_has = [&configured_devices](const char *name)
+    {
+        return std::find(configured_devices.begin(), configured_devices.end(), name) != configured_devices.end();
+    };
+    bool want_npu = configured_has("npu");
+    bool want_gpu = configured_has("gpu");
+    const bool want_cpu_share = configured_has("cpu");
+    if (want_npu && !LlamaCppHasHtpDevice())
+    {
+        My_Log{My_Log::Level::kWarning}
+            << "[LLAMACppBuilder] npu requested (device=" << device
+            << ") but HTP0 is not registered; falling back to GPUOpenCL" << std::endl;
+        want_npu = false;
+        want_gpu = true;
+    }
+    if (!want_npu && !want_gpu)
+    {
+        device = "cpu";
+    }
+    bool htp_draft_dropped = false;
+    if (speculative_requested && want_npu)
+    {
+        My_Log{My_Log::Level::kWarning}
+            << "[LLAMACppBuilder] speculative decoding is disabled on HTP0 (the DSP aborts the draft warm-up decode with "
+               "dspqueue_read 0x2e); loading the main model without the draft model on "
+            << (want_gpu ? "HTP0+GPUOpenCL" : "HTP0") << std::endl;
+        speculative_requested = false;
+        htp_draft_dropped = true;
+    }
+    std::vector<std::string> accelerators;
+    for (const auto &name: configured_devices)
+    {
+        if ((name == "npu" && want_npu) || (name == "gpu" && want_gpu))
+        {
+            accelerators.emplace_back(name == "npu" ? "HTP0" : "GPUOpenCL");
+        }
+    }
+    if (want_gpu && std::find(accelerators.begin(), accelerators.end(), "GPUOpenCL") == accelerators.end())
+    {
+        accelerators.emplace_back("GPUOpenCL");
+    }
+    std::string accelerator_list;
+    for (const auto &name: accelerators)
+    {
+        accelerator_list += (accelerator_list.empty() ? "" : ",") + name;
+    }
+    {
+        std::string devices_text;
+        for (const auto &d: configured_devices)
+        {
+            devices_text += (devices_text.empty() ? "" : "+") + d;
+        }
+        My_Log{} << "[LLAMACppBuilder] device=" << device << ", devices_effective="
+                 << (devices_text.empty() ? "(legacy)" : devices_text) << ", accelerators="
+                 << (accelerator_list.empty() ? "none(cpu)" : accelerator_list) << "\n";
+    }
 
     const llama_runtime::RuntimePlan *plan =
         (speculative_requested && model_config_.has_runtime_plan()) ? &model_config_.runtime_plan()
@@ -1679,7 +1967,11 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
         const int draft_n_gpu_layers = model_config_.is_speculative_draft_forced_cpu()
                                            ? 0
                                            : draft_config.n_gpu_layers;
-        if (device != "cpu" && draft_n_gpu_layers >= 0)
+        if (device == "cpu")
+        {
+            arg_strings.insert(arg_strings.end(), {"-ngld", "0"});
+        }
+        else if (draft_n_gpu_layers >= 0)
         {
             arg_strings.insert(arg_strings.end(), {"-ngld", std::to_string(draft_n_gpu_layers)});
         }
@@ -1765,6 +2057,22 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
                                       << "; clamping n_ubatch to n_batch." << std::endl;
         n_ubatch = n_batch;
     }
+    constexpr int kHtpLargeModelUbatch = 128;
+    if (want_npu && configured_n_ubatch <= 0 && n_ubatch > kHtpLargeModelUbatch)
+    {
+        const uint64_t htp_budget = llama_speculative::GetTotalPhysicalMemoryBytes() / 2;
+        const uint64_t htp_need =
+            want_gpu ? 0 : llama_speculative::EstimateHtpMappedBytes(gguf_path, static_cast<uint64_t>(n_ctx));
+        if (htp_draft_dropped || want_gpu || htp_need > htp_budget)
+        {
+            My_Log{My_Log::Level::kWarning}
+                << "[LLAMACppBuilder] HTP0 n_ubatch " << n_ubatch << " -> " << kHtpLargeModelUbatch
+                << " (draft dropped on HTP0: " << (htp_draft_dropped ? 1 : 0) << ", mapped estimate "
+                << (htp_need >> 20) << " MiB, budget " << (htp_budget >> 20) << " MiB = half of physical memory)"
+                << std::endl;
+            n_ubatch = kHtpLargeModelUbatch;
+        }
+    }
     if (model_config_.is_speculative_reduced_ubatch() && n_ubatch > 1)
     {
         const int reduced = n_ubatch / 2;
@@ -1783,16 +2091,63 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
     }
     else if (!speculative_requested)
     {
-
-        arg_strings.insert(arg_strings.end(), {
-            "--device", "GPUOpenCL",
-            "-ngl", "99",
-            "--load-mode", "none",
-            "--no-repack",
-            "--no-host",
-        });
+        int n_gpu_layers = 99;
+        std::string tensor_split;
+        if (accelerators.size() > 1 || want_cpu_share)
+        {
+            std::vector<uint64_t> budgets;
+            for (const auto &name: accelerators)
+            {
+                budgets.push_back(llama_placement::WithMargin(
+                    name == "HTP0" ? llama_speculative::GetHtpBudgetBytes() : llama_speculative::GetGpuFreeBytes()));
+            }
+            const uint64_t need = llama_speculative::EstimateHtpMappedBytes(gguf_path, static_cast<uint64_t>(n_ctx));
+            const uint32_t n_layers = llama_speculative::ReadGgufBlockCount(gguf_path);
+            const bool budgets_known = need > 0 && n_layers > 0 &&
+                                       std::all_of(budgets.begin(), budgets.end(),
+                                                   [](uint64_t budget) { return budget > 0; });
+            if (budgets_known)
+            {
+                const llama_placement::Split split =
+                    llama_placement::ComputeSplit(budgets, need, n_layers, want_cpu_share);
+                n_gpu_layers = split.n_gpu_layers;
+                if (accelerators.size() > 1)
+                {
+                    for (const uint64_t share: split.shares)
+                    {
+                        tensor_split += (tensor_split.empty() ? "" : ",") +
+                                        std::to_string(std::max<uint64_t>(1, share >> 20));
+                    }
+                }
+                My_Log{My_Log::Level::kWarning}
+                    << "[LLAMACppBuilder] placement split: devices=" << accelerator_list
+                    << (want_cpu_share ? "+cpu" : "") << ", need_mib=" << (need >> 20)
+                    << ", ngl=" << n_gpu_layers << ", ts=" << (tensor_split.empty() ? "(default)" : tensor_split)
+                    << std::endl;
+            }
+            else
+            {
+                if (want_cpu_share && n_layers > 0)
+                {
+                    n_gpu_layers = std::max<int>(1, static_cast<int>(n_layers * 9 / 10));
+                }
+                My_Log{My_Log::Level::kWarning}
+                    << "[LLAMACppBuilder] device budgets unknown, using llama.cpp default split (ngl="
+                    << n_gpu_layers << ")" << std::endl;
+            }
+        }
+        arg_strings.insert(arg_strings.end(), {"--device", accelerator_list, "-ngl", std::to_string(n_gpu_layers)});
+        if (!tensor_split.empty())
+        {
+            arg_strings.insert(arg_strings.end(), {"-ts", tensor_split});
+        }
+        arg_strings.insert(arg_strings.end(), {"--load-mode", "none", "--no-repack", "--no-host"});
     }
-    if (device != "cpu")
+    else if (LlamaCppHasHtpDevice())
+    {
+        arg_strings.insert(arg_strings.end(), {"--device", "GPUOpenCL", "-devd", "GPUOpenCL"});
+    }
+    if (device != "cpu" && !want_npu)
     {
         const bool user_ot = std::any_of(configured_extra_args.begin(), configured_extra_args.end(),
                                          [](const std::string &a) { return a == "-ot" || a == "--override-tensor"; });
@@ -1889,6 +2244,7 @@ LLAMACppBuilder::LLAMACppBuilder(const ModelInstanceConfig &config) :
     }
 
     My_Log{} << "[LLAMACpp] Loaded params: device=" << device
+             << ", accelerators=" << (accelerator_list.empty() ? "none(cpu)" : accelerator_list)
              << ", n_ctx=" << params.n_ctx
              << ", n_gpu_layers=" << params.n_gpu_layers
              << ", no_extra_bufts=" << params.no_extra_bufts

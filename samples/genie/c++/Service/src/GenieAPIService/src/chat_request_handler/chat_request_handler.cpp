@@ -254,6 +254,10 @@ void ChatRequestHandler::FetchModelList(const httplib::Request &req, httplib::Re
                 m["context_length"] = loaded->config->get_context_size();
                 m["backend"]        = loaded->backend;
                 m["device"]         = loaded->device;
+                if (!loaded->devices_effective.empty())
+                {
+                    m["devices_effective"] = loaded->devices_effective;
+                }
                 break;
             }
         }
@@ -276,6 +280,10 @@ void ChatRequestHandler::FetchModelList(const httplib::Request &req, httplib::Re
         m["context_length"] = loaded->config->get_context_size();
         m["backend"]        = loaded->backend;
         m["device"]         = loaded->device;
+        if (!loaded->devices_effective.empty())
+        {
+            m["devices_effective"] = loaded->devices_effective;
+        }
         model_list.push_back(m);
     }
 

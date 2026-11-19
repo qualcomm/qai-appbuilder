@@ -13,6 +13,9 @@
 
 #include "../context/llama_runtime_planner.h"
 
+#include <string>
+#include <vector>
+
 using json = nlohmann::ordered_json;
 
 class ModelInstanceConfig
@@ -104,6 +107,12 @@ public:
     const std::string &get_device() const { return device_; }
     void set_device(const std::string &device) { device_ = device; }
 
+    const std::vector<std::string> &get_devices() const { return devices_; }
+    void set_devices(const std::vector<std::string> &devices) { devices_ = devices; }
+
+    const std::vector<std::string> &get_devices_effective() const { return devices_effective_; }
+    void set_devices_effective(const std::vector<std::string> &devices) { devices_effective_ = devices; }
+
     const std::string &get_tool_prompt_template() const { return tool_prompt_template_; }
     void set_tool_prompt_template(const std::string &template_str) { tool_prompt_template_ = template_str; }
 
@@ -140,6 +149,8 @@ private:
 
     std::string backend_ = "GGUF";
     std::string device_ = "gpu";
+    std::vector<std::string> devices_;
+    std::vector<std::string> devices_effective_;
 
     std::string tool_prompt_template_ = "\n# Tools\n\n"
                                         "You may call one or more functions to assist with the user query.\n"
