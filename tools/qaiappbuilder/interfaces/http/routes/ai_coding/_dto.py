@@ -145,10 +145,9 @@ def _build_session_config(
     # means "no filter".
     if isinstance(raw.get("skills"), list):
         kwargs["skills"] = tuple(str(s) for s in raw["skills"])
-    # CC SDK file checkpoint/rewind backend (V1 ``session_manager.py``):
-    # per-session opt-in to the ``claude_agent_sdk`` CLI subprocess adapter
-    # (real on-disk checkpoint/rewind).  Default kept at the V1 defaults
-    # (``http`` / off) so historical spawns are unchanged.
+    # Deprecated (the ``claude_agent_sdk`` backend was removed): still read so
+    # clients / stored configs that send them keep working; they have no
+    # effect and ``cc_backend="sdk"`` is normalised to ``"http"``.
     if isinstance(raw.get("cc_backend"), str):
         kwargs["cc_backend"] = raw["cc_backend"]
     if isinstance(raw.get("cli_path"), str):

@@ -204,12 +204,9 @@ from qai.ai_coding.domain import (
 from qai.ai_coding.infrastructure.claude_md_injector import ClaudeMdInjector
 from qai.ai_coding.infrastructure.providers import (
     ClaudeCodeProvider,
-    ClaudeCodeSdkProvider,
     HttpxTransport,
     MultiProviderCodingAdapter,
     OpenCodeProvider,
-    claude_sdk_available,
-    locate_claude_cli,
 )
 from qai.ai_coding.infrastructure.tools import (
     build_default_tool_handlers,
@@ -378,34 +375,6 @@ _CC_NON_SECRET_ENV_VARS: tuple[str, ...] = (
 )
 
 
-def _claude_sdk_probe() -> tuple[bool, str]:
-    """Return ``(sdk_available, sdk_version)`` for the Claude Code SDK.
-
-    Mirrors V1:
-
-    * SDK importable + has ``__version__``  → ``(True, "<version>")``.
-    * SDK importable, no ``__version__``    → ``(True, "unknown")`` —
-      V1 fallback (``getattr(claude_agent_sdk,
-      "__version__", "unknown")``).
-    * SDK not importable                    → ``(False, "")`` — V1
-      ``sdk_version = ""`` initialiser.
-
-    Defined here in the apps layer (NOT in ``qai.ai_coding.application``
-    or domain) so the SDK import never crosses the domain-purity /
-    import-linter boundary.  Promoted to a module-level helper (vs the
-    in-builder closure used by PR-105) so the V1-parity behaviour is
-    directly unit-testable without spinning up a full Container —
-    matches judge 1 (V2 architecture more testable than V1's inline
-    route handler block).
-
-    Best-effort: never raises (a broken SDK install must not break the
-    folded ``/api/{cc|oc}/health`` route).
-    """
-    try:
-        import claude_agent_sdk  # type: ignore[import-untyped]
-    except Exception:  # noqa: BLE001 — SDK optional / not installed.
-        return False, ""
-    return True, str(getattr(claude_agent_sdk, "__version__", "") or "unknown")
 
 
 # ---------------------------------------------------------------------------
@@ -857,13 +826,10 @@ def build_ai_coding_services(container: Container) -> AiCodingServices:
     #    then surface an explicit ``provider_not_available`` ERROR frame
     #    instead of the scripted fake data — matching V1 behaviour.
     #
-    #    CC backend selection (V1 file checkpoint/rewind parity): the
-    #    operator's ``tools.cc_backend`` chooses between the pure-HTTP
-    #    adapter and the ``claude_agent_sdk`` CLI-subprocess adapter that
-    #    supports TRUE on-disk file checkpoint/rewind (V1
-    #    ``session_manager.py``).  ``sdk`` gracefully falls back to ``http``
-    #    when the SDK / native CLI is unavailable so existing HTTP users
-    #    never regress.
+    #    The Claude Code provider is the pure-HTTP adapter.  The former
+    #    ``claude_agent_sdk`` CLI-subprocess backend (``tools.cc_backend=sdk``,
+    #    on-disk file checkpoint/rewind) has been removed; a stored ``sdk``
+    #    value is accepted and ignored (see ``_build_cc_provider``).
     cc_provider = _build_cc_provider(
         container, config_reader=coding_config_repo.load
     )
@@ -905,12 +871,6 @@ def build_ai_coding_services(container: Container) -> AiCodingServices:
         var_names=OC_CREDENTIAL_VARS,
         service=OC_SECRET_SERVICE,
     )
-
-    # -- U-5 / P1-6: Claude Code SDK probe lives at module level
-    #    (``_claude_sdk_probe`` above) so V1-parity defaults are
-    #    directly unit-testable without booting the full container.
-    #    The closure used by PR-105 was promoted to a module-level
-    #    helper as part of P1-6.
 
     return AiCodingServices(
         spawn_coding_session_use_case=SpawnCodingSessionUseCase(
@@ -1103,12 +1063,10 @@ def build_ai_coding_services(container: Container) -> AiCodingServices:
             checkpoint_repository=checkpoint_repo,
             event_bus=container.events,
             # 2-H3: wire the provider so a rewind performs the V1 native
-            # file restoration (CC ``rewind_files`` / OC ``revert``) in
-            # addition to the message-history truncate.  Best-effort:
-            # CC restores files when the SDK-backed provider is active
-            # (``cc_backend=sdk`` + ``enable_file_checkpointing``); the
-            # HTTP CC provider degrades to message-only.  OC issues its
-            # native revert when a message id is cached.
+            # file restoration (OC ``revert``) in addition to the
+            # message-history truncate.  Best-effort: the HTTP CC provider
+            # has no native file restore and degrades to message-only; OC
+            # issues its native revert when a message id is cached.
             provider_port=provider,
         ),
         # PR-105: context-window queries (zero-baseline minimal).
@@ -1131,7 +1089,6 @@ def build_ai_coding_services(container: Container) -> AiCodingServices:
                 Provider.CLAUDE_CODE.value: get_cc_credentials_use_case,
                 Provider.OPEN_CODE.value: get_oc_credentials_use_case,
             },
-            sdk_probe=_claude_sdk_probe,
             cc_non_secret_env_vars=_CC_NON_SECRET_ENV_VARS,
         ),
         # PR-105: hard abort + revert.
@@ -1191,62 +1148,34 @@ def _build_cc_provider(
     *,
     config_reader: object,
 ) -> CodingProviderPort:
-    """Build the Claude Code provider, honouring ``tools.cc_backend``.
+    """Build the Claude Code provider: the pure-HTTP Anthropic adapter.
 
-    Selection (V1 file checkpoint/rewind parity):
-
-    * ``tools.cc_backend == "sdk"`` AND ``claude_agent_sdk`` importable AND
-      a native CLI locatable → :class:`ClaudeCodeSdkProvider` (real on-disk
-      checkpoint/rewind via the ``claude_agent_sdk`` CLI subprocess, V1
-      ``session_manager.py`` model).
-    * otherwise → the pure-HTTP :class:`ClaudeCodeProvider` (existing
-      behaviour; ``sdk`` requested-but-unavailable degrades here with a
-      WARNING so HTTP users never regress — graceful fallback).
-
-    The SDK / native CLI is an *optional* capability (AGENTS.md
-    cross-platform constraint): a deployment without the ``cc-sdk`` extra
-    or without a native ``claude`` CLI silently runs the HTTP adapter.
+    The ``claude_agent_sdk`` CLI-subprocess backend that used to be selected by
+    ``tools.cc_backend == "sdk"`` has been removed (it had no PyPI wheel for
+    Windows ARM64 and was only reachable with a separately installed native
+    ``claude`` CLI).  ``tools.cc_backend`` / ``cc_cli_path`` /
+    ``cc_enable_file_checkpointing`` remain in the settings schema purely so an
+    existing ``user_config.toml`` that still carries them loads; they are ignored
+    here, with a one-line notice when the legacy ``sdk`` value is found.
     """
     settings_obj = getattr(container, "settings", None)
     tools_cfg = getattr(settings_obj, "tools", None) if settings_obj else None
-    # Production default is ``sdk`` (V1-aligned: the real CLI tool loop) —
-    # see ``ToolsSettings.cc_backend`` (settings.py).  The ``"http"`` here is
-    # only the fallback for a hand-rolled container WITHOUT a settings.tools
-    # (test fixtures bypassing ``Container.build``); those keep the pure-HTTP
-    # adapter so the legacy contract/route tests that omit settings are stable.
-    cc_backend = str(getattr(tools_cfg, "cc_backend", "http") or "http").lower()
-    cc_cli_path = str(getattr(tools_cfg, "cc_cli_path", "") or "")
-
-    def _http_provider() -> CodingProviderPort:
-        # C1 (model-source badge): let the CC adapter read the persisted
-        # forge_config so it can honour ``auth_env.ANTHROPIC_BASE_URL`` and
-        # source the ``model_list`` fallback (V1 parity).  Passing the
-        # repo's ``load`` bound method keeps the adapter clean-arch-correct.
-        return ClaudeCodeProvider(
-            secret_store=container.secret_store,
-            transport=HttpxTransport(),
-            config_reader=config_reader,  # type: ignore[arg-type]
+    legacy_backend = str(getattr(tools_cfg, "cc_backend", "") or "").lower()
+    if legacy_backend == "sdk":
+        logger.info(
+            "ai_coding.cc_backend.sdk_removed_using_http",
+            note="tools.cc_backend=sdk is no longer supported; the HTTP adapter is used",
         )
 
-    if cc_backend != "sdk":
-        return _http_provider()
-
-    # Requested SDK backend — verify it is actually usable, else degrade.
-    if not claude_sdk_available():
-        logger.warning(
-            "ai_coding.cc_backend.sdk_unavailable_fallback_http",
-            reason="claude_agent_sdk not importable",
-        )
-        return _http_provider()
-    if locate_claude_cli(cc_cli_path or None) is None:
-        logger.warning(
-            "ai_coding.cc_backend.cli_not_found_fallback_http",
-            reason="no native claude CLI executable located",
-            configured_cli_path=cc_cli_path or "(auto)",
-        )
-        return _http_provider()
-    logger.info("ai_coding.cc_backend.sdk_selected")
-    return ClaudeCodeSdkProvider(secret_store=container.secret_store)
+    # C1 (model-source badge): let the CC adapter read the persisted
+    # forge_config so it can honour ``auth_env.ANTHROPIC_BASE_URL`` and
+    # source the ``model_list`` fallback (V1 parity).  Passing the repo's
+    # ``load`` bound method keeps the adapter clean-arch-correct.
+    return ClaudeCodeProvider(
+        secret_store=container.secret_store,
+        transport=HttpxTransport(),
+        config_reader=config_reader,  # type: ignore[arg-type]
+    )
 
 
 def _security_request_permission_use_case(
