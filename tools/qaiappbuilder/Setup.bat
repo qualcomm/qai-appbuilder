@@ -44,6 +44,9 @@ REM   --no-builder    : kept for compatibility; the builder is already OFF by
 REM                     default. An explicit --no-builder wins over the
 REM                     implication of --desktop / --full.
 REM   --no-pause      : do not pause at the end (for non-interactive / scripted runs).
+REM   --with-vendor   : ARM64 only. Also download vendor-deps.7z (~210MB, aidevhome.com)
+REM                     and use its pre-built wheels / data. OFF by default: every
+REM                     dependency is taken from PyPI instead (no bundle download).
 REM This script merges the former V1 Setup_Builder_Env.bat in full (Step 8);
 REM everything runs in-process via scripts\setup\setup_qairt_env.py and
 REM scripts\setup\install_vs.ps1 - it does NOT depend on the qai.exe CLI.
@@ -66,6 +69,7 @@ set "NO_PAUSE=0"
 set "DEV_EXTRAS=0"
 set "DESKTOP_EXTRAS=0"
 set "FORCED_ARCH="
+set "WITH_VENDOR=0"
 :parse_setup_args
 if "%~1"=="" goto :args_done
 if /i "%~1"=="--help" goto :print_help
@@ -79,6 +83,7 @@ if /i "%~1"=="--desktop" ( set "DESKTOP_EXTRAS=1" & set "_IMPLY_BUILDER=1" & shi
 if /i "%~1"=="--voice-models" ( set "VOICE_MODELS=1" & shift & goto :parse_setup_args )
 if /i "%~1"=="--git" ( set "WITH_GIT=1" & shift & goto :parse_setup_args )
 if /i "%~1"=="--frontend" ( set "WITH_FRONTEND=1" & shift & goto :parse_setup_args )
+if /i "%~1"=="--with-vendor" ( set "WITH_VENDOR=1" & shift & goto :parse_setup_args )
 if /i "%~1"=="--full" ( set "VOICE_MODELS=1" & set "WITH_GIT=1" & set "WITH_FRONTEND=1" & set "_IMPLY_BUILDER=1" & shift & goto :parse_setup_args )
 if /i "%~1"=="--arch" goto :opt_arch
 shift & goto :parse_setup_args
@@ -343,7 +348,11 @@ REM
 REM Idempotent: if all four dirs already exist (dev checkout, or a prior run),
 REM the download is skipped. Non-fatal: a failure only warns; if vendor\whl\
 REM ends up missing, Step 4a is skipped and uv falls back to PyPI.
-call :fetch_vendor_deps
+if "%WITH_VENDOR%"=="1" (
+    call :fetch_vendor_deps
+) else (
+    echo [INFO] vendor-deps.7z is not used ^(pass --with-vendor to download it^).
+)
 
 REM --- Step 0c: Download guard64.dll (native file-guard DLL, ARM64 + x64) ---
 REM
@@ -639,7 +648,10 @@ REM ``browserforge`` is probed for the same reason: it generates the dynamic
 REM per-request browser fingerprint the keyless scrapers use to evade bot
 REM detection (import-guarded, so its absence only drops back to a static
 REM header set), and ships a pure-Python wheel so probing it forces no rebuild.
-"%VENV_DIR%\Scripts\python.exe" -c "import fastapi, uvicorn, structlog, claude_agent_sdk, croniter, playwright, selectolax, lxml, browserforge, paramiko" >nul 2>&1
+REM claude_agent_sdk has no win_arm64 wheel on PyPI: on ARM64 without --with-vendor it is not part of the closure.
+set "_CHECK_MODS=fastapi, uvicorn, structlog, claude_agent_sdk, croniter, playwright, selectolax, lxml, browserforge, paramiko"
+if /i "%HOST_ARCH%"=="arm64" if not "%WITH_VENDOR%"=="1" set "_CHECK_MODS=fastapi, uvicorn, structlog, croniter, playwright, selectolax, lxml, browserforge, paramiko"
+"%VENV_DIR%\Scripts\python.exe" -c "import %_CHECK_MODS%" >nul 2>&1
 if not errorlevel 1 (
     echo [SKIP] Dependencies already installed and complete ^(fastapi, uvicorn, structlog, claude_agent_sdk, croniter, playwright, paramiko^). Skipping pip steps.
     goto :skip_all_installs
@@ -676,7 +688,14 @@ REM x64 cp313 wheels on PyPI). qai_appbuilder is NOT on PyPI -- it is downloaded
 REM from GitHub releases and installed separately after :skip_all_installs (see
 REM the :qai_appbuilder_x64 section). No _constraints_tmp.txt is written, so the
 REM 4b2/4b-extra branches below take their PyPI-only (no --find-links) path.
+set "VENDOR_WHLS_INSTALLED=0"
 if /i "%HOST_ARCH%"=="x64" goto :skip_vendor_whls
+if not "%WITH_VENDOR%"=="1" (
+    echo [INFO] ARM64: the vendor-deps bundle is not used ^(pass --with-vendor to opt in^); dependencies come from PyPI.
+    echo [INFO]   Not available this way: exact token counting ^(tiktoken: coarse estimate instead^), the Claude Code SDK backend ^(HTTP backend is used^),
+    echo [INFO]   and App Builder models that need pyclipper.
+    goto :skip_vendor_whls
+)
 if not exist "%WHL_DIR%" goto :skip_vendor_whls
 echo [INFO] Installing pre-built ARM64 wheels from %WHL_DIR%...
 uv pip install --no-deps ^
@@ -712,6 +731,7 @@ REM upgrade them and rebuild from sdist.
     echo kaldi-native-fbank==1.22.3
     echo pyclipper==1.4.0
 ) > "_constraints_tmp.txt"
+set "VENDOR_WHLS_INSTALLED=1"
 
 :skip_vendor_whls
 REM --- Step 4b: Install all runtime dependencies (from pyproject.toml) ---
@@ -757,7 +777,10 @@ REM The extra remains OPTIONAL in pyproject.toml (cloud-only / Linux installs
 REM that never run Setup.bat are not forced to pull it; the SDK provider is
 REM import-guarded) -- Setup.bat is the Windows full-install entry point, so it
 REM enables the extra explicitly here.
-echo [INFO] Installing dependencies ^(uv pip install -r pyproject.toml --extra cc-sdk --extra search^)...
+REM claude-agent-sdk has no win_arm64 wheel on PyPI: the cc-sdk extra is only used on x64, or on ARM64 with the vendored wheel.
+set "CC_EXTRA=--extra cc-sdk"
+if /i "%HOST_ARCH%"=="arm64" if not "%VENDOR_WHLS_INSTALLED%"=="1" set "CC_EXTRA="
+echo [INFO] Installing dependencies ^(uv pip install -r pyproject.toml %CC_EXTRA% --extra search^)...
 REM The ``search`` extra (playwright + selectolax + lxml) is a RUNTIME extra
 REM installed by DEFAULT (not gated on --dev). TWO runtime features depend on
 REM it: (1) the ``web`` search provider's browser-backed ``google_browser``
@@ -767,12 +790,10 @@ REM control). Both share the SAME pinned ``playwright==1.61.0`` + the Chromium
 REM binary fetched in Step 4d, so installing this by default gives end users
 REM both the browser search path AND the browser tool out of the box.
 if exist "_constraints_tmp.txt" (
-    uv pip install -r pyproject.toml --extra cc-sdk --extra search --find-links "%WHL_DIR%" -c "_constraints_tmp.txt"
-) else if /i "%HOST_ARCH%"=="x64" (
-    REM x64: no vendored wheels, resolve everything from PyPI.
-    uv pip install -r pyproject.toml --extra cc-sdk --extra search
+    uv pip install -r pyproject.toml %CC_EXTRA% --extra search --find-links "%WHL_DIR%" -c "_constraints_tmp.txt"
 ) else (
-    uv pip install -r pyproject.toml --extra cc-sdk --extra search --find-links "%WHL_DIR%"
+    REM x64, or ARM64 without the vendor bundle: resolve everything from PyPI.
+    uv pip install -r pyproject.toml %CC_EXTRA% --extra search
 )
 if errorlevel 1 goto :install_error
 
@@ -796,12 +817,10 @@ if not "%DEV_EXTRAS%"=="1" (
 )
 echo [INFO] Installing dev + e2e extras from pyproject.toml...
 if exist "_constraints_tmp.txt" (
-    uv pip install --find-links "%WHL_DIR%" -c "_constraints_tmp.txt" -r pyproject.toml --extra dev --extra e2e --extra cc-sdk
-) else if /i "%HOST_ARCH%"=="x64" (
-    REM x64: no vendored wheels, resolve everything from PyPI.
-    uv pip install -r pyproject.toml --extra dev --extra e2e --extra cc-sdk
+    uv pip install --find-links "%WHL_DIR%" -c "_constraints_tmp.txt" -r pyproject.toml --extra dev --extra e2e %CC_EXTRA%
 ) else (
-    uv pip install --find-links "%WHL_DIR%" -r pyproject.toml --extra dev --extra e2e --extra cc-sdk
+    REM x64, or ARM64 without the vendor bundle: resolve everything from PyPI.
+    uv pip install -r pyproject.toml --extra dev --extra e2e %CC_EXTRA%
 )
 if errorlevel 1 goto :install_error
 
@@ -1982,6 +2001,10 @@ echo                     --frontend^). This is what the old default installed.
 echo.
 echo      --no-builder   Compatibility flag: the builder is already off by
 echo                     default. Wins over the implication of --full/--desktop.
+echo.
+echo      --with-vendor  ARM64 only: also download the vendor-deps.7z bundle
+echo                     ^(~210MB, aidevhome.com^). OFF by default: every dependency
+echo                     comes from PyPI instead, and no bundle is downloaded.
 echo.
 echo      --dev          Also install the developer / test toolchain:
 echo                     dev extras  ^(ruff, mypy, pytest, import-linter, ...^)
