@@ -115,6 +115,9 @@ class HealthStatusResult:
     # U-5: legacy V1 footer parity (additive per v2.7 §3.1 field-name
     # lock — appended with defaults so existing test constructions /
     # older clients keep working unchanged).
+    # Deprecated wire fields: the Claude Code SDK backend was removed, so these
+    # are always ``False`` / ``""``.  Kept (not deleted) because HTTP responses
+    # are append-only (v2.7 §3.1) and older clients still read them.
     sdk_available: bool = False
     sdk_version: str = ""
     auth_configured: bool = False
@@ -159,7 +162,6 @@ class HealthStatusUseCase:
         coding_provider: CodingProviderPort,
         repository: CodingSessionRepositoryPort | None = None,
         credentials_use_cases: Mapping[str, object] | None = None,
-        sdk_probe: Callable[[], tuple[bool, str]] | None = None,
         cc_non_secret_env_vars: tuple[str, ...] = (),
     ) -> None:
         self._coding_provider = coding_provider
@@ -171,11 +173,6 @@ class HealthStatusUseCase:
         # CC and OC routes use distinct SecretStore namespaces +
         # variable whitelists, so the lookup is keyed by provider.
         self._credentials_use_cases = dict(credentials_use_cases or {})
-        # DI-injected SDK probe.  Returns ``(available, version)``.  The
-        # application layer never imports ``claude_agent_sdk`` directly
-        # (domain-purity / import-linter); the probe closure lives in
-        # the apps/infrastructure layer.
-        self._sdk_probe = sdk_probe
         # P1-6: V1 ``_non_secret_vars`` parity (``api_routes.py:1569-1575``).
         # CC-only: when any of these env vars carry a value the auth
         # status flips to ``(True, "env")`` even when no SecretStore-
@@ -275,17 +272,12 @@ class HealthStatusUseCase:
         # U-5: auth configuration (per the queried provider).
         auth_configured, auth_source = await self._auth_status(query.provider)
 
-        # U-5: SDK availability (CC only; OC has no embedded SDK).
-        sdk_available, sdk_version = self._sdk_status(query.provider)
-
         return HealthStatusResult(
             provider=query.provider.value,
             available=query.provider in advertised,
             available_providers=tuple(p.value for p in advertised),
             providers=tuple(providers),
             models=tuple(models),
-            sdk_available=sdk_available,
-            sdk_version=sdk_version,
             auth_configured=auth_configured,
             auth_source=auth_source,
             active_sessions=active_sessions,
@@ -434,18 +426,3 @@ class HealthStatusUseCase:
             return True, "env"
         return True, "store"
 
-    def _sdk_status(self, provider: Provider) -> tuple[bool, str]:
-        """Return ``(sdk_available, sdk_version)`` for *provider*.
-
-        Only Claude Code carries an embedded SDK; OpenCode talks to a
-        local HTTP service and has no in-process SDK, so it always
-        reports ``(False, "")``.  The probe itself is DI-injected so
-        the application layer never imports ``claude_agent_sdk``.
-        """
-        if provider is not Provider.CLAUDE_CODE or self._sdk_probe is None:
-            return False, ""
-        try:
-            available, version = self._sdk_probe()
-        except Exception:  # noqa: BLE001 — probe is best-effort.
-            return False, ""
-        return bool(available), str(version or "")

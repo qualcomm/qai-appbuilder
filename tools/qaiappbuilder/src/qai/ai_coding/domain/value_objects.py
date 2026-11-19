@@ -410,8 +410,8 @@ class CodingSessionConfig:
       field: not consumed by any provider today.
     * :attr:`session_env` — environment variables injected into the CLI
       subprocess env (legacy ``ClaudeAgentOptions.env`` analogue).
-      Consumed by the SDK-backed CC provider
-      (:class:`ClaudeCodeSdkProvider._build_session_env`).
+      *Reserved* field: the SDK-backed provider that consumed it was removed,
+      and the HTTP providers do not read it.
     * :attr:`skills` — F-23 (PR-I3): per-session skill filter, the
       ``ClaudeAgentOptions.skills`` analogue.  Distinct from the
       ``manage_skills`` mount-style skill (which provisions skill
@@ -441,8 +441,7 @@ class CodingSessionConfig:
     # Append-only field per v2.7 §3.1; keeps the historical PR-046 /
     # PR-102 / PR-107 spawn paths working unchanged.  Allowed values
     # mirror the legacy CLI: ``low``, ``medium``, ``high``, ``max``.
-    # ``None`` means "use the global default" (the SDK-backed CC
-    # provider decides).  Consumed by ``ClaudeCodeSdkProvider`` when set.
+    # ``None`` means "use the global default".
     effort: str | None = None
     # F-23 (PR-I3): per-session skill filter (``ClaudeAgentOptions.skills``
     # analogue).  Append-only field per v2.7 §3.1; benign default ``()``
@@ -475,28 +474,17 @@ class CodingSessionConfig:
     add_dirs: tuple[str, ...] = ()
     agents: tuple[str, ...] = ()
     betas: tuple[str, ...] = ()
-    # ── CC SDK file-checkpoint backend (V1 ``session_manager.py``) ──────
-    # These three fields drive the SDK-backed Claude Code provider that
-    # mirrors V1's ``claude_agent_sdk`` short-connection model (resume +
-    # ``enable_file_checkpointing`` true file restore on disk).  Append-only
-    # per v2.7 §3.1; all default to the V1 defaults so the historical HTTP
-    # spawn paths are byte-for-byte unchanged.
+    # ── Deprecated: CC SDK file-checkpoint backend ──────────────────────
+    # The ``claude_agent_sdk`` CLI-subprocess backend these three fields used
+    # to drive has been removed.  They stay on the value object (append-only
+    # per v2.7 §3.1) so a stored / client-sent config that still carries them
+    # keeps loading; they have NO effect.
     #
-    #   * ``cc_backend`` — ``"http"`` (default) keeps the pure-HTTP Anthropic
-    #     Messages adapter; ``"sdk"`` opts into the ``claude_agent_sdk`` CLI
-    #     subprocess adapter (real file checkpoint/rewind).  The DI root
-    #     gracefully falls back to ``"http"`` when the SDK / CLI is missing.
-    #   * ``cli_path`` — explicit path to a native ``claude`` CLI executable
-    #     (V1 ``ClaudeAgentOptions.cli_path``; ``session_manager.py:1446-
-    #     1448,1833``).  Empty string means "auto-locate" (the SDK provider
-    #     runs :func:`locate_claude_cli`).  A ``.cmd`` shim is rewritten to
-    #     the sibling ``.exe`` so the SDK pipe handshake works.
-    #   * ``enable_file_checkpointing`` — V1 default ``False``
-    #     (``session_manager.py:1725``, has I/O overhead); the operator
-    #     opts in via the settings panel.  When ``True`` the SDK provider
-    #     passes ``enable_file_checkpointing=True`` +
-    #     ``extra_args={"replay-user-messages": None}`` so it can capture
-    #     ``UserMessage.uuid`` for ``rewind_files``.
+    #   * ``cc_backend`` — ``"http"`` is the only backend.  The legacy value
+    #     ``"sdk"`` is still accepted and normalised to ``"http"``.
+    #   * ``cli_path`` — formerly the explicit native ``claude`` CLI path.
+    #   * ``enable_file_checkpointing`` — formerly the on-disk file checkpoint
+    #     switch (the HTTP providers never supported it).
     cc_backend: str = "http"
     cli_path: str = ""
     enable_file_checkpointing: bool = False
@@ -506,6 +494,9 @@ class CodingSessionConfig:
             raise ValueError(
                 f"cc_backend must be 'http' or 'sdk', got {self.cc_backend!r}"
             )
+        if self.cc_backend == "sdk":
+            # Legacy stored value: the SDK backend no longer exists.
+            object.__setattr__(self, "cc_backend", "http")
         if self.cli_path:
             assert_max_length(self.cli_path, max_length=4096, name="cli_path")
             assert_no_control_chars(self.cli_path, name="cli_path")

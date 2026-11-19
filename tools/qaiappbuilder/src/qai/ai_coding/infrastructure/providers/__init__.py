@@ -13,9 +13,7 @@ from .base import (
     HttpStreamError,
     ProviderHttpConfig,
 )
-from .claude_cli_locator import locate_claude_cli, normalise_cli_path
 from .claude_code import ClaudeCodeProvider
-from .claude_code_sdk import ClaudeCodeSdkProvider, claude_sdk_available
 from .http_transport import (
     HttpTransportPort,
     HttpxTransport,
@@ -29,7 +27,6 @@ from .open_code import OpenCodeProvider
 __all__ = [
     "DEFAULT_HTTP_CONFIG",
     "ClaudeCodeProvider",
-    "ClaudeCodeSdkProvider",
     "HttpCodingProviderBase",
     "HttpStreamError",
     "HttpTransportPort",
@@ -39,8 +36,5 @@ __all__ = [
     "OpenCodeProvider",
     "ProviderHttpConfig",
     "SseEvent",
-    "claude_sdk_available",
-    "locate_claude_cli",
-    "normalise_cli_path",
     "parse_sse_bytes",
 ]

@@ -583,11 +583,11 @@ class ClaudeCodeProvider(HttpCodingProviderBase):
         # NOT accept ``resume`` / ``session_id`` top-level keys — and V1
         # had NO HTTP provider at all (it ran exclusively on the
         # ``claude_agent_sdk`` CLI, where ``resume`` is a CLI option, not a
-        # wire field).  Sending them to a strict Anthropic endpoint 400s.
+        # wire field; that backend has since been removed from this project).  Sending them to a strict Anthropic endpoint 400s.
         # Multi-turn context is carried by replaying the full ``messages``
         # history (built above), which IS the Anthropic-native way to
         # continue a conversation.  The captured upstream id is still kept
-        # on the handle for the SDK backend's ``resume=``; the HTTP body
+        # on the handle (informational); the HTTP body
         # just no longer ships the non-official keys.
         # ------------------------------------------------------------------
 
@@ -683,9 +683,7 @@ class ClaudeCodeProvider(HttpCodingProviderBase):
         # ``anthropic-beta`` header (see :meth:`_build_stream_headers`).
         # ``add_dirs`` (extra readable dirs) and ``agents`` (named
         # sub-agents) are CLI-only capabilities with no Anthropic Messages
-        # wire equivalent; they take effect under the SDK backend
-        # (``ClaudeCodeSdkProvider._build_options``), which is the V1-aligned
-        # default — so the HTTP fallback simply does not ship them.
+        # wire equivalent, so the HTTP provider simply does not ship them.
 
         # ------------------------------------------------------------------
         # 2-H9: dynamic permission-rule replay — consume but do NOT ship
