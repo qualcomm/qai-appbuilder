@@ -127,6 +127,19 @@ dependencies = [
   # ``platform_machine`` is ``ARM64`` on Windows ARM64 and ``AMD64`` on x64.
   "tiktoken>=0.12.0,<1.0; platform_machine != 'ARM64'",
 
+  # QAI AppBuilder inference binding (NPU). Windows ARM64 only: PyPI has a native
+  # cp313 ``win_arm64`` wheel. Do NOT widen the marker to AMD64: the PyPI
+  # ``win_amd64`` wheel is not a real x64 build and fails to load on an x64 CPU
+  # ("DLL initialization routine failed"); x64 installs the ``<version>.1`` wheel
+  # from the GitHub release instead (see Setup.bat / installer/_setup_env.bat).
+  # The lower bound is the minimum extension version of the QAIRT SDK pinned in
+  # ``scripts/qairt_release.json`` (``QairtVersion.minimum_appbuilder``); a unit
+  # test keeps the two in step. A fresh install gets the newest release below 3;
+  # an existing install is not upgraded just because Setup runs again.
+  # The package caps numpy (``numpy<=2.4.4``), which is why it is resolved here
+  # together with everything else instead of being installed with ``--no-deps``.
+  "qai-appbuilder>=2.48.40,<3; sys_platform == 'win32' and platform_machine == 'ARM64'",
+
   # Qualcomm AI Hub model compilation and profiling cloud service.
   # China AI Hub currently rejects 0.56.x; keep the CLI/SDK on the newest
   # server-supported release until that deployment accepts 0.56.x.

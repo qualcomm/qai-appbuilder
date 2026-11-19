@@ -122,7 +122,8 @@ REM                         x64   <tag>.1  pure x86_64 build, published on the G
 REM                                        (The PyPI win_amd64 wheel <tag> is an ARM64EC build: its
 REM                                         libappbuilder.dll etc. carry ARM64 entry code and cannot load
 REM                                         on an Intel/AMD CPU, so x64 never installs from PyPI.)
-REM                         arm64 <tag>    published on the same GitHub release (win_arm64 wheel).
+REM                         arm64 not downloaded here: pyproject.toml pulls qai-appbuilder>=<tag>,<3 from PyPI
+REM                                        (native cp313 win_arm64 wheel) together with the other dependencies.
 REM   QAI_GUARD_RELEASE_TAG  release that hosts guard.zip. Pinned on purpose: guard.zip is not republished on every
 REM                       release (v2.51.40 has none), so it does NOT follow QAI_AB_RELEASE_TAG.
 set "QAIRT_VERSION="
@@ -1006,10 +1007,15 @@ for /f "tokens=2 delims='" %%M in ('findstr /i /c:"No module named" "%_QF%"') do
 if /i "%_QMOD%"=="qai_appbuilder" (
     set "QAB_MISSING=1"
     echo [WARN] qai_appbuilder is NOT INSTALLED in %VENV_DIR% ^(NPU inference unavailable; Model Builder UI still starts^).
-    echo [WARN] Its install step failed earlier - see the lines above ^(the wheel comes from the GitHub release^).
-    echo [WARN] Fix the network ^(proxy / GitHub access^) and run _setup_env.bat again: it only fetches what is missing.
-    echo [WARN] Or install the wheel by hand: download %RELEASE_BASE%/%QAI_AB_WHL_FILE%
-    echo [WARN]     then  "%UV_EXE%" pip install --python "%VPY%" --no-deps ^<that file^>
+    echo [WARN] Its install step failed earlier - see the lines above.
+    if /i "%HOST_ARCH%"=="arm64" (
+        echo [WARN] On ARM64 it comes from PyPI. Fix the network ^(proxy / PyPI access^) and run _setup_env.bat again, or run:
+        echo [WARN]     "%UV_EXE%" pip install --python "%VPY%" "qai-appbuilder>=%QAI_AB_RELEASE_TAG%,<3"
+    ) else (
+        echo [WARN] On x64 the wheel comes from the GitHub release. Fix the network ^(proxy / GitHub access^) and run _setup_env.bat again.
+        echo [WARN] Or install the wheel by hand: download %RELEASE_BASE%/%QAI_AB_WHL_FILE%
+        echo [WARN]     then  "%UV_EXE%" pip install --python "%VPY%" --no-deps ^<that file^>
+    )
     del /f /q "%_QF%" 2>nul
     exit /b 0
 )
@@ -1060,7 +1066,8 @@ exit /b 0
 
 REM :install_qai_appbuilder
 :install_qai_appbuilder
-REM ---- GitHub release wheel %QAI_AB_WHL_VERSION% (x64 and ARM64; never PyPI on x64, see the note at the top) ----
+if /i "%HOST_ARCH%"=="arm64" goto :qab_arm64_pypi
+REM ---- x64: GitHub release wheel %QAI_AB_WHL_VERSION% (never PyPI on x64, see the note at the top) ----
 REM Skip only when exactly this version is installed. A bare prefix test on the tag would also accept
 REM the PyPI ARM64EC wheel (x64 only) and leave a broken package in place. Read the version from the
 REM package metadata, not from import, so a wheel that cannot be imported is still recognised.
@@ -1085,6 +1092,22 @@ if not exist "%DL_DIR%\%_WN%" goto :qab_fail
 "%UV_EXE%" pip install --reinstall --no-deps "%DL_DIR%\%_WN%"
 if errorlevel 1 goto :qab_fail
 echo [OK]   qai_appbuilder %QAI_AB_WHL_VERSION% installed ^(%HOST_ARCH%, GitHub release^).
+exit /b 0
+
+REM ---- ARM64: qai-appbuilder comes from PyPI (pyproject.toml, step 5b). Verify the installed version is at least the
+REM minimum for the pinned QAIRT SDK; if it is missing or older (e.g. step 5b was skipped because the rest of the
+REM closure was already importable) install it from PyPI now. A newer version is accepted and never downgraded.
+:qab_arm64_pypi
+"%VPY%" -c "import importlib.metadata as m, sys; v=tuple(int(x) for x in m.version('qai_appbuilder').split('.')[:3]); need=tuple(int(x) for x in '%QAI_AB_RELEASE_TAG%'.split('.')); sys.exit(0 if v>=need else 1)" >nul 2>&1
+if not errorlevel 1 (
+    echo [SKIP] qai_appbuilder already installed ^(at least %QAI_AB_RELEASE_TAG%^).
+    exit /b 0
+)
+echo [INFO] installing qai-appbuilder ^(>=%QAI_AB_RELEASE_TAG%, PyPI^)...
+set UR_CMD="%UV_EXE%" pip install "qai-appbuilder>=%QAI_AB_RELEASE_TAG%,<3"
+call :uv_retry qab
+if errorlevel 1 goto :qab_fail
+echo [OK]   qai_appbuilder installed ^(arm64, PyPI^).
 exit /b 0
 
 :qab_fail
