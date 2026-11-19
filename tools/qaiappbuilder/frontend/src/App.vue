@@ -335,8 +335,10 @@ onMounted(() => {
 // /api/auth/renew so an active user is never kicked out mid-task. The
 // timer is torn down on unmount. If the tab is backgrounded and the
 // session lapses anyway, the next business call 401s → login prompt.
-const RENEW_THRESHOLD_S = 10 * 60; // renew when < 10 min left
-const KEEPALIVE_INTERVAL_MS = 60 * 1000; // check every minute
+// The threshold must stay well above the check interval, otherwise the
+// session can lapse between two checks without ever entering the window.
+const RENEW_THRESHOLD_S = 2 * 60 * 60; // renew when < 2 h left
+const KEEPALIVE_INTERVAL_MS = 30 * 60 * 1000; // check every 30 minutes
 let keepAliveTimer: ReturnType<typeof setInterval> | null = null;
 
 function startSessionKeepAlive(): void {
