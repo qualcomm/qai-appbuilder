@@ -18,7 +18,7 @@ Flow
    ``/callback`` — historically it discarded the token right after.
 2. We POST that verified ``id_token`` to ``{base_url}/api/auth/exchange``.
    The broker re-verifies it (same issuer/client_id the app uses) and mints
-   its own session JWT (``expires_in`` ≈ 8 h).
+   its own session JWT (``expires_in`` as the broker returns it, currently 1 week).
 3. :func:`store_service_jwt` keeps it here; the chat model-resolution bridge
    reads it via :func:`get_service_jwt` and sends it as the outbound
    ``Authorization`` bearer to ``{base_url}/v1/...``.
@@ -32,7 +32,7 @@ Design notes
   transparent: the exchange only happens inside the Okta ``/callback``, so
   without persistence a restart drops the token while the browser's session
   cookie stays valid — the user looks signed in but the pool has no bearer
-  until the next full login. An ~8 h credential is worth persisting precisely
+  until the next full login. A multi-day credential is worth persisting precisely
   because it outlives a dev-loop restart; storing it in the OS keyring (not
   config, not logs) keeps it protected. A process with no SecretStore wired
   (CLI / test container) degrades to in-memory-only, i.e. the prior behaviour.
@@ -88,8 +88,8 @@ __all__ = [
 _EXPIRY_SKEW_SECONDS = 60.0
 
 #: Fallback lifetime when the broker omits / malforms ``expires_in``. Matches
-#: the observed 8 h issuance; deliberately not longer than the real one.
-_DEFAULT_EXPIRES_IN = 28800
+#: the 1-week issuance the local session cookie is aligned with.
+_DEFAULT_EXPIRES_IN = 7 * 24 * 3600
 
 #: HTTP status the exchange endpoint returns on success.
 _HTTP_OK = 200
@@ -317,7 +317,7 @@ def clear_service_jwt() -> None:
     """Drop the held JWT (called on logout). Idempotent.
 
     Clears BOTH the in-memory copy and the persisted one: a logout means the
-    identity the token was bound to is gone, so leaving an ~8 h bearer on disk
+    identity the token was bound to is gone, so leaving a multi-day bearer on disk
     would let the pool keep billing that user after they signed off — and would
     silently resurrect on the next start. ``_hydrated`` stays ``True`` so a
     subsequent read does not re-hydrate the just-deleted value.

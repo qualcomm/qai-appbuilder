@@ -1860,7 +1860,7 @@ class AuthSettings(BaseModel):
             "on first login and reused across restarts."
         ),
     )
-    session_ttl_seconds: int = Field(default=8 * 60 * 60, ge=60)
+    session_ttl_seconds: int = Field(default=7 * 24 * 60 * 60, ge=60)
     cookie_secure: bool = Field(
         default=False,
         description=(

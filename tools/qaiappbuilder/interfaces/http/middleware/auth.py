@@ -209,13 +209,15 @@ def dump_session(user: dict[str, Any], ttl_seconds: int, secret: str) -> str:
     """Encode ``user`` into ``<payload>.<signature>`` with the given secret.
 
     ``ttl_seconds`` becomes ``exp``; the cookie also carries ``iat`` for
-    diagnostics but ``exp`` is what gates expiry on load.
+    diagnostics but ``exp`` is what gates expiry on load. No fallback here:
+    the default lives only in ``AuthSettings.session_ttl_seconds`` (``ge=60``)
+    and every caller passes a positive TTL.
     """
     now = int(time.time())
     payload = {
         "user": public_user(user),
         "iat": now,
-        "exp": now + int(ttl_seconds or 28800),
+        "exp": now + int(ttl_seconds),
     }
     data = b64url_encode(
         json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode(

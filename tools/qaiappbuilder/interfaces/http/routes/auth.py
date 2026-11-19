@@ -783,9 +783,7 @@ def build_router(
                     )
                     device_user = None
                 if device_user is not None:
-                    new_exp = int(time.time()) + int(
-                        settings.session_ttl_seconds or 28800
-                    )
+                    new_exp = int(time.time()) + settings.session_ttl_seconds
                     response = JSONResponse(
                         {
                             "auth_enabled": True,
@@ -923,7 +921,7 @@ def build_router(
                 status_code=401,
             )
         now = int(time.time())
-        new_exp = now + int(settings.session_ttl_seconds or 28800)
+        new_exp = now + settings.session_ttl_seconds
         cookie = dump_session(user, settings.session_ttl_seconds, secret)
         response = JSONResponse(
             {"authenticated": True, "expires_at": new_exp}
