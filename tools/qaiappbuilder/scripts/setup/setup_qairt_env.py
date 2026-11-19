@@ -895,38 +895,6 @@ def install_inference_deps(root):
             _print_err(f"uv.exe not found: {uv}")
             return False
 
-    # ── Local ARM64 wheels (Windows ARM64 only) ──────────────────────────────
-    # Not on PyPI for win_arm64, so vendored. Windows x64 skips this block and
-    # resolves every dependency (opencv, qai-appbuilder, etc.) from PyPI.
-    if _detect_platform() != "linux" and _detect_arch() == "aarch64":
-        whl_dir = root / "vendor" / "whl"
-        arm64_local_wheels = [
-            # (whl_filename,                                                import_name)
-            ("numpy-2.3.1-cp313-cp313-win_arm64.whl",                      "numpy"),
-            ("opencv_python_headless-4.10.0.84-cp313-cp313-win_arm64.whl", "cv2"),
-            ("MarkupSafe-2.1.5-cp313-cp313-win_arm64.whl",                 "markupsafe"),
-            ("pyclipper-1.4.0-cp313-cp313-win_arm64.whl",                  "pyclipper"),
-            ("soundfile-0.13.1-cp313-cp313-win_arm64.whl",                  "soundfile"),
-            ("kaldi_native_fbank-1.22.3-cp313-cp313-win_arm64.whl",         "kaldi_native_fbank"),
-        ]
-        local_import_names = [imp for _, imp in arm64_local_wheels]
-        available_local = _batch_check_imports(python, local_import_names)
-        for whl_file, import_name in arm64_local_wheels:
-            if import_name in available_local:
-                _print_ok(f"{whl_file} already installed")
-                continue
-            whl_path = whl_dir / whl_file
-            if not whl_path.exists():
-                _print_warn(f"Local ARM64 wheel not found: {whl_path} — skipping")
-                continue
-            print(f"[INFO] Installing {whl_file} (local ARM64 wheel)...")
-            ok, _, err = _run(f'"{uv}" pip install "{whl_path}" --python "{python}"', capture=False)
-            if not ok:
-                _print_err(f"Failed to install {whl_file}: {err}")
-                print(f"[WARN] Skipping {whl_file} (non-fatal)")
-                continue
-            _print_ok(f"{whl_file} installed")
-
     # Common inference + post-processing libraries for ARM64 .venv
     # Format: (pip_spec, import_name, use_torch_index)
     # use_torch_index=True for torch/torchvision when ARM64 Windows wheels are needed.
@@ -989,10 +957,19 @@ def install_inference_deps(root):
         packages = [
             # ── Image processing ──────────────────────────────────────────────
             ("Pillow",          "PIL",          False),
-            # opencv-python: installed from vendor/whl/ (ARM64 local wheel), not PyPI
+            # opencv / MarkupSafe / soundfile / kaldi-native-fbank used to come from
+            # vendor/whl/ (vendor-deps.7z). PyPI has native cp313 win_arm64 wheels for all
+            # of them now, so they install like on x64. (pyclipper is no longer installed:
+            # nothing in this repo imports it, and PyPI has no win_arm64 wheel.)
+            ("opencv-python-headless", "cv2",   False),
             # ── Numerical / data ──────────────────────────────────────────────
             ("numpy",           "numpy",        False),
             ("scipy",           "scipy",        False),
+            # ── Pack post-processing deps ───────────────────────────────────
+            ("MarkupSafe",          "markupsafe",         False),
+            # >=0.14.0: 0.13.1 on PyPI is the generic wheel without libsndfile.
+            ("soundfile>=0.14.0",   "soundfile",          False),
+            ("kaldi-native-fbank",  "kaldi_native_fbank", False),
             # ── Visualization / utilities ─────────────────────────────────────
             ("matplotlib",      "matplotlib",   False),
             ("tqdm",            "tqdm",         False),
@@ -1018,8 +995,8 @@ def install_inference_deps(root):
         # Everything resolves from PyPI (no vendored win_arm64 wheels). CPU
         # inference backend: standard onnxruntime (QnnCpu via .dlc), qai-appbuilder
         # x64 wheel, and torch/torchvision x64 wheels (published on PyPI — NO
-        # --index-url). opencv + the deps arm64 vendored (markupsafe/pyclipper/
-        # soundfile/kaldi_native_fbank) are all available on PyPI for x64.
+        # --index-url). opencv + markupsafe/pyclipper/soundfile/kaldi_native_fbank
+        # are all available on PyPI for x64.
         packages = [
             # ── Image processing ──────────────────────────────────────────────
             ("Pillow",                  "PIL",          False),
@@ -1032,7 +1009,7 @@ def install_inference_deps(root):
             ("tqdm",                    "tqdm",         False),
             ("pyyaml",                  "yaml",         False),
             ("requests",                "requests",     False),
-            # ── Pack post-processing deps (vendored on arm64, PyPI on x64) ─────
+            # ── Pack post-processing deps ───────────────────────────────────────
             ("MarkupSafe",              "markupsafe",   False),
             ("pyclipper",               "pyclipper",    False),
             ("soundfile",               "soundfile",    False),
