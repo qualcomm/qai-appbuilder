@@ -175,12 +175,10 @@ async function onRewind(msg: { id: string; checkpointId?: string }): Promise<voi
   const ok = await confirm({
     icon: "⏪",
     title: t("aiCoding.panel.rewindLabel"),
-    // CC SDK file checkpoint/rewind (2-H3): a `checkpointId` only exists when
-    // file checkpointing was enabled for the session, so the SDK backend can
-    // restore the on-disk files (V1 `session_manager.py:2604-2706`). The
-    // confirm text reflects that files will be rolled back; the post-action
-    // toast then reports the actual outcome (files restored vs messages only)
-    // from the response `files_rewound` flag.
+    // The Claude Code provider is HTTP-only now (the SDK backend with on-disk
+    // file restore was removed), so this rewinds the conversation history
+    // only; the confirm text says so. The post-action toast still reports the
+    // actual outcome from the response `files_rewound` flag.
     message:
       t("aiCoding.panel.rewindWithUuidTitle", { uuid: msg.checkpointId }) +
       "\n\n" +

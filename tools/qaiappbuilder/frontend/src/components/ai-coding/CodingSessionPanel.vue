@@ -78,26 +78,21 @@ function sourceLabel(src: "all" | "webchat" | "wechat" | "feishu"): string {
 }
 
 // ── Health (connection / auth readiness) ─────────────────────────────────────
-// V1 parity (AiCodingPanel.js:128-136): Claude Code checks SDK availability +
-// auth; OpenCode checks HTTP service connectivity. `envReady` gates session
-// creation so users can never spawn a session (and silently hit the scripted
-// fallback) against an un-configured / un-connected provider.
+// Claude Code checks that authentication is configured (its SDK backend was
+// removed, so there is no SDK availability to check); OpenCode checks HTTP
+// service connectivity. `envReady` gates session creation so users can never
+// spawn a session (and silently hit the scripted fallback) against an
+// un-configured / un-connected provider.
 const available = ref<boolean | null>(null);
-const sdkAvailable = ref(false);
 const authConfigured = ref(false);
-const sdkVersion = ref("");
 const healthLoading = ref(false);
 
-// V1 AiCodingPanel.js:128-131 — CC reads sdk.available, OC reads health.available
-const isSdkAvailable = computed(() =>
-  props.kind === "oc" ? available.value === true : sdkAvailable.value,
-);
 // V1 AiCodingPanel.js:132-135 — CC reads auth_configured, OC reads health.available
 const isAuthConfigured = computed(() =>
   props.kind === "oc" ? available.value === true : authConfigured.value,
 );
-// V1 AiCodingPanel.js:136 — both must hold before creating sessions
-const envReady = computed(() => isSdkAvailable.value && isAuthConfigured.value);
+// Authentication / connectivity must hold before creating sessions
+const envReady = computed(() => isAuthConfigured.value);
 
 async function loadHealth(): Promise<void> {
   healthLoading.value = true;
@@ -105,14 +100,10 @@ async function loadHealth(): Promise<void> {
     const res =
       props.kind === "cc" ? await fetchCcHealth() : await fetchOcHealth();
     available.value = res.available === true;
-    sdkAvailable.value = res.sdk_available === true;
     authConfigured.value = res.auth_configured === true;
-    sdkVersion.value = res.sdk_version ?? "";
   } catch {
     available.value = false;
-    sdkAvailable.value = false;
     authConfigured.value = false;
-    sdkVersion.value = "";
   } finally {
     healthLoading.value = false;
   }
@@ -525,7 +516,6 @@ onMounted(() => {
       :data-testid="`coding-panel-hint-${kind}`"
     >
       <span v-if="kind === 'oc'">{{ t("aiCoding.panel.ocNotConnected", "OpenCode service not connected — start it in Settings > AI Coding") }}</span>
-      <span v-else-if="!isSdkAvailable">{{ t("aiCoding.panel.sdkNotInstalled", "Claude Code SDK not installed — see Settings > AI Coding") }}</span>
       <span v-else-if="!isAuthConfigured">{{ t("aiCoding.panel.authNotConfigured", "Authentication not configured (set API Key in Settings > AI Coding)") }}</span>
       <span
         style="margin-left:6px;cursor:pointer;text-decoration:underline"
@@ -857,15 +847,8 @@ onMounted(() => {
           class="ai-coding-statusbar-info"
           style="display:flex;align-items:center;gap:8px;min-width:0;flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis"
         >
-          <!-- Claude Code: SDK version + auth status (V1 AiCodingPanel.js:1361-1368) -->
+          <!-- Claude Code: auth status -->
           <template v-if="kind === 'cc'">
-            <span
-              :style="sdkAvailable ? 'color:#4ade80;flex-shrink:0' : 'color:#f87171;flex-shrink:0'"
-              :title="`SDK ${sdkVersion}`"
-            >
-              SDK {{ sdkAvailable ? "✅" : "❌" }}
-              <span class="ai-coding-statusbar-detail">{{ sdkVersion }}</span>
-            </span>
             <span
               :style="authConfigured ? 'color:#4ade80;flex-shrink:0' : 'color:#f87171;flex-shrink:0'"
               :title="t('aiCoding.panel.authStatusTitle', 'Authentication status')"

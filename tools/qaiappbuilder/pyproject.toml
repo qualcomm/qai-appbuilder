@@ -59,7 +59,6 @@ dependencies = [
   "anyio>=4.4,<5.0",
   # MCP SDK: capped below 2.0 -- mcp 2.x removed ``mcp.server.fastmcp`` which
   # the MCP client/installer (chat/adapters/mcp_client.py) relies on.
-  # claude-agent-sdk (cc-sdk extra) only requires ``mcp>=1.19`` with no cap.
   "mcp>=1.19,<2.0",
 
   # data / serialization
@@ -258,16 +257,6 @@ typing = [
 ]
 
 # Claude Code SDK backend (V1 file checkpoint/rewind parity).
-# Optional / platform-specific: the ``claude_agent_sdk`` drives the native
-# ``claude`` CLI subprocess to support TRUE on-disk file checkpoint/rewind
-# (``ClaudeSDKClient.rewind_files``).  Kept OUT of the core ``dependencies``
-# per the AGENTS.md cross-platform constraint — a cloud-only / Linux install
-# is never forced to pull it, and the SDK provider is import-guarded so a
-# deployment without this extra silently runs the pure-HTTP CC adapter.
-# The wheel ships in ``vendor/whl/`` for the ARM64 cp313 dev env.
-cc-sdk = [
-  "claude-agent-sdk>=0.1.72,<1.0",
-]
 
 # -----------------------------------------------------------------------------
 # CLI entry points
@@ -427,16 +416,6 @@ ignore = [
 ]
 # `__init__.py` re-exports
 "**/__init__.py" = ["F401", "F403"]
-# CC SDK provider: the ``claude_agent_sdk`` is an OPTIONAL dependency, so its
-# imports MUST be lazy / in-function (import guard — PLC0415) so a deployment
-# without the ``cc-sdk`` extra still imports the module and falls back to the
-# HTTP adapter. The SDK message→frame mapper and the V1-parity error-code
-# classifier inherently fan out into many branches/returns (PLR0911/PLR0912).
-# Structured logging keeps the ``error=`` field convention used across the
-# context (TRY300/TRY400) rather than re-raising.
-"src/qai/ai_coding/infrastructure/providers/claude_code_sdk.py" = [
-  "PLC0415", "PLR0911", "PLR0912", "TRY300", "TRY400",
-]
 # Inventory scripts may print and use os.system-style calls.
 "scripts/dev/inventory/**" = ["T201", "S603", "S607", "PLR0915", "PLR0912", "C901"]
 # Setup-time scripts: console-style tools that print progress, spawn pip/uv,

@@ -154,7 +154,6 @@ export function formatErrorMessage(
     session_closed: t("claudeCode.errSessionClosed"),
     session_busy: t("claudeCode.errSessionBusy"),
     timeout: t("claudeCode.errTimeout"),
-    sdk_unavailable: t("claudeCode.errSdkUnavailable"),
     auth_not_configured: t("claudeCode.errAuthNotConfigured"),
     // V2 backend surfaces the unconfigured-provider error with this unified
     // QaiError code (ai_coding.provider_not_available); map it to the same
