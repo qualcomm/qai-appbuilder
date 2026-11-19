@@ -121,10 +121,16 @@ dependencies = [
   # Lazily imported + fully try/except-guarded, so a missing package or vocab
   # degrades to a coarse ``len//2`` estimate (never crashes chat).
   # Windows ARM64: PyPI publishes NO win_arm64 wheel for tiktoken (the sdist needs
-  # a Rust toolchain), so it is not a hard requirement there; an ARM64 wheel is
-  # only picked up if one is installed separately (e.g. ``Setup.bat --with-vendor``).
+  # a Rust toolchain), so it is not a hard requirement there. Exact counting then
+  # comes from ``qai.platform.bpe`` (pure Python, same token ids), which needs the
+  # ``regex`` package below and the cl100k_base vocabulary that the backend fetches
+  # from OpenAI's official URL on first start (SHA-256 verified).
   # ``platform_machine`` is ``ARM64`` on Windows ARM64 and ``AMD64`` on x64.
   "tiktoken>=0.12.0,<1.0; platform_machine != 'ARM64'",
+  # Used by ``qai.platform.bpe`` (tiktoken's own dependency, so it is already present
+  # wherever tiktoken is; listed explicitly because ARM64 does not install tiktoken).
+  # Has a native cp313 win_arm64 wheel on PyPI.
+  "regex>=2023.10.3",
 
   # QAI AppBuilder inference binding (NPU). Windows ARM64 only: PyPI has a native
   # cp313 ``win_arm64`` wheel. Do NOT widen the marker to AMD64: the PyPI

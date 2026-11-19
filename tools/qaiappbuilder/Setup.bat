@@ -679,8 +679,8 @@ set "VENDOR_WHLS_INSTALLED=0"
 if /i "%HOST_ARCH%"=="x64" goto :skip_vendor_whls
 if not "%WITH_VENDOR%"=="1" (
     echo [INFO] ARM64: the vendor-deps bundle is not used ^(pass --with-vendor to opt in^); dependencies come from PyPI.
-    echo [INFO]   Not available this way: exact token counting ^(tiktoken: coarse estimate instead^)
-    echo [INFO]   and App Builder models that need pyclipper.
+    echo [INFO]   Token counting stays exact through a built-in pure-Python tokenizer ^(vocabulary fetched on first start^).
+    echo [INFO]   Not available this way: App Builder models that need pyclipper.
     goto :skip_vendor_whls
 )
 if not exist "%WHL_DIR%" goto :skip_vendor_whls

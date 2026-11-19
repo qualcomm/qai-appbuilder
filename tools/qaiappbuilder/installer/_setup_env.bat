@@ -267,8 +267,8 @@ if /i "%HOST_ARCH%"=="arm64" (
         if exist "vendor\whl\%VENDOR_MARKER_WHL%" set "USE_VENDOR=1"
     ) else (
         echo [INFO] ARM64: the vendor-deps bundle is not used ^(--with-vendor to opt in^); dependencies come from PyPI.
-        echo [INFO]   Not available this way: exact token counting ^(tiktoken: coarse estimate instead^)
-        echo [INFO]   and App Builder models that need pyclipper.
+        echo [INFO]   Token counting stays exact through a built-in pure-Python tokenizer ^(vocabulary fetched on first start^).
+        echo [INFO]   Not available this way: App Builder models that need pyclipper.
     )
 ) else (
     echo [SKIP] x64: the vendor-deps bundle is ARM64-only and is not used.
