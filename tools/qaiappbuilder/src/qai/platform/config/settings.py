@@ -1279,46 +1279,29 @@ class ToolsSettings(BaseModel):
             "/api/security/runtime-config (M-2)."
         ),
     )
+    # DEPRECATED (kept so an existing ``user_config.toml`` that still carries
+    # these keys loads): the ``claude_agent_sdk`` CLI-subprocess backend has been
+    # removed, so none of the three has any effect any more.
     cc_backend: str = Field(
-        default="sdk",
+        default="http",
         description=(
-            "Claude Code provider backend: ``sdk`` (default) drives the "
-            "``claude_agent_sdk`` CLI-subprocess adapter that mirrors V1's "
-            "``session_manager.py`` model — the ONLY backend with a real "
-            "agentic tool loop (the CLI itself executes Read/Write/Edit/Bash "
-            "and edits files on disk) plus TRUE on-disk file "
-            "checkpoint/rewind (``enable_file_checkpointing`` + "
-            "``ClaudeSDKClient.rewind_files``).  V1 always ran on this CLI, so "
-            "``sdk`` is the V1-aligned default.  ``http`` selects the pure-HTTP "
-            "Anthropic Messages adapter, which has NO tool-execution loop "
-            "(it only relays tool_use frames) — kept as a graceful fallback "
-            "for deployments without the ``claude_agent_sdk`` extra / a native "
-            "CLI.  When ``sdk`` is requested but the SDK / native CLI is "
-            "unavailable, the DI root logs a WARNING and falls back to "
-            "``http`` (no crash).  Baked into the provider at DI build → "
-            "reboot to change."
+            "Deprecated, ignored. The Claude Code provider is always the pure-HTTP "
+            "Anthropic Messages adapter; the former ``sdk`` backend was removed. A "
+            "stored ``sdk`` value is accepted and treated as ``http``."
         ),
     )
     cc_enable_file_checkpointing: bool = Field(
         default=False,
         description=(
-            "Enable Claude Code file checkpointing (SDK backend only). V1 "
-            "default OFF (``session_manager.py:1725``, has I/O overhead); the "
-            "operator opts in via the settings panel. When ON the SDK "
-            "provider passes ``enable_file_checkpointing=True`` + "
-            "``extra_args={replay-user-messages}`` so it can capture "
-            "``UserMessage.uuid`` and later restore files on a rewind. No "
-            "effect under the ``http`` backend."
+            "Deprecated, ignored. Claude Code file checkpointing needed the removed "
+            "SDK backend."
         ),
     )
     cc_cli_path: str = Field(
         default="",
         description=(
-            "Explicit path to a native ``claude`` CLI executable for the SDK "
-            "backend (V1 ``ClaudeAgentOptions.cli_path``). Empty = auto-locate "
-            "the native ARM64 ``claude.exe`` (avoiding the x64 bundled-CLI "
-            "crash and the ``.cmd`` pipe-handshake pitfall). A ``.cmd`` shim "
-            "is rewritten to the sibling ``.exe``."
+            "Deprecated, ignored. Formerly the path of the native ``claude`` CLI "
+            "used by the removed SDK backend."
         ),
     )
 

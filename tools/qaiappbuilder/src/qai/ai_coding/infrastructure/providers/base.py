@@ -234,13 +234,11 @@ class HttpCodingProviderBase:
         (PR-046 spawn path), so callers can always count on the
         return value being a real value object.
 
-        This is the read-side hook the SDK-backed CC provider uses to
-        consume the config fields it honours (effort / thinking /
-        session_env / add_dirs / extra_args / cli_path /
-        enable_file_checkpointing), and the seam through which the
-        local-only reserved fields (hooks / output_format /
-        setting_sources / plugins) are read back without importing the
-        provider-internal handle dict shape.
+        This is the read-side hook providers use to consume the config
+        fields they honour (effort / thinking / extra_args / ...), and the
+        seam through which the local-only reserved fields (hooks /
+        output_format / setting_sources / plugins) are read back without
+        importing the provider-internal handle dict shape.
         """
         record = self._handles.get(session_id.value, {})
         cfg = record.get("config")
@@ -364,15 +362,12 @@ class HttpCodingProviderBase:
     ) -> bool:
         """Default rewind: no native file restoration (2-H3).
 
-        The base / Claude Code HTTP provider has no live SDK client to
-        call ``rewind_files(sdk_uuid)`` on, so it reports ``False`` and
-        :class:`RewindCheckpointUseCase` performs a message-only rewind —
-        never raising, never fabricating a file rollback.  The native file
-        restoration is provided by the SDK-backed CC provider
-        (:class:`ClaudeCodeSdkProvider`, ``cc_backend=sdk`` +
-        ``enable_file_checkpointing``, V1 ``session_manager.py:2604-2706``
-        parity) and by :class:`OpenCodeProvider` (native
-        ``POST /session/{id}/revert``), both of which override this.
+        The base / Claude Code HTTP provider has no native file restoration,
+        so it reports ``False`` and :class:`RewindCheckpointUseCase` performs a
+        message-only rewind — never raising, never fabricating a file
+        rollback.  Native file restoration is provided by
+        :class:`OpenCodeProvider` (native ``POST /session/{id}/revert``),
+        which overrides this.
         """
         return False
 
