@@ -46,10 +46,14 @@ def test_tiktoken_is_still_required_elsewhere() -> None:
 
 
 def test_no_other_core_requirement_is_arm64_gated() -> None:
-    """Guard against silently dropping more packages on ARM64."""
+    """Guard against silently dropping more packages on ARM64.
+
+    ``qai-appbuilder`` is the one deliberate ARM64-only addition (see
+    ``test_pyproject_qai_appbuilder.py``); ``tiktoken`` is the one exclusion.
+    """
     gated = [
         name
         for name, r in _core_requirements().items()
         if r.marker is not None and "ARM64" in str(r.marker)
     ]
-    assert gated == ["tiktoken"]
+    assert sorted(gated) == ["qai-appbuilder", "tiktoken"]

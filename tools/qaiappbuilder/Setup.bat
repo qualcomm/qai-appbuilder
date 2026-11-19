@@ -893,13 +893,11 @@ REM must always match the pinned wheel in vendor\whl\. Because the general dep
 REM skip-check above (import qai) cannot distinguish versions, we unconditionally
 REM force-reinstall here so a version bump is never missed on re-run.
 REM
-REM ARM64: vendored wheel lives in vendor\whl\ (pre-downloaded, offline-safe).
-REM x64: NOT vendored (x64 hosts are typically online); download from GitHub
-REM      release on first install, cache in data\downloads\, install from cache.
-REM      Skip download if already cached AND the correct version is installed.
-REM Both architectures download the wheel from the GitHub release whose tag is the first three numeric parts of
-REM qairt_version in scripts\qairt_release.json (2.51.40.260930 -> v2.51.40); x64 takes the pure-x86_64 build
-REM (<tag>.1), ARM64 takes <tag>. Cached in data\downloads\, skipped when exactly that version is installed.
+REM ARM64: from PyPI (pyproject.toml); this step only verifies the minimum version (see below).
+REM x64: the pure-x86_64 build (<tag>.1) from the GitHub release whose tag is the first three numeric parts of
+REM      qairt_version in scripts\qairt_release.json (2.51.40.260930 -> v2.51.40), cached in data\downloads\ and
+REM      skipped when exactly that version is installed. (The PyPI win_amd64 wheel is an ARM64EC build that does not
+REM      load on an x64 CPU, so x64 never installs it from PyPI.)
 set "QAIRT_VERSION_AB="
 for /f "usebackq delims=" %%V in (`powershell -NoProfile -ExecutionPolicy Bypass -Command "try { (Get-Content -Raw -LiteralPath '%ROOT_DIR%scripts\qairt_release.json' | ConvertFrom-Json).qairt_version } catch { exit 1 }" 2^>nul`) do set "QAIRT_VERSION_AB=%%V"
 set "QAI_APPBUILDER_VERSION="
@@ -909,42 +907,25 @@ if not defined QAI_APPBUILDER_VERSION (
     goto :qai_appbuilder_done
 )
 if /i "%HOST_ARCH%"=="x64" goto :qai_appbuilder_x64
-set "QAI_AB_ARM64_WHL_NAME=qai_appbuilder-%QAI_APPBUILDER_VERSION%-cp313-cp313-win_arm64.whl"
-set "QAI_AB_ARM64_WHL_CACHED=%DL_DIR%\%QAI_AB_ARM64_WHL_NAME%"
-set "QAI_AB_ARM64_URL=https://github.com/qualcomm/qai-appbuilder/releases/download/v%QAI_APPBUILDER_VERSION%/%QAI_AB_ARM64_WHL_NAME%"
-"%VENV_DIR%\Scripts\python.exe" -c "import importlib.metadata as m, sys; sys.exit(0 if m.version('qai_appbuilder')=='%QAI_APPBUILDER_VERSION%' else 1)" >nul 2>&1
+REM ARM64: qai-appbuilder is a normal PyPI dependency (pyproject.toml: native cp313 win_arm64 wheel, resolved together
+REM with numpy, which it caps at 2.4.4). Here we only verify that the installed version is at least the minimum for the
+REM pinned QAIRT SDK, and install it from PyPI if it is missing or older (e.g. the dependency step above was skipped).
+REM A newer version is accepted and never downgraded.
+"%VENV_DIR%\Scripts\python.exe" -c "import importlib.metadata as m, sys; v=tuple(int(x) for x in m.version('qai_appbuilder').split('.')[:3]); need=tuple(int(x) for x in '%QAI_APPBUILDER_VERSION%'.split('.')); sys.exit(0 if v>=need else 1)" >nul 2>&1
 if not errorlevel 1 (
-    echo [SKIP] qai_appbuilder %QAI_APPBUILDER_VERSION% already installed ^(ARM64^).
+    echo [SKIP] qai_appbuilder already installed ^(ARM64, at least %QAI_APPBUILDER_VERSION%^).
     goto :qai_appbuilder_done
 )
-if exist "vendor\whl\%QAI_AB_ARM64_WHL_NAME%" set "QAI_AB_ARM64_WHL_CACHED=vendor\whl\%QAI_AB_ARM64_WHL_NAME%"
-if exist "%QAI_AB_ARM64_WHL_CACHED%" goto :qai_appbuilder_arm64_install
-echo [INFO] Downloading qai_appbuilder ARM64 wheel from GitHub...
-echo [INFO] URL: %QAI_AB_ARM64_URL%
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup\download_with_aria2c.ps1" ^
-    -Url "%QAI_AB_ARM64_URL%" ^
-    -OutFile "%QAI_AB_ARM64_WHL_CACHED%" ^
-    -Aria2cExe "data\bin\aria2c\aria2c.exe" ^
-    -MinSize 500000 ^
-    -MaxRetries 3 ^
-    -StallTimeoutSec 60 ^
-    -AttemptTimeoutSec 300
-if not exist "%QAI_AB_ARM64_WHL_CACHED%" (
-    echo [WARN] Failed to download qai_appbuilder ARM64 wheel. App Builder inference
-    echo [WARN] will not work until it is installed. Re-run Setup.bat or install manually:
-    echo [WARN]     uv pip install "%QAI_AB_ARM64_URL%"
-    goto :qai_appbuilder_done
-)
-:qai_appbuilder_arm64_install
-echo [INFO] Installing qai_appbuilder %QAI_APPBUILDER_VERSION% ^(ARM64^)...
-uv pip install --reinstall --no-deps "%QAI_AB_ARM64_WHL_CACHED%"
+echo [INFO] Installing qai-appbuilder ^(>=%QAI_APPBUILDER_VERSION%, ARM64, PyPI^)...
+uv pip install "qai-appbuilder>=%QAI_APPBUILDER_VERSION%,<3"
 if errorlevel 1 (
-    echo [WARN] Failed to install qai_appbuilder ARM64 wheel.
+    echo [WARN] Failed to install qai-appbuilder from PyPI. App Builder inference
+    echo [WARN] will not work until it is installed. Re-run Setup.bat or install manually:
+    echo [WARN]     uv pip install "qai-appbuilder>=%QAI_APPBUILDER_VERSION%,<3"
 ) else (
-    echo [OK]   qai_appbuilder %QAI_APPBUILDER_VERSION% installed ^(ARM64, from GitHub^).
+    echo [OK]   qai_appbuilder installed ^(ARM64, PyPI^).
 )
 goto :qai_appbuilder_done
-
 :qai_appbuilder_x64
 REM --- x64 path: download from GitHub releases if not installed at correct version ---
 set "QAI_AB_X64_WHL_NAME=qai_appbuilder-%QAI_APPBUILDER_VERSION%.1-cp313-cp313-win_amd64.whl"

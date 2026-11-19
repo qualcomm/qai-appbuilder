@@ -7,14 +7,16 @@
 #   .venv_arm64_313 (CPython 3.13, ARM64 Windows)
 #   App Builder Run: 14742 ms / HTP / "And so my fellow Americans..."
 #
-# ── ARM64 vendor wheels (must be installed before pip install -r) ─────────────
-# The following packages have no usable ARM64 wheel on PyPI and must be
-# installed from vendor/whl/ first:
-#
-#   uv pip install vendor/whl/numpy-2.3.1-cp313-cp313-win_arm64.whl
-#   uv pip install vendor/whl/tiktoken-0.12.0-cp313-cp313-win_arm64.whl
-#   uv pip install vendor/whl/soundfile-0.13.1-cp313-cp313-win_arm64.whl
-#   uv pip install vendor/whl/qai_appbuilder-2.46.0-cp313-cp313-win_arm64.whl
+# ── Windows ARM64: everything comes from PyPI ─────────────────────────────────
+# numpy, soundfile and qai-appbuilder have cp313 win_arm64 wheels on PyPI, so no
+# vendor/whl/ step is needed. The versions are lower bounds on purpose: an exact
+# pin makes the packaged app's startup check (ensure_deps_base._version_satisfied)
+# "repair" a newer, healthy install by DOWNGRADING it (qai-appbuilder ==2.45.40
+# used to replace the 2.48+ that Setup installed; numpy ==2.3.1 and
+# soundfile ==0.13.1 likewise - 0.13.1 on PyPI has no bundled libsndfile).
+# qai-appbuilder caps numpy at 2.4.4 itself.
+# tiktoken has NO win_arm64 wheel anywhere official (the sdist needs Rust), so it
+# is not requested on ARM64; see "Tokenizer" below.
 #
 # ── Tokenizer ────────────────────────────────────────────────────────────────
 # The runner uses a custom _TiktokenDecoder built from the gpt2.tiktoken vocab
@@ -24,30 +26,34 @@
 # openai-whisper must be installed with --no-deps to avoid pulling
 # numba/llvmlite, which have no pre-built ARM64 Windows wheels:
 #   uv pip install --no-deps openai-whisper==20250625
-# tiktoken, more-itertools, tqdm, regex are the only runtime deps actually
-# used and are listed here so Setup_Builder_Env installs them separately.
+# tiktoken (x64 / non-ARM64 only), more-itertools, tqdm, regex are the only
+# runtime deps actually used and are listed here so Setup_Builder_Env installs
+# them separately.
+# KNOWN GAP: on Windows ARM64 the runner still imports tiktoken, which is not
+# installable there, so this pack cannot start on ARM64 until the runner gets a
+# pure-Python BPE fallback (planned, not part of this change).
 #
 # ── Audio I/O ────────────────────────────────────────────────────────────────
-# soundfile must be installed from vendor/whl/ (PyPI wheel lacks the bundled
-# libsndfile.dll for ARM64 Windows). See vendor wheel install command above.
+# soundfile >=0.14.0 ships a win_arm64 wheel that bundles libsndfile.
 #
 # ── QNN inference ────────────────────────────────────────────────────────────
 # Uses shared/qnn_helper.QnnContext (same pattern as ppocrv4).
-# qai-appbuilder must be installed from vendor/whl/. See above.
+# qai-appbuilder comes from PyPI on ARM64 (the shared App Builder venv already
+# has it from Setup); on x64 Setup installs the GitHub release build.
 
 # --- Core numeric / signal processing ---
-numpy==2.3.1             # log-mel spectrogram + decoder cache arrays (ARM64 vendor wheel)
+numpy>=2.3.1             # log-mel spectrogram + decoder cache arrays (qai-appbuilder caps it at 2.4.4)
 scipy>=1.17.1            # log_softmax / logsumexp in the timestamp filter
 
 # --- Audio decoding ---
-soundfile==0.13.1        # wav/flac/ogg via bundled libsndfile (ARM64 vendor wheel)
+soundfile>=0.14.0        # wav/flac/ogg via bundled libsndfile (win_arm64 wheel on PyPI)
 
 # --- Tokenizer ---
 openai-whisper==20250625 # provides assets/gpt2.tiktoken vocab file only; install --no-deps
-tiktoken==0.12.0         # BPE engine that reads gpt2.tiktoken offline (ARM64 vendor wheel)
+tiktoken==0.12.0; platform_machine != 'ARM64'  # BPE engine that reads gpt2.tiktoken offline (no win_arm64 wheel)
 more-itertools>=11.0.2   # runtime dep of openai-whisper
 tqdm>=4.67.3             # runtime dep of openai-whisper
 regex>=2026.5.9          # runtime dep of tiktoken
 
 # --- QNN inference ---
-qai-appbuilder==2.45.40  # QNN HTP binding (ARM64 vendor wheel)
+qai-appbuilder>=2.45.40  # QNN HTP binding (pack's own lower bound; never pin ==)
