@@ -37,8 +37,9 @@ This runner exposes the three-stage persistent API (``load_model`` /
 ``run_inference`` / ``release_model``).  ``main()`` chains them so the
 file remains usable as a one-shot subprocess script as well.
 
-Isolation: imports only NumPy, scipy.special, tiktoken,
-qai_appbuilder, and the App Builder ``shared/`` utilities. No imports
+Isolation: imports only NumPy, scipy.special, tiktoken (optional: falls
+back to ``shared/pure_bpe.py``), qai_appbuilder, and the App Builder
+``shared/`` utilities. No imports
 from features/model-builder.
 """
 
@@ -568,6 +569,31 @@ class _WhisperTokenizerFull:
         return self._enc.encode(text)
 
 
+def _encoding_class():
+    """``tiktoken.Encoding`` when tiktoken is installed, else the pure-Python equivalent.
+
+    tiktoken has no Windows ARM64 wheel; ``shared/pure_bpe.py`` implements the subset used
+    here (``encode``, ``decode``, ``n_vocab``, ``special_tokens_set``, ``encode_single_token``)
+    with identical token ids. Only a missing ``regex`` makes this raise.
+    """
+    try:
+        import tiktoken
+
+        return tiktoken.Encoding
+    except ImportError:
+        pass
+    try:
+        from pure_bpe import PureBpeEncoding   # shared/ is on PYTHONPATH
+
+        return PureBpeEncoding
+    except ImportError as e:
+        raise _UserError(
+            "TOKENIZER_LOAD_ERROR",
+            f"neither tiktoken nor the bundled pure-Python tokenizer could be loaded ({e}). "
+            "Run: pip install regex",
+        ) from e
+
+
 def _load_tokenizer(pack_dir: Path) -> _WhisperTokenizerFull:
     """Build a Whisper tokenizer, auto-detecting multilingual vs base.en.
 
@@ -578,13 +604,7 @@ def _load_tokenizer(pack_dir: Path) -> _WhisperTokenizerFull:
     If both exist, multilingual takes priority (the superset model).
     """
     import base64
-    try:
-        import tiktoken
-    except ImportError as e:
-        raise _UserError(
-            "TOKENIZER_LOAD_ERROR",
-            f"tiktoken is not installed: {e}. Run: pip install tiktoken",
-        ) from e
+    Encoding = _encoding_class()
 
     # Locate whisper package assets
     whisper_pkg_assets: Optional[Path] = None
@@ -660,7 +680,7 @@ def _load_tokenizer(pack_dir: Path) -> _WhisperTokenizerFull:
         n_vocab += 1
 
     try:
-        enc = tiktoken.Encoding(
+        enc = Encoding(
             name="whisper_multilingual" if is_multilingual else "whisper_base_en",
             pat_str=r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""",
             mergeable_ranks=ranks,
@@ -669,7 +689,7 @@ def _load_tokenizer(pack_dir: Path) -> _WhisperTokenizerFull:
     except Exception as e:
         raise _UserError(
             "TOKENIZER_LOAD_ERROR",
-            f"tiktoken.Encoding construction failed: {e}",
+            f"tokenizer Encoding construction failed: {e}",
         ) from e
 
     lang_count = 99 if is_multilingual else 0
@@ -679,7 +699,7 @@ def _load_tokenizer(pack_dir: Path) -> _WhisperTokenizerFull:
 def _load_tokenizer_mode(pack_dir: Path, *, multilingual: bool) -> _WhisperTokenizerFull:
     """Force-load tokenizer in a specific mode (used after vocab probe mismatch)."""
     import base64
-    import tiktoken
+    Encoding = _encoding_class()
 
     target_file = "multilingual.tiktoken" if multilingual else "gpt2.tiktoken"
 
@@ -730,7 +750,7 @@ def _load_tokenizer_mode(pack_dir: Path, *, multilingual: bool) -> _WhisperToken
         special_tokens[token] = n_vocab
         n_vocab += 1
 
-    enc = tiktoken.Encoding(
+    enc = Encoding(
         name="whisper_multilingual" if multilingual else "whisper_base_en",
         pat_str=r"""'s|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+""",
         mergeable_ranks=ranks,

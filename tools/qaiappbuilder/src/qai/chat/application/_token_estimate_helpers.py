@@ -37,6 +37,17 @@ from typing import Any, Literal
 from qai.chat.domain.content import MessageRole
 from qai.chat.domain.sub_agent_session import SubAgentSession
 from qai.chat.domain.usage_math import finalize_cumulative_prompt_usage
+from qai.platform.bpe import (
+    CL100K_BASE,
+    EncodingSpec,
+    PureBpeEncoding,
+    cached_vocab,
+    fetch_vocab,
+    load_ranks,
+)
+from qai.platform.logging import get_logger
+
+_log = get_logger(__name__)
 
 # Byte-per-token / per-message overhead constants. These mirror the values in
 # ``qai.chat.adapters.context_size_estimator`` (lines 58/68/72) but are
@@ -695,29 +706,84 @@ def _tiktoken_encoding_name(model_id: str | None) -> str:
     return "cl100k_base"
 
 
+#: Vocabularies this module knows how to obtain (official source + SHA-256).
+_ENCODING_SPECS: dict[str, EncodingSpec] = {CL100K_BASE.name: CL100K_BASE}
+
+
+def _vocab_cache_dir() -> Path | None:
+    """``TIKTOKEN_CACHE_DIR`` if the operator set it, else ``<repo_root>/vendor/tiktoken``."""
+    override = os.environ.get("TIKTOKEN_CACHE_DIR", "").strip()
+    if override:
+        return Path(override)
+    repo_root = _find_repo_root()
+    return None if repo_root is None else repo_root / "vendor" / "tiktoken"
+
+
 @lru_cache(maxsize=4)
 def _get_encoder(encoding_name: str) -> Any | None:
-    """Module-cached tiktoken encoder, loaded OFFLINE from ``vendor/tiktoken``.
+    """Module-cached encoder for ``encoding_name``, strictly OFFLINE; ``None`` if unavailable.
 
-    Sets ``TIKTOKEN_CACHE_DIR`` to ``<repo_root>/vendor/tiktoken`` (resolved by
-    structure marker) so ``tiktoken.get_encoding`` reads the vendored BPE files
-    instead of hitting the network (offline → SSLError otherwise). Lazy import
-    of tiktoken keeps module-load cost out of the hot path. Returns ``None`` on
-    ANY failure (tiktoken missing / vocab not found / load error) — the caller
-    then falls back to the ``len//2`` heuristic. Never raises.
+    The vocabulary must already be in the cache directory (``vendor/tiktoken``) with a
+    matching SHA-256 - this function never touches the network, so it can sit on the chat
+    hot path. :func:`warm_token_backend` downloads a missing vocabulary in the background.
+
+    Backend order: real ``tiktoken`` (Rust, fastest) when it is importable and loads, else
+    the pure-Python :class:`~qai.platform.bpe.PureBpeEncoding` (same token ids; the only
+    option on Windows ARM64, where PyPI has no tiktoken wheel). Both expose ``encode``.
+    ``None`` -> the caller falls back to the ``len//2`` heuristic. Never raises.
     """
     try:
-        repo_root = _find_repo_root()
-        if repo_root is not None:
-            cache_dir = repo_root / "vendor" / "tiktoken"
-            if cache_dir.is_dir():
-                # Only set when unset, so an operator override is respected.
-                os.environ.setdefault("TIKTOKEN_CACHE_DIR", str(cache_dir))
-        import tiktoken  # noqa: PLC0415 — lazy: avoid module-load cost
+        spec = _ENCODING_SPECS.get(encoding_name)
+        cache_dir = _vocab_cache_dir()
+        if spec is None or cache_dir is None:
+            return None
+        vocab = cached_vocab(spec, cache_dir)
+        if vocab is None:
+            _log.info("chat.token_backend", backend="len2", encoding=encoding_name, reason="vocab_missing")
+            return None
+        try:
+            import tiktoken  # noqa: PLC0415 — lazy: avoid module-load cost
 
-        return tiktoken.get_encoding(encoding_name)
+            os.environ.setdefault("TIKTOKEN_CACHE_DIR", str(cache_dir))
+            enc = tiktoken.get_encoding(encoding_name)
+            _log.info("chat.token_backend", backend="tiktoken", encoding=encoding_name)
+            return enc
+        except Exception:  # noqa: BLE001 — no wheel / broken install: use the pure-Python one
+            pass
+        pure = PureBpeEncoding(
+            spec.name, spec.pat_str, load_ranks(vocab), spec.special_tokens
+        )
+        _log.info("chat.token_backend", backend="pure", encoding=encoding_name)
+        return pure
     except Exception:  # noqa: BLE001 — never break chat on token counting
         return None
+
+
+def token_backend_name(encoding_name: str = "cl100k_base") -> str:
+    """``"tiktoken"``, ``"pure"`` or ``"len2"`` - which counter is in effect right now."""
+    enc = _get_encoder(encoding_name)
+    if enc is None:
+        return "len2"
+    return "pure" if isinstance(enc, PureBpeEncoding) else "tiktoken"
+
+
+def warm_token_backend(*, timeout: float = 20.0) -> str:
+    """Make the token counter ready, fetching the vocabulary once if it is missing.
+
+    BLOCKING (may download ~1.7 MB from OpenAI's official URL, SHA-256 verified): run it in
+    a worker thread at startup, never on a request path. Safe to call repeatedly. Returns the
+    backend name; a failed download simply leaves the ``len//2`` fallback in place.
+    """
+    try:
+        name = _tiktoken_encoding_name(None)
+        spec = _ENCODING_SPECS.get(name)
+        cache_dir = _vocab_cache_dir()
+        if spec is not None and cache_dir is not None and cached_vocab(spec, cache_dir) is None:
+            fetch_vocab(spec, cache_dir, timeout=timeout)
+            _get_encoder.cache_clear()  # drop a cached "no vocab" result
+        return token_backend_name(name)
+    except Exception:  # noqa: BLE001 — warm-up must never raise
+        return "len2"
 
 
 def precise_text_tokens(text: str, model_id: str | None) -> int | None:
@@ -737,7 +803,7 @@ def precise_text_tokens(text: str, model_id: str | None) -> int | None:
         enc = _get_encoder(_tiktoken_encoding_name(model_id))
         if enc is None:
             return None
-        return len(enc.encode(text))
+        return len(enc.encode(text, disallowed_special=()))
     except Exception:  # noqa: BLE001 — never break chat on token counting
         return None
 
@@ -1030,4 +1096,6 @@ __all__ = [
     "non_text_content_bytes",
     "precise_text_tokens",
     "record_subagent_turn_usage",
+    "token_backend_name",
+    "warm_token_backend",
 ]

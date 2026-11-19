@@ -900,6 +900,25 @@ def make_lifespan(
                 exc_info=True,
             )
 
+        # Token counting backend warm-up (tiktoken / pure-Python BPE / len//2).
+        # On Windows ARM64 there is no tiktoken wheel, so exact counting needs the
+        # cl100k_base vocabulary in ``vendor/tiktoken``; fetch it once from OpenAI's
+        # official URL (SHA-256 verified) here, off the request path and in a worker
+        # thread, then log which backend is in effect. Failure just leaves the
+        # ``len//2`` estimate in place; it is retried on the next start.
+        try:
+            from qai.chat.application._token_estimate_helpers import (  # noqa: PLC0415
+                warm_token_backend,
+            )
+
+            async def _warm_token_backend() -> None:
+                backend = await asyncio.to_thread(warm_token_backend)
+                _log.info("lifespan.token_backend_ready", token_backend=backend)
+
+            asyncio.create_task(_warm_token_backend(), name="token-backend-warmup")
+        except Exception:  # noqa: BLE001 — spawn must never abort startup
+            _log.warning("lifespan.token_backend_warmup_spawn_failed", exc_info=True)
+
         try:
             # Write the runtime endpoint file (single source of truth for
             # "where is the API now") just before yielding control to

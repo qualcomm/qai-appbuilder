@@ -16,7 +16,8 @@
 # soundfile ==0.13.1 likewise - 0.13.1 on PyPI has no bundled libsndfile).
 # qai-appbuilder caps numpy at 2.4.4 itself.
 # tiktoken has NO win_arm64 wheel anywhere official (the sdist needs Rust), so it
-# is not requested on ARM64; see "Tokenizer" below.
+# is not requested at all; the runner uses it when present and otherwise the
+# pure-Python BPE in shared/pure_bpe.py (identical token ids; needs only ``regex``).
 #
 # ── Tokenizer ────────────────────────────────────────────────────────────────
 # The runner uses a custom _TiktokenDecoder built from the gpt2.tiktoken vocab
@@ -26,12 +27,9 @@
 # openai-whisper must be installed with --no-deps to avoid pulling
 # numba/llvmlite, which have no pre-built ARM64 Windows wheels:
 #   uv pip install --no-deps openai-whisper==20250625
-# tiktoken (x64 / non-ARM64 only), more-itertools, tqdm, regex are the only
-# runtime deps actually used and are listed here so Setup_Builder_Env installs
-# them separately.
-# KNOWN GAP: on Windows ARM64 the runner still imports tiktoken, which is not
-# installable there, so this pack cannot start on ARM64 until the runner gets a
-# pure-Python BPE fallback (planned, not part of this change).
+# more-itertools, tqdm, regex are the only runtime deps actually used and are
+# listed here so Setup_Builder_Env installs them separately. (tiktoken is
+# optional: the runner falls back to shared/pure_bpe.py.)
 #
 # ── Audio I/O ────────────────────────────────────────────────────────────────
 # soundfile >=0.14.0 ships a win_arm64 wheel that bundles libsndfile.
@@ -50,10 +48,9 @@ soundfile>=0.14.0        # wav/flac/ogg via bundled libsndfile (win_arm64 wheel 
 
 # --- Tokenizer ---
 openai-whisper==20250625 # provides assets/gpt2.tiktoken vocab file only; install --no-deps
-tiktoken==0.12.0; platform_machine != 'ARM64'  # BPE engine that reads gpt2.tiktoken offline (no win_arm64 wheel)
 more-itertools>=11.0.2   # runtime dep of openai-whisper
 tqdm>=4.67.3             # runtime dep of openai-whisper
-regex>=2026.5.9          # runtime dep of tiktoken
+regex>=2026.5.9          # BPE pre-tokenizer regex (shared/pure_bpe.py; also tiktoken's dependency)
 
 # --- QNN inference ---
 qai-appbuilder>=2.45.40  # QNN HTP binding (pack's own lower bound; never pin ==)
