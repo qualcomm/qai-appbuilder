@@ -634,7 +634,7 @@ def estimate_wire_tokens(
                 if fb > _BPE_PER_FRAGMENT_MAX_BYTES:
                     precise += fb // 4
                 else:
-                    precise += len(enc.encode(f))
+                    precise += len(enc.encode(f, disallowed_special=()))
             return int(precise) + image_bytes_extra // 4
     except Exception:  # noqa: BLE001 — tokenizer never breaks the hot loop
         pass
