@@ -41,7 +41,6 @@ import { useUiStore, type ToolMode } from "@/stores/ui";
 import { useVoiceInput, VOICE_ENGINES } from "@/composables/useVoiceInput";
 import { useContextUsage } from "@/composables/chat/useContextUsage";
 import { useForgeConfig } from "@/composables/useForgeConfig";
-import { useSkillsStore } from "@/stores/skills";
 import { useConversationsStore } from "@/stores/conversations";
 import { useClaudeCode } from "@/composables/useClaudeCode";
 import { useOpenCode } from "@/composables/useOpenCode";
@@ -1124,10 +1123,6 @@ watch(
   { immediate: true },
 );
 
-// Enabled-skills count for the `⚡ N skills active` indicator (V1 parity).
-// Shared store so the composer and the sidebar Skills badge agree.
-const skillsStore = useSkillsStore();
-const enabledSkillsCount = computed(() => skillsStore.enabledSkillsCount);
 
 // ─── Session working directory (V2 enhancement) ─────────────────────────────
 // Every conversation may set an optional `meta.workspace` override via the
@@ -1504,21 +1499,6 @@ const {
         </div>
       </div>
 
-      <!-- Enabled skills indicator (V1 index.html:1185-1189). Icon-only pill:
-           ⚡ N (count only; the full "N skills active" phrasing lives in the
-           title tooltip on hover — mirrors the concise inline style of the
-           ctx-badge % chip). The i18n key `chat.skillsActive` is unchanged
-           (retained as the tooltip source). Shown only when N > 0. -->
-      <div
-        v-if="enabledSkillsCount > 0"
-        class="rit-skills-active"
-        data-testid="skills-active-indicator"
-        :title="t('chat.skillsActive', { n: enabledSkillsCount })"
-        :aria-label="t('chat.skillsActive', { n: enabledSkillsCount })"
-      >
-        <span aria-hidden="true">⚡</span>
-        <span>{{ enabledSkillsCount }}</span>
-      </div>
 
       <!-- Claude Code pill (T2.7-B) — V1 parity (index.html:1191-1209).
            Settings gate: hidden when forge_config.ai_coding.cc.enabled
@@ -2686,15 +2666,6 @@ const {
   font-variant-numeric: tabular-nums;
 }
 
-/* Enabled-skills indicator — V1 parity (index.html:1186 inline style:
-   flex row, 4px gap, small muted text). */
-.rit-skills-active {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--text-sm, 0.8125rem);
-  color: var(--text-muted, #9aa0aa);
-  white-space: nowrap;
 }
 
 /* Sub-agent "allow question" toggle (收尾 ①). Inherits the icon-button
