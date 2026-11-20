@@ -359,6 +359,12 @@ public:
 
         vocab = llama_model_get_vocab(model);
 
+        const auto harmony_start_tokens = common_tokenize(ctx, "<|start|>", false, true);
+        if (harmony_start_tokens.size() == 1)
+        {
+            harmony_start_token_ = harmony_start_tokens[0];
+        }
+
         smpl = llama_init->sampler(0);
         if (!smpl)
         {
@@ -704,12 +710,22 @@ public:
         }
         int ckpt_end = prefix_cache_on ? FindCheckpointPos(effective_prompt_len, n_reuse, 1) : -1;
         if (prefix_cache_on) {
-            const auto im_end_tokens = common_tokenize(ctx, "<|im_end|>", false, true);
-            if (im_end_tokens.size() == 1) {
+            const bool harmony_prompt = harmony_start_token_ != LLAMA_TOKEN_NULL;
+            const std::vector<const char *> end_texts = harmony_prompt
+                    ? std::vector<const char *>{"<|end|>", "<|call|>"}
+                    : std::vector<const char *>{"<|im_end|>"};
+            std::vector<llama_token> end_tokens;
+            for (const char *end_text : end_texts) {
+                const auto end_token = common_tokenize(ctx, end_text, false, true);
+                if (end_token.size() == 1) {
+                    end_tokens.push_back(end_token[0]);
+                }
+            }
+            if (!end_tokens.empty()) {
                 const llama_token bos = llama_vocab_bos(vocab);
                 llama_token msg_start = LLAMA_TOKEN_NULL;
                 for (int i = 0; i < effective_prompt_len; ++i) {
-                    if (embd_inp[i] != bos && llama_vocab_is_control(vocab, embd_inp[i])) {
+                    if (IsMessageStartToken(embd_inp[i], bos)) {
                         msg_start = embd_inp[i];
                         break;
                     }
@@ -723,12 +739,13 @@ public:
                 }
                 int tail_start = -1;
                 for (int i = last_msg_start - 1; i >= 0; --i) {
-                    if (embd_inp[i] == im_end_tokens[0]) {
+                    if (std::find(end_tokens.begin(), end_tokens.end(), embd_inp[i]) != end_tokens.end()) {
                         tail_start = i + 1;
                         break;
                     }
                 }
-                if (tail_start >= 0 && last_msg_start - tail_start > 1)
+                const int min_tail_gap = harmony_prompt ? 0 : 1;
+                if (tail_start >= 0 && last_msg_start - tail_start > min_tail_gap)
                     ckpt_end = tail_start;
             }
         }
@@ -738,6 +755,15 @@ public:
         for (size_t i = 0; i < ckpt_points.size(); ++i)
         {
             head_str += (i ? "," : "") + std::to_string(ckpt_points[i]);
+        }
+        if (prefix_cache_on && harmony_start_token_ != LLAMA_TOKEN_NULL)
+        {
+            const int ckpt_prev = FindCheckpointPos(effective_prompt_len, n_reuse, 2);
+            if (ckpt_prev > n_reuse && ckpt_prev < ckpt_end &&
+                std::find(ckpt_points.begin(), ckpt_points.end(), ckpt_prev) == ckpt_points.end())
+            {
+                ckpt_points.push_back(ckpt_prev);
+            }
         }
         if (ckpt_end > n_reuse)
         {
@@ -1423,6 +1449,7 @@ public:
     void (*ggml_threadpool_free_fn)(ggml_threadpool *){};
 
     const llama_vocab *vocab = nullptr;
+    llama_token harmony_start_token_ = LLAMA_TOKEN_NULL;
     common_sampler *smpl = nullptr;
     ggml_threadpool *threadpool_batch{};
     ggml_threadpool *threadpool{};
@@ -1512,13 +1539,26 @@ public:
                llama_state_seq_set_data_ext(c, buf.data(), buf.size(), 0, LLAMA_STATE_SEQ_FLAGS_PARTIAL_ONLY) > 0;
     }
 
+    bool IsMessageStartToken(llama_token token, llama_token bos) const
+    {
+        if (token == bos)
+        {
+            return false;
+        }
+        if (harmony_start_token_ != LLAMA_TOKEN_NULL && token == harmony_start_token_)
+        {
+            return true;
+        }
+        return llama_vocab_is_control(vocab, token);
+    }
+
     int FindCheckpointPos(int effective_prompt_len, int n_reuse, int nth) const
     {
         const llama_token bos = llama_vocab_bos(vocab);
         llama_token msg_start = LLAMA_TOKEN_NULL;
         for (int i = 0; i < effective_prompt_len; ++i)
         {
-            if (embd_inp[i] != bos && llama_vocab_is_control(vocab, embd_inp[i]))
+            if (IsMessageStartToken(embd_inp[i], bos))
             {
                 msg_start = embd_inp[i];
                 break;
@@ -1557,7 +1597,7 @@ public:
         int first = -1;
         for (int i = 0; i < effective_prompt_len; ++i)
         {
-            if (embd_inp[i] != bos && llama_vocab_is_control(vocab, embd_inp[i]))
+            if (IsMessageStartToken(embd_inp[i], bos))
             {
                 msg_start = embd_inp[i];
                 first = i;

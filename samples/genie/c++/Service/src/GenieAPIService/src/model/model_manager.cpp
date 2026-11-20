@@ -1752,6 +1752,31 @@ bool ModelManager::InitializeConfig()
                 }
 #endif
 
+                {
+                    bool qnn_cache_enabled = true;
+                    uint64_t qnn_cache_max_mb = 3072;
+                    int qnn_cache_max_checkpoints = 6;
+                    bool qnn_cache_tail_fallback = true;
+                    std::string qnn_cache_dir;
+                    if (pe_json.contains("qnn_prefix_cache") && pe_json["qnn_prefix_cache"].is_object())
+                    {
+                        const auto &qc = pe_json["qnn_prefix_cache"];
+                        qnn_cache_enabled = qc.value("enabled", true);
+                        qnn_cache_max_mb = qc.value("max_total_mb", static_cast<uint64_t>(3072));
+                        qnn_cache_max_checkpoints = qc.value("max_checkpoints", 6);
+                        qnn_cache_tail_fallback = qc.value("tail_fallback", true);
+                        qnn_cache_dir = qc.value("dir", std::string());
+                    }
+                    GenieContext::ConfigureCheckpoint(qnn_cache_enabled, qnn_cache_max_mb << 20,
+                                                      qnn_cache_max_checkpoints, qnn_cache_tail_fallback,
+                                                      qnn_cache_dir);
+                    My_Log{} << "[Config] qnn_prefix_cache.enabled=" << qnn_cache_enabled
+                             << " max_total_mb=" << qnn_cache_max_mb
+                             << " max_checkpoints=" << qnn_cache_max_checkpoints
+                             << " tail_fallback=" << qnn_cache_tail_fallback
+                             << " dir=" << (qnn_cache_dir.empty() ? "<default>" : qnn_cache_dir) << std::endl;
+                }
+
                 if (pe_json.contains("prompt_optimization"))
                 {
                     const auto &po = pe_json["prompt_optimization"];
