@@ -236,7 +236,6 @@ const chat = {
     copied: "Copied",
     zoomHint: "Click to zoom",
   },
-  skillsActive: "{n} skills active",
   collapse: "Collapse",
   collapseToolCards: "Collapse Tool Cards",
   expand: "Expand",
