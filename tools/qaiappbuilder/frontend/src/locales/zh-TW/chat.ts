@@ -232,7 +232,6 @@ const chat = {
     copied: "已複製",
     zoomHint: "點擊放大",
   },
-  skillsActive: "{n} 個技能已啟用",
   collapse: "摺疊",
   collapseToolCards: "摺疊所有工具卡",
   expand: "展開",

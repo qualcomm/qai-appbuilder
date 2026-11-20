@@ -825,14 +825,6 @@ const { fontSizePopoverOpen, fontSizeWrapEl, toggleFontSizePopover } =
           v-show="!ui.sidebarCollapsed"
           class="nav-label"
         >{{ t("nav.skills") }}</span>
-        <!-- Enabled-skills badge (V1 app.js:2000-2001) — shows the count
-             of skills with mode !== 'off'; hidden when 0. Same shared
-             store as the composer `⚡ N skills active` indicator. -->
-        <span
-          v-if="!ui.sidebarCollapsed && skillsStore.enabledSkillsCount > 0"
-          class="nav-badge"
-          aria-hidden="true"
-        >{{ skillsStore.enabledSkillsCount }}</span>
       </RouterLink>
 
       <!-- Channels -->
