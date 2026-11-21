@@ -241,14 +241,31 @@ def _extract_zip_to_dir(zip_path: Path, dest_dir: Path, *, tmp_base: Path) -> No
 
     All filesystem calls go through :func:`_long_path` so a long archive name
     stacked on a deep install root can't trip ``WinError 206``.
+
+    Every failure surfaces as :class:`InstallFailedError` with a message the
+    model card can show as-is: not a zip at all (a truncated download or a
+    saved error page — the catalog has no checksum for most zips, so this is
+    the first point that can tell), not enough free space, or anything
+    ``zipfile`` raises mid-way (``NotImplementedError`` for Deflate64,
+    ``zlib.error``, ``EOFError`` on a truncated member ...). The temporary
+    flatten dir never outlives the call.
     """
+    if not zipfile.is_zipfile(zip_path):
+        raise InstallFailedError(
+            f"{zip_path.name} is not a zip archive ({_size_text(zip_path)}): the "
+            "download is incomplete or the server returned an error page. "
+            "Delete it and download the model again."
+        )
+    tmp_extract = tmp_base / f"{zip_path.stem}_tmp_extract"
     try:
         with zipfile.ZipFile(zip_path) as zf:
+            _ensure_free_space(
+                sum(info.file_size for info in zf.infolist()), tmp_base
+            )
             names = [n for n in zf.namelist() if n and not n.startswith("__MACOSX")]
             top_level = {n.split("/")[0].split("\\")[0] for n in names}
             top_level.discard("")
             if len(top_level) == 1:
-                tmp_extract = tmp_base / f"{zip_path.stem}_tmp_extract"
                 shutil.rmtree(_long_path(tmp_extract), ignore_errors=True)
                 os.makedirs(_long_path(tmp_extract), exist_ok=True)
                 zf.extractall(_long_path(tmp_extract))
@@ -259,14 +276,54 @@ def _extract_zip_to_dir(zip_path: Path, dest_dir: Path, *, tmp_base: Path) -> No
                     shutil.move(
                         _long_path(source / name), _long_path(dest_dir / name)
                     )
-                shutil.rmtree(_long_path(tmp_extract), ignore_errors=True)
             else:
                 os.makedirs(_long_path(dest_dir), exist_ok=True)
                 zf.extractall(_long_path(dest_dir))
+    except InstallFailedError:
+        raise
     except zipfile.BadZipFile as exc:
         raise InstallFailedError(f"corrupt archive: {exc}") from exc
     except OSError as exc:
         raise InstallFailedError(f"extraction failed: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001 — zipfile raises more than BadZipFile/OSError
+        raise InstallFailedError(
+            f"extraction failed ({type(exc).__name__}): {exc}"
+        ) from exc
+    finally:
+        shutil.rmtree(_long_path(tmp_extract), ignore_errors=True)
+
+
+#: Head-room left free on top of an archive's uncompressed size, so a model
+#: install never fills the disk to the last byte.
+_EXTRACT_FREE_SPACE_MARGIN = 512 * 1024 * 1024
+
+
+def _size_text(path: Path) -> str:
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return "size unknown"
+    return f"{size / 1024**3:.2f} GB" if size >= 1024**3 else f"{size:,} bytes"
+
+
+def _ensure_free_space(needed: int, target: Path) -> None:
+    """Fail before extracting when ``target``'s drive cannot hold ``needed`` bytes.
+
+    The zip is only deleted after a successful install, so the drive has to
+    hold both at once; without this check a full disk surfaces half-way
+    through as a bare ``[Errno 28]``.
+    """
+    try:
+        free = shutil.disk_usage(target).free
+    except OSError:
+        return  # cannot tell: let the extraction itself decide
+    if free < needed + _EXTRACT_FREE_SPACE_MARGIN:
+        raise InstallFailedError(
+            f"not enough disk space: the model needs {needed / 1024**3:.1f} GB "
+            f"unpacked (plus {_EXTRACT_FREE_SPACE_MARGIN / 1024**3:.1f} GB "
+            f"head-room) but only {free / 1024**3:.1f} GB is free on the drive "
+            f"of {target}. Free up space and click Install again."
+        )
 
 
 def _delete_zip_after_install(zip_path: Path) -> bool:
@@ -517,10 +574,24 @@ class FileSystemArtifactInstaller(ArtifactInstallerPort):
         if dest_dir.exists():
             if bak_dir.exists():
                 shutil.rmtree(bak_dir, ignore_errors=True)
-            dest_dir.rename(bak_dir)
+            try:
+                # Antivirus / indexer scans briefly lock freshly written model
+                # files; the same retry the service install uses.
+                _rename_retrying(dest_dir, bak_dir)
+            except OSError as exc:
+                raise InstallFailedError(
+                    f"cannot replace the existing {dest_dir.name} install, a file "
+                    f"in it is in use (close any app using this model, then "
+                    f"retry): {exc}"
+                ) from exc
         try:
             if is_zip:
-                _extract_zip_to_dir(src_path, dest_dir, tmp_base=models_root)
+                # Multi-GB unzip: run it off the event loop, otherwise the
+                # whole backend (chat, status polling) freezes for minutes and
+                # the app looks hung mid-install.
+                await asyncio.to_thread(
+                    _extract_zip_to_dir, src_path, dest_dir, tmp_base=models_root
+                )
             else:
                 # Raw single-file model (e.g. a GGUF weight downloaded
                 # directly, not packaged as a zip). Move it in as-is —
@@ -528,7 +599,9 @@ class FileSystemArtifactInstaller(ArtifactInstallerPort):
                 # non-recursive top-level dir scan, so it must sit directly
                 # under ``dest_dir``, never inside a sub-directory.
                 dest_dir.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(src_path), str(dest_dir / src_path.name))
+                await asyncio.to_thread(
+                    shutil.move, str(src_path), str(dest_dir / src_path.name)
+                )
             # Additional raw files (e.g. a speculative-decoding drafter GGUF)
             # declared by the catalog variant. Placed into their own
             # sub-directory so they never interfere with the non-recursive
@@ -556,10 +629,29 @@ class FileSystemArtifactInstaller(ArtifactInstallerPort):
                     json.dumps(install_config, indent=4, ensure_ascii=False),
                     encoding="utf-8",
                 )
-        except InstallFailedError:
+        except Exception as exc:  # noqa: BLE001 — every failure must restore the previous install
+            # A zip install leaves only extracted copies in dest_dir (the zip
+            # itself is untouched), so a half-written dest_dir is dropped and
+            # the previous install put back. A raw-file install has already
+            # MOVED the download into dest_dir: keep it, never delete it.
+            if is_zip and dest_dir.exists():
+                shutil.rmtree(_long_path(dest_dir), ignore_errors=True)
             if bak_dir.exists() and not dest_dir.exists():
-                bak_dir.rename(dest_dir)
-            raise
+                with suppress(OSError):
+                    _rename_retrying(bak_dir, dest_dir)
+            _LOGGER.warning(
+                "model_install.failed",
+                model_id=model_id or dest_name,
+                save_path=save_path,
+                save_size=_size_text(src_path),
+                exc_type=type(exc).__name__,
+                error=str(exc),
+            )
+            if isinstance(exc, InstallFailedError):
+                raise
+            raise InstallFailedError(
+                f"install failed ({type(exc).__name__}): {exc}"
+            ) from exc
         if bak_dir.exists():
             shutil.rmtree(bak_dir, ignore_errors=True)
         # Persist which platform variant AND which catalog model_id this dir

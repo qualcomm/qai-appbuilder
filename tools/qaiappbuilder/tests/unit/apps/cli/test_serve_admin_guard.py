@@ -15,10 +15,17 @@ from __future__ import annotations
 import pytest
 
 from apps.cli import serve
+from qai.platform.process import elevation_is_unavoidable
 
 
 class _ReachedParser(Exception):
     """Raised by the fake parser to prove ``main`` got past the guard."""
+
+
+@pytest.fixture(autouse=True)
+def _elevation_avoidable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default: a UAC split-token session, independent of the machine running the tests."""
+    monkeypatch.setattr(serve, "elevation_is_unavoidable", lambda: False)
 
 
 def _stop_at_parser(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -91,6 +98,28 @@ def test_env_values_that_are_not_truthy_keep_the_guard_on(
     _stop_at_parser(monkeypatch)
 
     assert serve.main([]) == serve.ELEVATED_REFUSED_EXIT_CODE
+
+
+def test_admin_without_a_way_to_run_unelevated_starts_with_warning(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # UAC off / built-in Administrator: refusing would lock the user out.
+    monkeypatch.setattr(serve, "is_admin", lambda: True)
+    monkeypatch.setattr(serve, "elevation_is_unavoidable", lambda: True)
+    monkeypatch.delenv(serve.ALLOW_ELEVATED_ENV, raising=False)
+    _stop_at_parser(monkeypatch)
+
+    with pytest.raises(_ReachedParser):
+        serve.main([])
+
+    err = capsys.readouterr().err
+    assert "WARNING" in err
+    assert "UAC is off" in err
+    assert "Refusing to start" not in err
+
+
+def test_elevation_probe_on_this_machine_does_not_raise() -> None:
+    assert isinstance(elevation_is_unavoidable(), bool)
 
 
 def test_non_admin_proceeds_and_is_silent_even_if_env_set(

@@ -38,7 +38,7 @@ Public surface (curated)
 
 from __future__ import annotations
 
-from .admin_guard import is_admin
+from .admin_guard import elevation_is_unavoidable, is_admin
 from .arch import current_arch
 from .bundled_path import (
     bundled_bin_dirs,
@@ -77,6 +77,7 @@ __all__ = [
     "cmd_raw_command",
     "create_subprocess_for_argv",
     "current_arch",
+    "elevation_is_unavoidable",
     "is_admin",
     "no_window_creationflags",
     "prepend_bundled_paths",
