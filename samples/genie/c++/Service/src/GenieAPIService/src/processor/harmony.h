@@ -70,6 +70,8 @@ public:
 
     std::string GetMessageForHistory() const;
 
+    void SetAnalysisPrefill(bool enable) { m_analysisPrefill = enable; }
+
 private:
     class Impl;
 
@@ -78,6 +80,7 @@ private:
     std::string m_finalText;
     std::string m_internalAnalysisBuffer;
     size_t m_reasoningSent = 0;
+    bool m_analysisPrefill = false;
     std::string m_commentaryText;
     bool m_isToolCall = false;
     std::string m_toolCallContent;

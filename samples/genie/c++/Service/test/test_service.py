@@ -30,6 +30,7 @@ from service_tests.common import (
     TestResult,
     detect_modality,
     infer_backend,
+    parse_gguf_devices,
     wait_http_ok,
     wait_port_closed,
     wait_port_open,
@@ -97,6 +98,7 @@ def main():
     # 按套件精确运行:
     python test_service.py --exe_dir ./GenieService_v2.3.7 --models ./models --suite sampleapp
     python test_service.py --exe_dir ./GenieService_v2.3.7 --models ./models --suite gguf --gguf_devices gpu
+    python test_service.py --exe_dir ./GenieService_v2.3.7 --models ./models --suite gguf --gguf_devices gpu,cpu,npu,npu_legacy,list,invalid
     python test_service.py --exe_dir ./GenieService_v2.3.7 --models ./models --suite mnn
     python test_service.py --exe_dir ./GenieService_v2.3.7 --models ./models --suite qnn
         """
@@ -126,7 +128,11 @@ def main():
                              "<data_dir>/bin/<name> 以触发 Builder 官方自愈式安装发现），默认复用 --exe_dir。"
                              "供 skill_capacity 的 builder 模式使用")
     parser.add_argument("--gguf_model", default=None, help="GGUF 显式加载回归限定的单个模型目录名（默认留空，测试全部已发现的 GGUF 模型）")
-    parser.add_argument("--gguf_devices", choices=("both", "gpu", "cpu"), default="both", help="GGUF 显式加载回归的设备筛选：both/gpu/cpu（默认 both）")
+    parser.add_argument("--gguf_devices", type=parse_gguf_devices, default=parse_gguf_devices("both"),
+                        help="GGUF 显式加载回归的用例，逗号分隔（both 等价于 gpu,cpu，默认 both）：gpu/cpu 走旧 device 字段，"
+                             "npu 写 \"devices\": \"npu\"，npu_legacy 走旧 device 字段写 npu；npu 类用例放不下按 npu→gpu→cpu 溢出，"
+                             "HTP0 不可用时降级仍判通过并在 detail 标注；list（devices 写成列表）与 invalid（\"devices\": \"tpu\"）"
+                             "期望加载前报错且权重未开始加载")
     parser.add_argument("--skill_capacity_models", default=None,
                         help="--suite skill_capacity 限定测试的目标模型简写，逗号分隔（qwen3-8b/qwen2.5_omini），"
                              "留空则两个目标模型都测（各自缺失时精确跳过，不影响另一个）")

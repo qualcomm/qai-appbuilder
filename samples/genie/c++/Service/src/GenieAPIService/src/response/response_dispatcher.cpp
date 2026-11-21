@@ -155,8 +155,13 @@ void ResponseDispatcher::ResetProcessor()
     switch (int(prompt_type))
     {
         case PromptType::Harmony:
-            proc_ = new HarmonyProcessor{};
+        {
+            auto *harmony_proc = new HarmonyProcessor{};
+            harmony_proc->SetAnalysisPrefill(
+                instance_config_ ? instance_config_->getenableThinking() : model_config_.getenableThinking());
+            proc_ = harmony_proc;
             break;
+        }
         default:
             proc_ = new GeneralProcessor{};
     }
