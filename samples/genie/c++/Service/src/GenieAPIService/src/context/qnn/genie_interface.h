@@ -49,6 +49,8 @@ struct GenieContext::QInterfaceImpl
 
         virtual bool set_content(ModelInput &model_input) = 0;
 
+        virtual void OverrideInput(const std::string &, GenieDialog_SentenceCode_t) {}
+
         Genie_Status_t GenieDialogQuery()
         {
             const auto status = GenieDialogQueryImpl();
@@ -96,14 +98,26 @@ struct GenieContext::QInterfaceImpl
             return true;
         }
 
+        void OverrideInput(const std::string &text, GenieDialog_SentenceCode_t code) override
+        {
+            input_data_ = reinterpret_cast<uint8_t *>(const_cast<char *>(text.data()));
+            input_len_ = text.size();
+            sentence_code_ = code;
+        }
+
         Genie_Status_t GenieDialogQueryImpl() final
         {
+            const auto code = sentence_code_;
+            sentence_code_ = GENIE_DIALOG_SENTENCE_COMPLETE;
             return GenieDialog_query(context_->m_DialogHandle,
                                      reinterpret_cast<const char *>(input_data_),
-                                     GENIE_DIALOG_SENTENCE_COMPLETE,
+                                     code,
                                      GenieCallBack,
                                      this);
         }
+
+    private:
+        GenieDialog_SentenceCode_t sentence_code_{GENIE_DIALOG_SENTENCE_COMPLETE};
     };
 
     class IEmbedding : public QInterface

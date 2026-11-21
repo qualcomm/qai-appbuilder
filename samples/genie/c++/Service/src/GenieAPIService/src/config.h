@@ -80,7 +80,8 @@ inline bool Config::Process()
     app.add_flag("-l,--load_model", loadModel, "Actually load the model specified by -c at service startup. "
                  "Without this flag, no model is loaded until a chat/HTTP request triggers LoadModelByName().");
     app.add_flag("-a,--all_text", model_config_.outputAllText, "Output all text includes tool calls text.");
-    app.add_flag("-t,--enable_thinking", model_config_.enableThinking, "Enable thinking mode.");
+    app.add_flag("-t,--enable_thinking", model_config_.enableThinking,
+                 "Think on every turn within the adaptive budget (token-level budget on GGUF only; prompt-level on QNN and Harmony).");
     app.add_flag("-g,--prompt_debug", model_config_.enablePromptDebug, "Enable prompt compression optimization debug logs. (Repeat for level 2: -g -g)");
     app.add_flag("-v,--version", version, "Print version info and exit.");
 
