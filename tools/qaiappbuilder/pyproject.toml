@@ -74,9 +74,10 @@ dependencies = [
   "alembic>=1.13,<2.0",                    # schema migrations (S2/S6)
 
   # crypto / secrets
-  # ARM64 (Windows aarch64) note: PyPI publishes cp313 win_arm64 wheels for
-  # cryptography 46.x (45.x was revoked there).  47.0+ are sdist-only and
-  # require Rust + OpenSSL toolchain.  Upper bound stays below 47.
+  # ARM64 (Windows aarch64) note: PyPI has win_arm64 wheels only up to
+  # 46.0.3; later releases there are sdist-only (Rust + crates.io).  What
+  # keeps ARM64 on a wheel is `[tool.uv.pip] only-binary` below, not this
+  # bound.  Upper bound stays below 47.
   "cryptography>=45,<47",
   "keyring>=25,<26",                       # OS-level credential store (PR-013)
   # SSH remote deployment (qai.remote_deploy): paramiko 5.x is the stable
@@ -337,6 +338,19 @@ exclude = [
   "/docs/40-security/scripts/tmp",
   "/docs/40-security/scripts/.pytest_cache",
 ]
+
+# -----------------------------------------------------------------------------
+# uv pip (read by every `uv pip ...` run from this directory: installer
+# _setup_env.bat, Setup.bat). An end-user machine must never compile a
+# native package: no Rust / C toolchain, and the build would download its own
+# dependencies (crates.io) through networks that already block it.
+# -----------------------------------------------------------------------------
+[tool.uv.pip]
+# cryptography: Windows ARM64 wheels exist only up to 46.0.3 (46.0.4-46.0.7 are
+# sdist-only there), so without this uv picks the newest 46.0.x and builds it
+# from source. Wheel-only makes it pick the newest version that has a wheel
+# for the platform, and newer ones automatically once they ship ARM64 wheels.
+only-binary = ["cryptography"]
 
 # =============================================================================
 # Linting / formatting (ruff)

@@ -57,3 +57,16 @@ def test_no_other_core_requirement_is_arm64_gated() -> None:
         if r.marker is not None and "ARM64" in str(r.marker)
     ]
     assert sorted(gated) == ["qai-appbuilder", "tiktoken"]
+
+
+def test_cryptography_is_never_built_from_source() -> None:
+    """Windows ARM64 has cryptography wheels only up to 46.0.3; newer 46.0.x are sdist-only there.
+
+    Without wheel-only, ``uv pip install -r pyproject.toml`` picks the newest 46.0.x and
+    compiles it (Rust + crates.io), which fails on end-user machines (seen in the field).
+    ``[tool.uv.pip]`` is read by every ``uv pip`` call the installer and Setup.bat make
+    from this directory.
+    """
+    data = tomllib.loads(_PYPROJECT.read_text(encoding="utf-8"))
+    only_binary = data["tool"]["uv"]["pip"]["only-binary"]
+    assert "cryptography" in only_binary
