@@ -2666,8 +2666,6 @@ const {
   font-variant-numeric: tabular-nums;
 }
 
-}
-
 /* Sub-agent "allow question" toggle (收尾 ①). Inherits the icon-button
    `.rit-btn` look (transparent → hover bg); when active it tints to
    `--accent` and shows a small accent dot at the bottom-right corner —
