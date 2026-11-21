@@ -28,6 +28,11 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
   "License :: Other/Proprietary License",
+  # Never published: this is a locally run application, and the installer /
+  # Setup.bat only install its dependencies (`uv pip install -r
+  # pyproject.toml`), never the project itself. PyPI rejects any upload that
+  # carries this classifier.
+  "Private :: Do Not Upload",
   "Operating System :: Microsoft :: Windows",
   "Operating System :: MacOS",
   "Operating System :: POSIX :: Linux",

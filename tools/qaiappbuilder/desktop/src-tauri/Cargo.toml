@@ -3,6 +3,8 @@ name = "qai-desktop"
 version = "3.2.0"
 edition = "2021"
 description = "QAI AppBuilder desktop shell (WebView2 window around the local backend)"
+# Built locally into the installer only; never published to crates.io.
+publish = false
 
 [lib]
 name = "qai_desktop_lib"
