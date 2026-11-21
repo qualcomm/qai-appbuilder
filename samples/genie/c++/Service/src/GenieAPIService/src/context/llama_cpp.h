@@ -19,6 +19,10 @@ public:
     using std::runtime_error::runtime_error;
 };
 
+bool LlamaCppHasHtpDevice();
+
+void EnsureGgmlBackendsLoaded();
+
 class LLAMACppBuilder : public ContextBase
 {
 public:

@@ -19,9 +19,12 @@ import requests
 
 from .common import (
     CrashEvent,
+    GGUF_CASES,
     MULTIMODAL_PROMPTS,
     TestResult,
     detect_modality,
+    evaluate_gguf_device_result,
+    evaluate_gguf_slots,
     infer_backend,
     wait_port_closed,
     wait_port_open,
@@ -465,14 +468,22 @@ def run_numresponse_stateless_mode_regressions(args, models, all_results, all_cr
     _check_basic_endpoint("POST /contextsize", "contextsize", _judge_contextsize)
 
 
+def _read_service_log(svc):
+    try:
+        return Path(svc._stdout_log).read_bytes().decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
 def run_gguf_explicit_load_regressions(args, models, all_results, all_crash_events, all_perf_samples):
     """阶段 4：对全部已发现的 GGUF 模型（或 --gguf_model 限定的单个模型），分别用
-    GGUF device=gpu / device=cpu 启动服务并验证 /models + chat。"""
+    GGUF_CASES 里的各个用例（gpu/cpu/npu/npu_legacy）启动服务并验证 /models + /v2/status 槽位 + chat；
+    list/invalid 写入非法 devices，验证加载前报错且权重未开始加载。"""
     print(f"\n{'='*60}")
-    print("阶段 4: GGUF GPU/CPU 显式加载回归")
+    print("阶段 4: GGUF GPU/CPU/NPU 显式加载回归")
     print(f"{'='*60}")
 
-    devices = ("gpu", "cpu") if args.gguf_devices == "both" else (args.gguf_devices,)
+    devices = args.gguf_devices
     placeholder_model = args.gguf_model or "gpt-oss-20b-GGUF"
     if args.remote:
         for device in devices:
@@ -525,7 +536,9 @@ def run_gguf_explicit_load_regressions(args, models, all_results, all_crash_even
                 except json.JSONDecodeError:
                     model_config = {}
                 model_config["backend"] = "GGUF"
-                model_config["device"] = device
+                case_config, requested, reject_marker = GGUF_CASES[device]
+                model_config.pop("devices", None)
+                model_config.update(case_config)
                 gguf_config_path.write_text(json.dumps(model_config, ensure_ascii=False, indent=2), encoding="utf-8")
 
                 svc = ServiceManager(args.exe_dir, args.host, args.port)
@@ -550,12 +563,51 @@ def run_gguf_explicit_load_regressions(args, models, all_results, all_crash_even
                     models_resp = requests.get(f"http://{args.host}:{args.port}/models", timeout=30)
                     actual_backend = ""
                     actual_device = ""
+                    actual_effective = []
+                    loaded_entries = []
                     if models_resp.status_code == 200:
                         entries = models_resp.json().get("data", [])
                         loaded_entries = [m for m in entries if m.get("is_loaded") and m.get("id") == service_model_name]
                         if loaded_entries:
                             actual_backend = loaded_entries[0].get("backend", "")
                             actual_device = loaded_entries[0].get("device", "")
+                            raw_effective = loaded_entries[0].get("devices_effective", "")
+                            if raw_effective:
+                                actual_effective = str(raw_effective).lower().split("+")
+
+                    if reject_marker:
+                        log_text = _read_service_log(svc)
+                        marker_found = reject_marker in log_text
+                        weights_loaded = "load_tensors" in log_text
+                        passed = (models_resp.status_code == 200 and not loaded_entries
+                                  and marker_found and not weights_loaded)
+                        all_results.append(TestResult(
+                            name=test_name, round_num=1, model_name=result_model_name,
+                            passed=passed, status_code=models_resp.status_code,
+                            latency_ms=(time.time() - start_time) * 1000,
+                            detail=(f"requested devices={case_config['devices']}, /models={models_resp.status_code}, "
+                                    f"model_loaded={bool(loaded_entries)}, 日志含 '{reject_marker}' 报错={marker_found}, "
+                                    f"日志含 load_tensors(权重已开始加载)={weights_loaded}"),
+                            response_data={
+                                "requested_devices": case_config["devices"],
+                                "model_loaded": bool(loaded_entries),
+                                "error_marker_found": marker_found,
+                                "weights_loaded": weights_loaded,
+                            }
+                        ))
+                        continue
+
+                    status_slots = None
+                    status_code_slots = 0
+                    try:
+                        slots_resp = requests.get(f"http://{args.host}:{args.port}/v2/status", timeout=30)
+                        status_code_slots = slots_resp.status_code
+                        if slots_resp.status_code == 200:
+                            status_slots = slots_resp.json().get("slots")
+                    except Exception:
+                        pass
+                    slots_ok, occupied_slots, slots_note = evaluate_gguf_slots(
+                        service_model_name, actual_effective, status_slots)
 
                     chat_body = {
                         "model": service_model_name,
@@ -582,16 +634,17 @@ def run_gguf_explicit_load_regressions(args, models, all_results, all_crash_even
                             response_text = f"JSON 解析失败: {e}"
 
                     backend_ok = actual_backend == "GGUF"
-                    if device == "gpu":
-                        device_ok = actual_device in ("gpu", "cpu")
-                        fallback_note = "；GPU 加载 fallback 到 CPU" if actual_device == "cpu" else ""
-                    else:
-                        device_ok = actual_device == "cpu"
-                        fallback_note = ""
-                    passed = models_resp.status_code == 200 and chat_resp.status_code == 200 and backend_ok and device_ok and chat_ok
+                    device_ok, npu_degraded, fallback_note = evaluate_gguf_device_result(
+                        requested, actual_device, actual_effective,
+                        "HTP0 device not found" in _read_service_log(svc))
+                    slots_note_text = f"；{slots_note}" if slots_note else ""
+                    passed = (models_resp.status_code == 200 and chat_resp.status_code == 200 and backend_ok
+                              and device_ok and chat_ok and slots_ok is not False)
                     detail = (
-                        f"requested_device={device}, actual_backend={actual_backend}, actual_device={actual_device}"
-                        f"{fallback_note}, /models={models_resp.status_code}, chat={chat_resp.status_code}, "
+                        f"requested_device={device}, actual_backend={actual_backend}, actual_device={actual_device}, "
+                        f"devices_effective={'+'.join(actual_effective) or '-'}, occupied_slots={'+'.join(occupied_slots) or '-'}"
+                        f"{fallback_note}{slots_note_text}, /models={models_resp.status_code}, "
+                        f"/v2/status={status_code_slots}, chat={chat_resp.status_code}, "
                         f"chat_latency_ms={chat_latency:.1f}, response_len={len(response_text)}"
                     )
                     all_results.append(TestResult(
@@ -603,6 +656,11 @@ def run_gguf_explicit_load_regressions(args, models, all_results, all_crash_even
                             "requested_device": device,
                             "actual_backend": actual_backend,
                             "actual_device": actual_device,
+                            "devices_effective": "+".join(actual_effective),
+                            "npu_degraded": npu_degraded,
+                            "occupied_slots": occupied_slots,
+                            "slots_consistent": slots_ok,
+                            "v2_status_slots": status_slots,
                             "models_status": models_resp.status_code,
                             "chat_status": chat_resp.status_code,
                         }
@@ -627,7 +685,7 @@ def run_gguf_explicit_load_regressions(args, models, all_results, all_crash_even
                         detail=f"启动失败: {str(e)[:300]}", crashed=True,
                         ignorable=False,
                         ignore_reason=("疑似 GPU 显存/驱动相关(命中内存关键词)，仅作诊断标注，不代表豁免"
-                                        if (device == "gpu" and _mem_hint) else "")
+                                        if ("gpu" in device.split("+") and _mem_hint) else "")
                     ))
                 except Exception as e:
                     all_results.append(TestResult(

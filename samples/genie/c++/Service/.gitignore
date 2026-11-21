@@ -18,3 +18,4 @@ tmp/
 assert/
 test_results
 test_results_*
+.awb

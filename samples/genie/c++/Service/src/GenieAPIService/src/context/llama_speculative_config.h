@@ -69,6 +69,15 @@ llama_runtime::RuntimePlan PlanSpeculativeRuntime(const std::string &model_dir,
 
 uint32_t ReadGgufBlockCount(const std::string &gguf_path);
 
+uint64_t EstimateHtpMappedBytes(const std::string &gguf_path, uint64_t context_size);
+
+uint64_t EstimateMainModelBytes(const std::string &model_dir, const std::string &draft_relative_path,
+                                uint64_t context_size);
+
+uint64_t GetGpuFreeBytes();
+
+uint64_t GetHtpBudgetBytes();
+
 constexpr uint32_t kDflashFfnCpuLayersDefault = 30;
 
 std::string BuildDflashFfnCpuOverride(uint32_t block_count, uint32_t cpu_layers);

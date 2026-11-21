@@ -1,5 +1,5 @@
 {
   "backend": "gguf",
   "device": "gpu",
-  "context_size": 16384
+  "context_size": 32768
 }

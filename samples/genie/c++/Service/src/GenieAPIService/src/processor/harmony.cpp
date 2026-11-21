@@ -164,7 +164,7 @@ std::tuple<bool, std::string> HarmonyProcessor::preprocessStream(std::string &ch
         goto ahead;
     }
 
-    if (chunkText.find("<|channel|>") != std::string::npos)
+    if (m_analysisPrefill || chunkText.find("<|channel|>") != std::string::npos)
     {
         chunkText = start_tag_ + chunkText;
         start_tag_.clear();
@@ -644,7 +644,7 @@ HarmonyProcessor::~HarmonyProcessor()
 void HarmonyProcessor::Clean()
 {
     impl_->Clean();
-    start_tag_ = "<|start|>assistant";
+    start_tag_ = m_analysisPrefill ? "<|start|>assistant<|channel|>analysis<|message|>" : "<|start|>assistant";
     m_finalText.clear();
     m_internalAnalysisBuffer.clear();
     m_reasoningSent = 0;

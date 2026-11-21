@@ -14,6 +14,7 @@
 #include "../context/qnn/genie.h"
 #include "../context/mnn.h"
 #include "../context/llama_cpp.h"
+#include "../context/llama_placement.h"
 #include "../response/response_tools.h"
 #include "../chat_request_handler/summary_cache.h"
 #include "../chat_request_handler/task_memo_store.h"
@@ -119,6 +120,87 @@ static void ParseBackendDeviceFromConfigJson(const std::string &config_json_path
                                              const std::string &log_prefix,
                                              std::string &out_backend,
                                              std::string &out_device);
+
+static std::string JoinDevices(const std::vector<std::string> &devices)
+{
+    std::string joined;
+    for (const auto &name: devices)
+    {
+        joined += joined.empty() ? name : "+" + name;
+    }
+    return joined;
+}
+
+static bool DevicesContain(const std::vector<std::string> &devices, const char *name)
+{
+    return std::find(devices.begin(), devices.end(), name) != devices.end();
+}
+
+static bool ResolveGgufDevices(const json &j, const std::string &legacy_device,
+                               std::vector<std::string> &out, std::string &error)
+{
+    out.clear();
+    if (j.is_object() && j.contains("devices"))
+    {
+        const json &field = j["devices"];
+        if (!field.is_string())
+        {
+            error = "\"devices\" must be a plain string: \"npu\", \"gpu\" or \"cpu\" (a list is not supported; "
+                    "a model that does not fit overflows to the next device automatically)";
+            return false;
+        }
+        std::string name = field.get<std::string>();
+        std::transform(name.begin(), name.end(), name.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (name != "npu" && name != "gpu" && name != "cpu")
+        {
+            error = "unsupported device '" + name + "' in \"devices\" (allowed: npu, gpu, cpu)";
+            return false;
+        }
+        out.push_back(name);
+        return true;
+    }
+    out = {legacy_device == "cpu" || legacy_device == "npu" ? legacy_device : "gpu"};
+    return true;
+}
+
+static bool HtpAvailable()
+{
+#ifdef USE_GGUF
+    return LlamaCppHasHtpDevice();
+#else
+    return false;
+#endif
+}
+
+static llama_placement::Inputs BuildPlacementInputs(const std::string &primary, bool has_draft,
+                                                    uint64_t need_bytes, bool npu_slot_free)
+{
+    llama_placement::Inputs in;
+    in.primary = primary;
+    in.htp_available = HtpAvailable();
+    in.npu_slot_free = npu_slot_free;
+    in.has_draft = has_draft;
+    in.need_bytes = need_bytes;
+    in.gpu_budget = llama_placement::WithMargin(llama_speculative::GetGpuFreeBytes());
+    in.npu_budget = llama_placement::WithMargin(llama_speculative::GetHtpBudgetBytes());
+    const uint64_t avail_phys = llama_speculative::GetAvailablePhysicalMemoryBytes();
+    in.avail_phys_bytes = avail_phys == UINT64_MAX ? 0 : avail_phys;
+    return in;
+}
+
+static std::vector<std::string> DevicesToFamilies(const std::vector<std::string> &devices)
+{
+    std::vector<std::string> families;
+    for (const char *name: {"npu", "gpu", "cpu"})
+    {
+        if (DevicesContain(devices, name))
+        {
+            families.emplace_back(name);
+        }
+    }
+    return families;
+}
 
 class ModelManager::QNNImpl
 {
@@ -598,15 +680,18 @@ struct ModelManager::ModeVerifier
 
         std::shared_ptr<ContextBase> CreateIfVerifiedImpl() override
         {
-            auto load_with_device = [this](const std::string &device, bool draft_on_cpu = false,
+            auto load_with_device = [this](const std::string &device, const std::vector<std::string> &devs,
+                                           bool draft_on_cpu = false,
                                            bool reduced_ubatch = false,
                                            bool full_gpu = false) -> std::shared_ptr<ContextBase>
             {
                 My_Log{} << "[GGUFVerify] load attempt: device=" << device
+                          << ", devices=" << JoinDevices(devs)
                           << ", draft_device=" << (draft_on_cpu ? std::string("cpu") : device)
                           << ", reduced_ubatch=" << (reduced_ubatch ? 1 : 0)
                           << ", full_gpu=" << (full_gpu ? 1 : 0) << std::endl;
                 config_->set_device(device);
+                config_->set_devices_effective(devs);
                 config_->set_speculative_draft_forced_cpu(draft_on_cpu);
                 config_->set_speculative_reduced_ubatch(reduced_ubatch);
                 config_->set_speculative_full_gpu(full_gpu);
@@ -640,9 +725,29 @@ struct ModelManager::ModeVerifier
                         << std::endl;
             }
 
+            std::vector<std::string> devices;
+            std::string devices_error;
+            if (!ResolveGgufDevices(j, requested_device, devices, devices_error))
+            {
+                My_Log{My_Log::Level::kError} << "[GGUFVerify] invalid devices config: " << devices_error
+                                              << std::endl;
+                self_->SetLastLoadFailureReason(ModelManager::LoadFailureReason::kOther, devices_error);
+                return nullptr;
+            }
+            config_->set_devices(devices);
+            const std::string primary = devices.front();
+            if (primary == "npu" && !HtpAvailable())
+            {
+                My_Log{My_Log::Level::kWarning}
+                        << "[GGUFVerify] npu requested but HTP0 device not found, degrading to devices=gpu"
+                        << std::endl;
+            }
+
             llama_speculative::DraftModelConfig draft_config = llama_speculative::DraftModelConfig::ParseFrom(j);
             config_->set_speculative_draft_configured(draft_config.present);
             bool full_gpu_fits = false;
+            uint64_t placement_need = 0;
+            uint64_t placement_gpu_free = 0;
             if (draft_config.present)
             {
 
@@ -658,6 +763,8 @@ struct ModelManager::ModeVerifier
                     full_gpu_fits = llama_speculative::SpeculativeFitsFullGpu(
                             config_->get_model_path(), draft_config.path, effective_context_size,
                             &gpu_required, &gpu_available);
+                    placement_need = gpu_required;
+                    placement_gpu_free = gpu_available;
                     My_Log{} << "[GGUFVerify] full GPU check: required=" << gpu_required
                               << " bytes, gpu_available=" << gpu_available
                               << " bytes, fits=" << (full_gpu_fits ? 1 : 0)
@@ -671,6 +778,8 @@ struct ModelManager::ModeVerifier
                             config_->get_model_path(), draft_config, effective_context_size);
                     config_->set_runtime_plan(plan);
                     full_gpu_fits = plan.full_gpu;
+                    placement_need = plan.ledger.gpu_required();
+                    placement_gpu_free = plan.gpu_free_observed;
 
                     const llama_runtime::MemoryLedger &led = plan.ledger;
                     My_Log{} << "[Planner] weights=" << (led.weights_tgt + led.weights_dft)
@@ -721,107 +830,114 @@ struct ModelManager::ModeVerifier
                           << ", context_size=" << effective_context_size
                           << ", estimated_required_bytes=" << required
                           << ", available_physical_memory_bytes=" << available << std::endl;
+                if (primary == "npu")
+                {
+                    placement_need = llama_speculative::EstimateMainModelBytes(
+                            config_->get_model_path(), draft_config.path, effective_context_size);
+                }
+            }
+
+            if (!draft_config.present)
+            {
+                const size_t configured_ctx = config_->get_context_size();
+                placement_need = llama_speculative::EstimateMainModelBytes(
+                        config_->get_model_path(), "", configured_ctx > 0 ? configured_ctx : 8192);
+            }
+            llama_placement::Inputs placement = BuildPlacementInputs(
+                    primary, draft_config.present, placement_need,
+                    !self_->IsFamilyOccupiedByOthers("npu", config_->get_model_name()));
+            if (draft_config.present)
+            {
+                placement.gpu_budget = placement_gpu_free;
+            }
+            std::vector<llama_placement::Tier> dropped_tiers;
+            const std::vector<llama_placement::Tier> tiers = llama_placement::PlanTiers(placement, &dropped_tiers);
+            for (const auto &tier: dropped_tiers)
+            {
+                My_Log{My_Log::Level::kWarning}
+                        << "[GGUFVerify] placement: tier " << JoinDevices(tier)
+                        << " dropped by the unified-memory gate: need_bytes=" << placement.need_bytes
+                        << " + headroom=" << llama_placement::kUnifiedMemHeadroom
+                        << " > avail_phys=" << placement.avail_phys_bytes << std::endl;
+            }
+            {
+                std::string plan_text;
+                for (const auto &tier: tiers)
+                {
+                    plan_text += (plan_text.empty() ? "" : " -> ") + JoinDevices(tier);
+                }
+                My_Log{} << "[GGUFVerify] placement: primary=" << primary
+                          << ", need_bytes=" << placement.need_bytes
+                          << ", gpu_budget=" << placement.gpu_budget
+                          << ", npu_budget=" << placement.npu_budget
+                          << ", avail_phys=" << placement.avail_phys_bytes
+                          << ", npu_slot_free=" << (placement.npu_slot_free ? 1 : 0)
+                          << ", tiers=" << plan_text << std::endl;
             }
 
             bool target_weights_too_large = false;
-            if (full_gpu_fits && requested_device != "cpu")
+            const auto try_load = [&](const llama_placement::Tier &tier, bool draft_on_cpu = false,
+                                      bool reduced_ubatch = false,
+                                      bool full_gpu = false) -> std::shared_ptr<ContextBase>
             {
                 try
                 {
-                    return load_with_device("gpu", false, false, true);
+                    return load_with_device(tier.front(), tier, draft_on_cpu, reduced_ubatch, full_gpu);
+                }
+                catch (const TargetWeightsLoadError &e)
+                {
+                    target_weights_too_large = target_weights_too_large || !DevicesContain(tier, "npu");
+                    My_Log{My_Log::Level::kError}
+                            << "[GGUFVerify] load with devices=" << JoinDevices(tier)
+                            << " failed on target weights, trying the next tier: " << e.what() << std::endl;
                 }
                 catch (const std::exception &e)
                 {
                     My_Log{My_Log::Level::kError}
-                            << "[GGUFVerify] full GPU load failed, fallback to tuned split: " << e.what() << std::endl;
+                            << "[GGUFVerify] load with devices=" << JoinDevices(tier)
+                            << " failed, trying the next tier: " << e.what() << std::endl;
                 }
                 catch (...)
                 {
                     My_Log{My_Log::Level::kError}
-                            << "[GGUFVerify] full GPU load failed with unknown error, fallback to tuned split"
-                            << std::endl;
+                            << "[GGUFVerify] load with devices=" << JoinDevices(tier)
+                            << " failed with unknown error, trying the next tier" << std::endl;
                 }
-            }
+                return nullptr;
+            };
 
-            if (requested_device == "cpu")
+            const llama_placement::Tier gpu_only{"gpu"};
+            for (const auto &tier: tiers)
             {
-                return load_with_device("cpu");
-            }
-
-            try
-            {
-                return load_with_device("gpu");
-            }
-            catch (const TargetWeightsLoadError &e)
-            {
-                target_weights_too_large = true;
-                My_Log{My_Log::Level::kError}
-                        << "[GGUFVerify] GPU load failed on target weights, skipping remaining GPU tiers: "
-                        << e.what() << std::endl;
-            }
-            catch (const std::exception &e)
-            {
-                My_Log{My_Log::Level::kError}
-                        << "[GGUFVerify] GPU load failed, fallback to CPU: " << e.what() << std::endl;
-            }
-            catch (...)
-            {
-                My_Log{My_Log::Level::kError}
-                        << "[GGUFVerify] GPU load failed with unknown error, fallback to CPU" << std::endl;
-            }
-
-            if (draft_config.present && !target_weights_too_large)
-            {
-                try
+                if (tier == gpu_only)
                 {
-                    return load_with_device("gpu", true);
+                    if (draft_config.present && !full_gpu_fits)
+                    {
+                        continue;
+                    }
+                    if (auto context = try_load(tier, false, false, draft_config.present))
+                    {
+                        return context;
+                    }
+                    continue;
                 }
-                catch (const std::exception &e)
+                if (auto context = try_load(tier))
                 {
-                    My_Log{My_Log::Level::kError}
-                            << "[GGUFVerify] GPU load with draft on CPU failed, fallback to CPU: " << e.what()
-                            << std::endl;
+                    return context;
                 }
-                catch (...)
+                if (draft_config.present && DevicesContain(tier, "cpu") && !DevicesContain(tier, "npu") &&
+                    tier.size() > 1 && !target_weights_too_large)
                 {
-                    My_Log{My_Log::Level::kError}
-                            << "[GGUFVerify] GPU load with draft on CPU failed with unknown error, fallback to CPU"
-                            << std::endl;
-                }
-
-                try
-                {
-                    return load_with_device("gpu", true, true);
-                }
-                catch (const std::exception &e)
-                {
-                    My_Log{My_Log::Level::kError}
-                            << "[GGUFVerify] GPU load with draft on CPU and reduced ubatch failed, fallback to CPU: "
-                            << e.what() << std::endl;
-                }
-                catch (...)
-                {
-                    My_Log{My_Log::Level::kError}
-                            << "[GGUFVerify] GPU load with draft on CPU and reduced ubatch failed with unknown error, "
-                               "fallback to CPU" << std::endl;
+                    if (auto context = try_load(tier, true))
+                    {
+                        return context;
+                    }
+                    if (auto context = try_load(tier, true, true))
+                    {
+                        return context;
+                    }
                 }
             }
-
-            try
-            {
-                return load_with_device("cpu");
-            }
-            catch (const std::exception &e)
-            {
-                My_Log{My_Log::Level::kError}
-                        << "[GGUFVerify] CPU load failed after GPU fallback: " << e.what() << std::endl;
-            }
-            catch (...)
-            {
-                My_Log{My_Log::Level::kError}
-                        << "[GGUFVerify] CPU load failed after GPU fallback with unknown error" << std::endl;
-            }
-
             return nullptr;
         }
     };
@@ -1636,6 +1752,31 @@ bool ModelManager::InitializeConfig()
                 }
 #endif
 
+                {
+                    bool qnn_cache_enabled = true;
+                    uint64_t qnn_cache_max_mb = 3072;
+                    int qnn_cache_max_checkpoints = 6;
+                    bool qnn_cache_tail_fallback = true;
+                    std::string qnn_cache_dir;
+                    if (pe_json.contains("qnn_prefix_cache") && pe_json["qnn_prefix_cache"].is_object())
+                    {
+                        const auto &qc = pe_json["qnn_prefix_cache"];
+                        qnn_cache_enabled = qc.value("enabled", true);
+                        qnn_cache_max_mb = qc.value("max_total_mb", static_cast<uint64_t>(3072));
+                        qnn_cache_max_checkpoints = qc.value("max_checkpoints", 6);
+                        qnn_cache_tail_fallback = qc.value("tail_fallback", true);
+                        qnn_cache_dir = qc.value("dir", std::string());
+                    }
+                    GenieContext::ConfigureCheckpoint(qnn_cache_enabled, qnn_cache_max_mb << 20,
+                                                      qnn_cache_max_checkpoints, qnn_cache_tail_fallback,
+                                                      qnn_cache_dir);
+                    My_Log{} << "[Config] qnn_prefix_cache.enabled=" << qnn_cache_enabled
+                             << " max_total_mb=" << qnn_cache_max_mb
+                             << " max_checkpoints=" << qnn_cache_max_checkpoints
+                             << " tail_fallback=" << qnn_cache_tail_fallback
+                             << " dir=" << (qnn_cache_dir.empty() ? "<default>" : qnn_cache_dir) << std::endl;
+                }
+
                 if (pe_json.contains("prompt_optimization"))
                 {
                     const auto &po = pe_json["prompt_optimization"];
@@ -2196,7 +2337,7 @@ bool ModelManager::LoadSingleModel()
 bool ModelManager::LoadModel(const ModelLoadRequest &request)
 {
     std::lock_guard<std::recursive_mutex> load_lock(load_mutex_);
-    UnloadModelsByDevice(ResolveTentativeFamilies(request.path, request.config_file));
+    UnloadModelsByDevice(ResolveTentativeFamilies(request.path, request.config_file, request.name));
 
     json prompt = json::object();
     int context_size = DEFAULT_CONTEXT_SIZE;
@@ -2268,21 +2409,11 @@ bool ModelManager::LoadModel(const ModelLoadRequest &request)
         else if (fmt == ModelFormat::GGUF)
         {
             config->set_backend("GGUF");
-            std::string gguf_device = config->get_device();
-            std::transform(gguf_device.begin(), gguf_device.end(), gguf_device.begin(),
-                           [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            if (gguf_device == "cpu" || gguf_device == "gpu")
-            {
-                config->set_device(gguf_device);
-            }
-            else
-            {
-                config->set_device("gpu");
-            }
         }
         My_Log{} << "LoadSingleModel: model_format=" << const_cast<ModelFormat &>(fmt).to_string()
                  << ", backend=" << config->get_backend()
-                 << ", device=" << config->get_device() << std::endl;
+                 << ", device=" << config->get_device()
+                 << ", devices_effective=" << JoinDevices(config->get_devices_effective()) << std::endl;
     }
 
     std::vector<std::shared_ptr<LoadedModel>> replaced_models;
@@ -2293,6 +2424,7 @@ bool ModelManager::LoadModel(const ModelLoadRequest &request)
         loaded_model->context = model_handle;
         loaded_model->backend = config->get_backend();
         loaded_model->device = config->get_device();
+        loaded_model->devices_effective = JoinDevices(config->get_devices_effective());
         loaded_model->is_loaded = true;
         loaded_model->load_seq = next_load_seq_++;
         loaded_model->occupied_families = ComputeOccupiedFamilies(*loaded_model);
@@ -2517,15 +2649,20 @@ std::vector<std::string> ModelManager::ComputeOccupiedFamilies(const LoadedModel
     }
     if (model.backend == "GGUF")
     {
-        if (model.device == "cpu")
+        std::vector<std::string> families;
+        if (model.config && !model.config->get_devices_effective().empty())
         {
-            return {"cpu"};
+            families = DevicesToFamilies(model.config->get_devices_effective());
         }
-        if (model.config && model.config->is_speculative_draft_forced_cpu())
+        else
         {
-            return {"gpu", "cpu"};
+            families = {model.device == "cpu" ? "cpu" : "gpu"};
         }
-        return {"gpu"};
+        if (model.config && model.config->is_speculative_draft_forced_cpu() && !DevicesContain(families, "cpu"))
+        {
+            families.emplace_back("cpu");
+        }
+        return families;
     }
     if (!model.device.empty())
     {
@@ -2535,7 +2672,8 @@ std::vector<std::string> ModelManager::ComputeOccupiedFamilies(const LoadedModel
 }
 
 std::vector<std::string> ModelManager::ResolveTentativeFamilies(const std::string &model_path,
-                                                                 const std::string &config_file)
+                                                                 const std::string &config_file,
+                                                                 const std::string &model_name) const
 {
     bool has_gguf_file = false;
     std::error_code ec;
@@ -2584,20 +2722,52 @@ std::vector<std::string> ModelManager::ResolveTentativeFamilies(const std::strin
 
     if (device_field == "cpu" || backend_field == "cpu")
     {
-        return {"cpu"};
+        device_field = "cpu";
     }
 
-    if (cfg_parsed)
+    std::vector<std::string> devices;
+    std::string devices_error;
+    if (!ResolveGgufDevices(cfg_parsed ? cfg : json::object(), device_field, devices, devices_error))
     {
-        llama_speculative::DraftModelConfig draft_config = llama_speculative::DraftModelConfig::ParseFrom(cfg);
-        if (draft_config.present &&
-            llama_speculative::GetTotalPhysicalMemoryBytes() <= (32ULL * 1024 * 1024 * 1024))
-        {
-            return {"gpu", "cpu"};
-        }
+        My_Log{My_Log::Level::kError}
+                << "[ResolveTentativeFamilies] invalid devices config, evict nothing: " << devices_error
+                << std::endl;
+        return {};
+    }
+    const std::string primary = devices.front();
+    if (primary == "npu" && !HtpAvailable())
+    {
+        My_Log{My_Log::Level::kWarning}
+                << "[ResolveTentativeFamilies] npu requested but HTP0 device not found, degrading to devices=gpu"
+                << std::endl;
     }
 
-    return {"gpu"};
+    const llama_speculative::DraftModelConfig draft_config =
+            cfg_parsed ? llama_speculative::DraftModelConfig::ParseFrom(cfg) : llama_speculative::DraftModelConfig{};
+    uint64_t need_bytes = 0;
+    if (!draft_config.present)
+    {
+        const int configured_ctx = ParseContextSizeFromConfigJson(config_file, model_name, "[ResolveTentativeFamilies]");
+        need_bytes = llama_speculative::EstimateMainModelBytes(model_path, "", configured_ctx > 0 ? configured_ctx : 8192);
+    }
+    else if (primary == "npu")
+    {
+        need_bytes = llama_speculative::EstimateMainModelBytes(model_path, draft_config.path,
+                                                               llama_speculative::ResolveContextSizeByPhysicalMemory());
+    }
+    const std::vector<llama_placement::Tier> tiers = llama_placement::PlanTiers(BuildPlacementInputs(
+            primary, draft_config.present, need_bytes, !IsFamilyOccupiedByOthers("npu", model_name)));
+    const llama_placement::Tier &first_tier = tiers.front();
+    std::vector<std::string> families = DevicesToFamilies(first_tier);
+
+    const bool draft_may_use_cpu = draft_config.present && DevicesContain(first_tier, "gpu") &&
+                                   !DevicesContain(first_tier, "npu") && !DevicesContain(first_tier, "cpu");
+    if (draft_may_use_cpu && llama_speculative::GetTotalPhysicalMemoryBytes() <= (32ULL * 1024 * 1024 * 1024))
+    {
+        families.emplace_back("cpu");
+    }
+
+    return families;
 }
 
 void ModelManager::StopAndDrain(std::vector<std::shared_ptr<LoadedModel>> &models, std::chrono::seconds timeout,
@@ -2814,6 +2984,20 @@ uint64_t ModelManager::EstimateOtherLoadedModelsMemoryBytes(const std::string &e
     }
 #endif
     return total;
+}
+
+bool ModelManager::IsFamilyOccupiedByOthers(const std::string &family, const std::string &exclude_name) const
+{
+    std::lock_guard<std::mutex> lock(models_mutex_);
+    for (const auto &entry: loaded_models_)
+    {
+        if (!entry.second || entry.first == exclude_name)
+            continue;
+        const auto &families = entry.second->occupied_families;
+        if (std::find(families.begin(), families.end(), family) != families.end())
+            return true;
+    }
+    return false;
 }
 
 static int ParseContextSizeFromConfigJson(const std::string &config_json_path,
