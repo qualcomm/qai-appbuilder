@@ -26,6 +26,7 @@ struct LoadedModel
     std::shared_ptr<ContextBase> context;
     std::string backend;
     std::string device;
+    std::string devices_effective;
     std::vector<std::string> occupied_families;
     bool is_loaded{false};
     uint64_t load_seq{0};
@@ -141,13 +142,16 @@ private:
 
     uint64_t EstimateOtherLoadedModelsMemoryBytes(const std::string &exclude_name) const;
 
+    bool IsFamilyOccupiedByOthers(const std::string &family, const std::string &exclude_name) const;
+
     std::shared_ptr<LoadedModel> GetDefaultModelLocked() const;
     void UnloadModelsByDevice(const std::vector<std::string> &families);
     void StopAndDrain(std::vector<std::shared_ptr<LoadedModel>> &models, std::chrono::seconds timeout,
                       const std::shared_ptr<ContextBase> &extra_context = nullptr);
     static std::vector<std::string> ComputeOccupiedFamilies(const LoadedModel &model);
-    static std::vector<std::string> ResolveTentativeFamilies(const std::string &model_path,
-                                                              const std::string &config_file);
+    std::vector<std::string> ResolveTentativeFamilies(const std::string &model_path,
+                                                      const std::string &config_file,
+                                                      const std::string &model_name) const;
 
     std::unordered_map<std::string, std::shared_ptr<LoadedModel>> loaded_models_;
     std::string default_model_name_;

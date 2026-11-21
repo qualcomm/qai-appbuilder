@@ -679,28 +679,29 @@ private:
             bool failure_trigger = false;
             bool forced_unblock_trigger = false;
             bool loop_trigger = force_think_;
-            if (instance_config_->getenableThinking())
+            const bool always_think = instance_config_->getenableThinking();
+            const auto &at_cfg = instance_config_->i_model_config_.GetAdaptiveThinkingConfig();
+            const bool think_triggered = force_think_
+                || ShouldThinkThisTurn(&failure_trigger, &forced_unblock_trigger, &loop_trigger);
+            if (always_think || think_triggered)
             {
-                systemDefaultPrompt += "/think";
-            }
-            else if (force_think_ || ShouldThinkThisTurn(&failure_trigger, &forced_unblock_trigger, &loop_trigger))
-            {
-                const auto &at_cfg = instance_config_->i_model_config_.GetAdaptiveThinkingConfig();
-                systemDefaultPrompt += "/no_think";
-                force_open_think_prefill = true;
-                if (failure_trigger && at_cfg.goal_reminder_chars > 0)
-                    think_goal_reminder = BuildGoalReminder(at_cfg.goal_reminder_chars);
-                model_input_.think_time_budget_s_ = at_cfg.time_budget_s;
-                model_input_.think_min_tokens_ = loop_trigger ? std::max(at_cfg.min_tokens, at_cfg.loop_min_tokens) : at_cfg.min_tokens;
-                model_input_.think_max_tokens_ = at_cfg.max_tokens;
-                model_input_.think_ctx_reserve_ = at_cfg.ctx_reserve_tokens;
-                model_input_.think_force_min_floor_ = forced_unblock_trigger;
+                systemDefaultPrompt += always_think ? "/think" : "/no_think";
+                if (!always_think || (at_cfg.enabled && at_cfg.time_budget_s > 0))
+                {
+                    force_open_think_prefill = true;
+                    if (failure_trigger && at_cfg.goal_reminder_chars > 0)
+                        think_goal_reminder = BuildGoalReminder(at_cfg.goal_reminder_chars);
+                    model_input_.think_time_budget_s_ = at_cfg.time_budget_s;
+                    model_input_.think_min_tokens_ = loop_trigger ? std::max(at_cfg.min_tokens, at_cfg.loop_min_tokens) : at_cfg.min_tokens;
+                    model_input_.think_max_tokens_ = at_cfg.max_tokens;
+                    model_input_.think_ctx_reserve_ = at_cfg.ctx_reserve_tokens;
+                    model_input_.think_force_min_floor_ = forced_unblock_trigger;
+                }
             }
             else
             {
                 systemDefaultPrompt += "/no_think";
                 force_empty_think_prefill = instance_config_->is_speculative_draft_configured();
-                const auto &at_cfg = instance_config_->i_model_config_.GetAdaptiveThinkingConfig();
                 if (is_tool && at_cfg.enabled && at_cfg.time_budget_s > 0 && !at_cfg.rethink_tools.empty())
                 {
                     std::string previous_tool_name;
@@ -821,7 +822,8 @@ private:
         if (force_open_think_prefill && !model_input_.think_force_min_floor_
             && ctx_left < model_input_.think_min_tokens_)
         {
-            const std::string non_think_start = instance_config_->is_speculative_draft_configured()
+            const std::string non_think_start = (instance_config_->is_speculative_draft_configured()
+                                                 || instance_config_->getenableThinking())
                 ? empty_think_start : j["start"].get<std::string>();
             if (modelInputContent.size() >= start_prompt_str.size()
                 && modelInputContent.compare(modelInputContent.size() - start_prompt_str.size(),
@@ -1190,13 +1192,39 @@ private:
 
         std::vector<GenieChatMessage> all_messages;
 
-        all_messages.push_back({"user", model_input_.text_});
+        int last_user_msg_index = -1;
+        for (size_t i = 0; i < msg.size(); ++i) {
+            if (get_json_value(msg[i], "role", BLANK_STRING) == "user") {
+                last_user_msg_index = static_cast<int>(i);
+            }
+        }
+        if (last_user_msg_index < 0) {
+            all_messages.push_back({"user", model_input_.text_});
+        }
+
+        int element_index = -1;
         for (const auto &element: msg)
         {
+            ++element_index;
             auto role = get_json_value(element, "role", BLANK_STRING);
             std::string content;
 
-            if (role == "assistant")
+            if (role == "user")
+            {
+                if (element_index == last_user_msg_index)
+                {
+                    all_messages.push_back({role, model_input_.text_});
+                }
+                else
+                {
+                    content = get_json_value(element, "content", BLANK_STRING);
+                    if (!content.empty())
+                    {
+                        all_messages.push_back({role, content});
+                    }
+                }
+            }
+            else if (role == "assistant")
             {
 
                 if (element.contains("tool_calls") && !element["tool_calls"].is_null() &&
@@ -1637,7 +1665,9 @@ private:
         OptimizedMessages optimized = PrepareHarmonyMessages(processed_messages,
                                                               system_msg, developer_msg, contextSize, messages);
 
-        messages.push_back("<|start|>assistant");
+        messages.push_back(instance_config_->getenableThinking()
+            ? "<|start|>assistant<|channel|>analysis<|message|>"
+            : "<|start|>assistant");
 
         std::string result;
         for (const auto &harmony_part : messages) {

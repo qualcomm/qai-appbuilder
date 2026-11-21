@@ -76,6 +76,20 @@
         "hint_text": "You are running on Windows. Shell/command-execution tools may route your command to either cmd.exe or PowerShell. cmd.exe: chain with && or ||, read variables as %VAR%, escape quotes as \"\". PowerShell: chain with ;, read variables as $env:VAR, nested quotes need escaping or single-quoting. If a command fails with a shell syntax error, retry using the other shell's syntax. Your command already runs inside a shell: write it directly in PowerShell, never wrapping it in another shell nor mixing cmd syntax in: Write-Output (\"os=\"+$env:OS). Nested quotes must differ from the outer: python -c \"import platform;print('m='+platform.machine())\". Needing two levels means write the script to a file and run it. List files with Get-ChildItem -Name or -Recurse -Filter *.py, not dir /b or /s /b. wmic is gone; use cmdlets."
     },
 
+    "qnn_prefix_cache": {
+        "_comment": "QNN/Genie 跨请求前缀 KV 复用（检查点存取，GenieDialog_save/restore）：在 ChatML 消息边界把提示词前缀的 KV 存盘，命中后只预填后缀；仅对满足条件的 QNN 模型生效（非多模态、非 eaglet/SSD 前缀、无水印、ChatML 模板），其余模型保持每请求全量预填。生效时驱逐迟滞等依赖前缀稳定的机制随之对 QNN 启用",
+        "_comment_enabled": "true=启用（默认），false=完全关闭检查点，行为回到每请求全量预填",
+        "enabled": true,
+        "_comment_max_total_mb": "整个 root（dir 下的 qnn_prefix_cache 子目录）的字节预算（MB），只用于清理空闲目录：已卸载模型、或键已变（模型文件、LoRA、上下文长度变化）的模型留下的目录，超出时按目录 mtime 从最老的整目录删除；每个活跃模型各自的目录按此值计，不会被其他模型挤掉。8K 上下文满载时单个检查点约 600 MB，大上下文模型字节预算先于条数生效；多个 QNN 模型来回切换时需调大，否则已卸载模型的检查点会在下次加载时被清掉",
+        "max_total_mb": 3072,
+        "_comment_max_checkpoints": "整个 root 的检查点条数上限，语义同 max_total_mb：用于清理空闲（已卸载或键已变）模型的目录，每个活跃模型各自的目录按此值计并在目录内按 LRU 淘汰、head 检查点优先保留；多个 QNN 模型来回切换时需调大",
+        "max_checkpoints": 6,
+        "_comment_tail_fallback": "true=额外保存「末条消息之前」的检查点，同前缀换尾时可回退命中（默认）；false=不保存",
+        "tail_fallback": true,
+        "_comment_dir": "检查点根目录，空=服务根目录；实际存放在其下自动追加的专用子目录 qnn_prefix_cache 里，清理只处理该子目录中名字为「32 位十六进制-数字」的上下文目录，其它文件和目录不会被动；不要指向模型目录",
+        "dir": ""
+    },
+
     "debug": {
         "_comment": "本地调试与诊断开关（规则命中日志 log_rule_matches 属于安全检测模块自身的调试项，已归位到 service_config.json 的 routing.sensitivity_detection.debug_log_matches，不在此文件）",
         "_comment_status_update_content_visible": "true=状态更新消息（preparing/inference/tool_call 等）同时将描述文字写入 delta.content，客户端可在对话界面看到状态提示；false=delta.content 为空，客户端不显示状态文字（仅用于保活连接）",
