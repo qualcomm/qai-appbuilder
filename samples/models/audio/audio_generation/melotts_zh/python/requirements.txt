@@ -33,7 +33,9 @@ regex
 tqdm
 
 # ── MeloTTS text / phonemizer (G2P) deps ──
-num2words
+# num2words pinned: 0.5.15 was a malicious release (MAL-2025-6794, since removed
+# from PyPI); 0.5.14 is the last legitimate one.
+num2words==0.5.14
 g2p_en
 cn2an
 pypinyin

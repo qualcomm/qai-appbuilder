@@ -102,7 +102,8 @@ $np = "--no-deps"
 & $py -m pip install $np "transformers==4.56.2" "tokenizers==0.22.2" "huggingface_hub==0.34.4" safetensors regex tqdm
 
 # --- text / phonemizer deps for melo ---
-& $py -m pip install $np num2words g2p_en cn2an pykakasi anyascii jamo g2pk2 gruut cached_path jaconv
+# num2words pinned: 0.5.15 was a malicious release (MAL-2025-6794); 0.5.14 is the last legitimate one.
+& $py -m pip install $np "num2words==0.5.14" g2p_en cn2an pykakasi anyascii jamo g2pk2 gruut cached_path jaconv
 & $py -m pip install $np lazy_loader scipy audioread pooch scikit-learn msgpack threadpoolctl decorator
 & $py -m pip install $np librosa soundfile
 & $py -m pip install $np pypinyin jieba unidecode txtsplit narwhals
