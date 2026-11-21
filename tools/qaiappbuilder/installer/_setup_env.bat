@@ -19,6 +19,8 @@ REM
 REM Usage: installer\_setup_env.bat [options]     (--help for the list)
 
 setlocal EnableExtensions
+REM Run state set by :uv_retry; never inherited from the caller's environment.
+set "UR_BUILD_FAILED="
 REM This script lives in <root>\installer\ ; the project root is its parent directory.
 for %%I in ("%~dp0..") do set "ROOT_DIR=%%~fI\"
 cd /d "%ROOT_DIR%"
@@ -423,6 +425,10 @@ echo [ERROR] If it is a download error ^(HTTP 403 / 404 / timeout^): check the n
 echo [ERROR] Re-running _setup_env.bat is safe: it only fetches what is missing.
 goto :fail
 :fail_install
+if defined UR_BUILD_FAILED (
+    echo [ERROR] dependency install failed: a package has no prebuilt wheel for this platform. Report it with the log.
+    goto :fail
+)
 echo [ERROR] dependency install failed. Re-run is safe ^(resumes^). Try --mirror cn or --proxy http://host:port
 goto :fail
 :fail_verify
@@ -605,6 +611,15 @@ call %UR_CMD% 2> "%_UR_ERR%"
 set "_UR_RC=%errorlevel%"
 if exist "%_UR_ERR%" type "%_UR_ERR%" 1>&2
 if "%_UR_RC%"=="0" goto :uv_retry_ok
+REM A package that had to be compiled from source is a packaging bug, not a network one, even when the build's own
+REM downloads (cargo -> crates.io) print certificate / connect errors. Retrying or switching mirror cannot help.
+findstr /i /c:"Failed to build" /c:"build backend returned an error" "%_UR_ERR%" >nul 2>&1
+if not errorlevel 1 (
+    echo [ERROR] %_UR_LABEL%: a package had to be compiled from source ^(no prebuilt wheel for this platform^).
+    echo [ERROR]   This is a packaging problem, not a network one: retrying or another mirror will not help.
+    set "UR_BUILD_FAILED=1"
+    goto :uv_retry_nonnet
+)
 findstr /i /c:"403 Forbidden" /c:"404 Not Found" /c:"status client error" /c:"status server error" /c:"timed out" /c:"tcp connect error" /c:"error sending request" /c:"dns error" /c:"connection reset" /c:"connection closed" /c:"Failed to fetch" /c:"Failed to download" /c:"certificate" "%_UR_ERR%" >nul 2>&1
 if errorlevel 1 goto :uv_retry_nonnet
 if "%_UR_TRY%"=="1" goto :uv_retry_same
