@@ -14,7 +14,7 @@
 //    file remains the single source of truth for build/dev concerns only.
 // =============================================================================
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { defineConfig, loadEnv } from "vite";
 import vue from "@vitejs/plugin-vue";
 import { fileURLToPath, URL } from "node:url";
@@ -40,6 +40,16 @@ const ports = JSON.parse(
   dev_backend_proxy: number;
 };
 
+// `edition` from <repo-root>/build_info.json, or "" when the file is absent.
+// A present but unreadable marker fails the build rather than silently
+// producing an internal bundle.
+function buildInfoEdition(): string {
+  const path = fileURLToPath(new URL("../build_info.json", import.meta.url));
+  if (!existsSync(path)) return "";
+  const info = JSON.parse(readFileSync(path, "utf-8")) as { edition?: unknown };
+  return typeof info.edition === "string" ? info.edition : "";
+}
+
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, fileURLToPath(new URL(".", import.meta.url)), [
     "VITE_",
@@ -60,7 +70,10 @@ export default defineConfig(({ mode }) => {
   // compiled into the bundle. The release pipeline (scripts/release/build.py)
   // sets QAI_EDITION=external so internal-only feature code is dead-code-
   // eliminated and physically absent from the external open-source bundle.
-  // Defaults to "internal" for dev / `pnpm build` without the flag.
+  // Without the flag the edition comes from <repo-root>/build_info.json, the
+  // same marker the backend reads (settings.py `edition`), so Build.bat /
+  // setup.sh / the installer can never ship a bundle whose edition differs
+  // from the backend's. No marker (dev source tree) -> "internal".
   //   - `__EDITION__` is substituted as a literal so `IS_INTERNAL` guards
   //     collapse to `if (false)` on external builds → Rollup drops the
   //     guarded dynamic import() and the internal chunk is never emitted.
@@ -69,7 +82,8 @@ export default defineConfig(({ mode }) => {
   //     source tree still resolves and nothing internal can leak into the
   //     external bundle (defence-in-depth).
   // -------------------------------------------------------------------------
-  const edition = env.QAI_EDITION === "external" ? "external" : "internal";
+  const requestedEdition = (env.QAI_EDITION || buildInfoEdition()).toLowerCase();
+  const edition = requestedEdition === "external" ? "external" : "internal";
   const isExternal = edition === "external";
   const emptyModule = fileURLToPath(
     new URL("./src/edition-stubs/empty.ts", import.meta.url),
