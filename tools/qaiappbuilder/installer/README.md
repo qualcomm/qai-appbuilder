@@ -203,6 +203,7 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 - 安装路径含空格或非 ASCII 会给警告(部分脚本拼路径,未全面验证)。
 - Inno Setup 6.7 默认开启 RedirectionGuard,子进程继承后 `uv python install` 建 junction 会报 `os error 448`,所以 `.iss` 里设了 `RedirectionGuard=no`。
 - 打包白名单要包含 `tools/`(`scripts.init.install` 需要它)。
+- 用户机器上不能有任何包从源码编译(没有 Rust / C 工具链，编译时还要自己联网下载依赖)。`cryptography` 在 Windows ARM64 上只有到 46.0.3 的预编译 wheel,所以 `pyproject.toml` 的 `[tool.uv.pip] only-binary` 把它限定为只用 wheel,uv 会自动选有 wheel 的最新版本。新增原生扩展依赖时，先用 `uv pip compile pyproject.toml --extra search --python-version 3.13 --python-platform aarch64-pc-windows-msvc --only-binary :all:` 确认两个架构都有 wheel。万一仍有包需要编译,`_setup_env.bat` 会直接报"打包问题",不再重试或换镜像。
 - x64 的 `qai_appbuilder` wheel 只在 GitHub release 上,无法访问 GitHub 时会装不上(`_setup_env.bat` 会给 `[ATTENTION]`)。
 - `ChineseSimplified.isl` 是社区翻译(kira-96/Inno-Setup-Chinese-Simplified-Translation),Inno 官方不再自带。
 
