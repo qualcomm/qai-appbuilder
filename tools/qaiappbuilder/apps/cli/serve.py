@@ -72,7 +72,7 @@ from qai.platform.net.port_allocator import (
     can_bind as _shared_can_bind,
     resolve_bindable_port as _shared_resolve_bindable_port,
 )
-from qai.platform.process import is_admin
+from qai.platform.process import elevation_is_unavoidable, is_admin
 
 # Environment variable that lets an operator knowingly bypass the
 # "refuse to run elevated" guard in :func:`main`.
@@ -221,8 +221,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     # An operator who knowingly accepts the permission trade-off (e.g. a
     # machine whose only usable account is an administrator) can opt out by
     # setting ``QAI_ALLOW_ELEVATED=1``; the default stays "refuse".
+    #
+    # Where nothing can run unelevated (UAC off, or the built-in Administrator
+    # account — common on lab / mini PCs) there is no later non-elevated run to
+    # clash with, so refusing would only lock the user out: start with a
+    # warning instead. Only an explicit "Run as administrator" is refused.
     if is_admin():
-        if _elevated_allowed():
+        if elevation_is_unavoidable():
+            _stderr(
+                "[serve] WARNING: running with administrator privileges because "
+                "this Windows session runs everything elevated (UAC is off or "
+                "this is the built-in Administrator account). Files created now "
+                "will be owned by Administrators.\n"
+            )
+        elif _elevated_allowed():
             _stderr(
                 f"[serve] WARNING: running with administrator/root privileges "
                 f"because {ALLOW_ELEVATED_ENV} is set. Files created now "

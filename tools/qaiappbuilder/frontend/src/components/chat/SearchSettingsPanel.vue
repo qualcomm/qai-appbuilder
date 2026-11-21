@@ -8,7 +8,9 @@
  * for 21 engines. It is its own concern, so it gets its own tab.
  *
  * Layout, in the order a user actually needs it:
- *   1. Routing — CEBot vs Web, and which one answers by default.
+ *   1. Routing — CEBot vs Web, and which one answers by default. Internal
+ *      edition only: the external backend never registers CEBot (it is an
+ *      intranet service) and already searches the web whatever mode is saved.
  *   2. Free engines — every keyless engine, ordered by MEASURED quality
  *      (backend `priority_hint`, never a hardcoded frontend list), each with a
  *      single on/off switch. These all run CONCURRENTLY on every search and the
@@ -25,6 +27,7 @@ import { apiJson } from "@/api";
 import { useForgeConfig } from "@/composables/useForgeConfig";
 import { type AppConfig } from "@/composables/useConfig";
 import { useToast } from "@/composables/useToast";
+import { IS_INTERNAL } from "@/edition";
 
 const { t } = useI18n();
 const toast = useToast();
@@ -339,8 +342,11 @@ async function onEngineClearKey(engineId: string): Promise<void> {
   <!-- `config-section` (shared settings.css) supplies the inter-group
        gap: var(--space-5) that every other settings panel relies on. -->
   <div class="config-section search-panel">
-    <!-- ═══ Routing ═══════════════════════════════════════════════════════ -->
-    <div class="config-group">
+    <!-- ═══ Routing (internal edition only: CEBot is an intranet service) ═══ -->
+    <div
+      v-if="IS_INTERNAL"
+      class="config-group"
+    >
       <div class="config-group-header config-group-header--static">
         <span>🔎</span>
         <span>{{ t("chat.search.groupTitle") }}</span>
