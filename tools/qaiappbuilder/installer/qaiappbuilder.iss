@@ -1,4 +1,4 @@
-; ---------------------------------------------------------------------
+﻿; ---------------------------------------------------------------------
 ; Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
 ; SPDX-License-Identifier: BSD-3-Clause
 ; ---------------------------------------------------------------------
@@ -74,6 +74,11 @@ WizardSizePercent=120
 ; ast-grep (~0.1 GB). The converter venv (.venv_x64_310) and the QAIRT SDK are NOT installed here.
 ExtraDiskSpaceRequired=3000000000
 UninstallDisplayName={#AppName} ({#Arch})
+; Brand icon (same artwork as the desktop window): installer exe, Apps & features entry, wizard images.
+SetupIconFile=..\desktop\src-tauri\icons\icon.ico
+UninstallDisplayIcon={app}\app\desktop\QAIAppBuilder.exe
+WizardImageFile=wizard-large.bmp
+WizardSmallImageFile=wizard-small.bmp
 #if Arch == "arm64"
 ArchitecturesAllowed=arm64
 #else
@@ -127,6 +132,9 @@ english.MirrorCn=China mirrors (use if github.com / pypi.org are slow or blocked
 english.PathWarn=The install path contains spaces or non-ASCII characters, which can break some setup scripts.%n%nContinue anyway?
 english.OldLayout=An older version of QAI AppBuilder is installed in:%n%1%n%nThis version uses a different folder layout and cannot upgrade it. Uninstall the old version first (Settings > Apps, or its Start-menu uninstall shortcut), then run this installer again.
 english.AppDirTaken=The folder%n%1%nalready contains files that were not installed by QAI AppBuilder.%n%nQAI AppBuilder installs into an "app" subfolder of the folder you choose and deletes that subfolder when uninstalled. Choose a different folder.
+english.CancelAsk=Cancel the installation?%n%nEverything installed so far will be removed. Run the installer again if you want to install later.
+english.CancelledTitle=Installation cancelled
+english.CancelledInfo=QAI AppBuilder was NOT installed. The files copied so far were removed.%n%nClick Finish to exit. Run the installer again to install.
 english.SettingUp=Setting up the Python environment and the browser (downloads about 1.2 GB, this can take 10-20 minutes)...
 english.StepFmt=Step %1 of 7: %2
 english.ElapsedFmt=Elapsed %1
@@ -158,6 +166,9 @@ chinesesimp.MirrorCn=国内镜像(github.com / pypi.org 慢或无法访问时选
 chinesesimp.PathWarn=安装路径包含空格或非 ASCII 字符,可能导致部分安装脚本出错。%n%n仍要继续吗?
 chinesesimp.OldLayout=以下位置已安装旧版本的 QAI AppBuilder:%n%1%n%n新版本使用不同的目录结构,无法直接升级。请先卸载旧版本(“设置 > 应用”,或开始菜单中的卸载快捷方式),然后重新运行本安装程序。
 chinesesimp.AppDirTaken=文件夹%n%1%n中已有不是 QAI AppBuilder 安装的文件。%n%nQAI AppBuilder 会安装到你所选文件夹下的 "app" 子文件夹,卸载时会删除该子文件夹。请选择其他文件夹。
+chinesesimp.CancelAsk=要取消安装吗?%n%n已安装的内容将全部删除。需要时请重新运行安装程序。
+chinesesimp.CancelledTitle=安装已取消
+chinesesimp.CancelledInfo=QAI AppBuilder 未安装,已复制的文件已删除。%n%n点击“完成”退出。需要时请重新运行安装程序。
 chinesesimp.SettingUp=正在配置 Python 环境和浏览器(需下载约 1.2 GB,可能需要 10-20 分钟)...
 chinesesimp.StepFmt=第 %1 步，共 7 步：%2
 chinesesimp.ElapsedFmt=已用时 %1
@@ -204,6 +215,7 @@ var
   LastLogText: String;
   SetupTimer: Longword;
   SetupRunning: Boolean;
+  SetupCancelled: Boolean;
   SetupLog, SetupBat: String;
   SetupStartTick, StepStartTick: DWORD;
   LastStepSeen: Integer;
@@ -538,6 +550,7 @@ begin
   // This timer runs on the UI thread, so re-enable the form here. Next/Cancel are child controls with their own
   // Enabled flag and stay greyed out; closing the window is refused in CancelButtonClick.
   EnableWindow(WizardForm.Handle, True);
+  WizardForm.CancelButton.Enabled := True;
   try
     Now := GetTickCount;
     Step := CurrentStep(SetupLog);
@@ -560,6 +573,26 @@ begin
   except
     // A transient read error (log being written) must not kill the timer; the next tick retries.
   end;
+end;
+
+// Ask, then kill the whole process tree of the hidden wrapper; Exec() in RunEnvironmentSetup then returns by itself and
+// CurStepChanged undoes the install. Called from our own OnClick (below): while Exec() waits, Inno's stock Cancel
+// handling did not react to the click, so the button is hooked directly.
+procedure RequestCancelSetup;
+var
+  Rc: Integer;
+begin
+  if (not SetupRunning) or SetupCancelled then Exit;
+  if MsgBox(CustomMessage('CancelAsk'), mbConfirmation, MB_YESNO or MB_DEFBUTTON2) <> IDYES then Exit;
+  SetupCancelled := True;
+  WizardForm.CancelButton.Enabled := False;
+  Exec(ExpandConstant('{cmd}'), '/c powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq ''cmd.exe'' -and $_.CommandLine -like ''*_run_setup_env.bat*'' -and $_.CommandLine -notlike ''*Get-CimInstance*'' } | ForEach-Object { taskkill /F /T /PID $_.ProcessId }"',
+       '', SW_HIDE, ewWaitUntilTerminated, Rc);
+end;
+
+procedure CancelButtonOnClick(Sender: TObject);
+begin
+  RequestCancelSetup;
 end;
 
 // Runs _setup_env.bat hidden and returns only when it has finished (so Setup cannot jump to the Finished page
@@ -587,6 +620,8 @@ begin
   WizardForm.ProgressGauge.Position := 0;
   CreateProgressLabels;
 
+  WizardForm.CancelButton.Enabled := True;
+  WizardForm.CancelButton.OnClick := @CancelButtonOnClick;
   SetupStartTick := GetTickCount;
   StepStartTick := SetupStartTick;
   LastStepSeen := 0;
@@ -616,24 +651,22 @@ procedure CurPageChanged(CurPageID: Integer);
 begin
   if CurPageID = wpInstalling then
   begin
-    WizardForm.CancelButton.Enabled := False;
     WizardForm.NextButton.Enabled := False;
+  end;
+  if (CurPageID = wpFinished) and SetupCancelled then
+  begin
+    WizardForm.FinishedHeadingLabel.Caption := CustomMessage('CancelledTitle');
+    WizardForm.FinishedLabel.Caption := CustomMessage('CancelledInfo');
   end;
 end;
 
 procedure CancelButtonClick(CurPageID: Integer; var Cancel, Confirm: Boolean);
 begin
-  // Closing the window mid-install would orphan the hidden _setup_env.bat; refuse until it is finished.
-  if SetupRunning then Cancel := False;
-end;
-
-procedure CurStepChanged(CurStep: TSetupStep);
-begin
-  if CurStep = ssPostInstall then
+  // Never let Inno tear the wizard down while the hidden _setup_env.bat runs (it would be orphaned).
+  if SetupRunning then
   begin
-    RunEnvironmentSetup;
-    if (SetupExit <> 0) and (not WizardSilent) then
-      MsgBox(FmtMessage(CustomMessage('SetupFailed'), [IntToStr(SetupExit), SetupLog]), mbError, MB_OK);
+    Cancel := False;
+    Confirm := False;
   end;
 end;
 
@@ -886,3 +919,27 @@ begin
   end;
 end;
 
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+  begin
+    RunEnvironmentSetup;
+    if SetupCancelled then
+    begin
+      // Cancel = undo: stop anything still running under the install folder, delete what was installed (the user's own
+      // data\ and memory\ of an earlier install are kept), drop the Start-menu group (with the Repair shortcut), then Abort so
+      // Inno rolls back the rest (uninstall entry, remaining files).
+      StopProcessesUnder(ExpandConstant('{app}\app'));
+      DeleteDirContentsExcept(ExpandConstant('{app}\app'), True);
+      RemoveDir(ExpandConstant('{app}'));
+      DelTree(ExpandConstant('{group}'), True, True, True);
+      // The wizard still shows its 'Completing' page after this step; CurPageChanged makes it say 'cancelled'.
+      // Also drop the Apps & features entry of the install that no longer exists.
+      SetupExit := -3;
+      RegDeleteKeyIncludingSubkeys(HKCU, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{6E3B1F52-8C0A-4D57-9B1E-3A7C5D2F8E14}_is1');
+      RegDeleteKeyIncludingSubkeys(HKLM, 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{6E3B1F52-8C0A-4D57-9B1E-3A7C5D2F8E14}_is1');
+    end
+    else if (SetupExit <> 0) and (not WizardSilent) then
+      MsgBox(FmtMessage(CustomMessage('SetupFailed'), [IntToStr(SetupExit), SetupLog]), mbError, MB_OK);
+  end;
+end;
