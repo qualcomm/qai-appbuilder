@@ -326,6 +326,9 @@ bool GenieContext::Query(const ModelInput &model_input, const Callback &callback
         std::lock_guard<std::mutex> metrics_lock(trace_metrics_mutex_);
         last_trace_metrics_ = json::object();
     }
+    ++query_seq_;
+    last_query_prompt_tokens_ = 0;
+    last_query_gen_tokens_ = 0;
     if (query_scope.stopped())
     {
         My_Log{My_Log::Level::kWarning}
@@ -568,6 +571,9 @@ prefill_start:
     {
         callback(tail_answer);
     }
+
+    last_query_prompt_tokens_ = prompt_tokens;
+    last_query_gen_tokens_ = inf_impl_->inf_->cur_length_ > prompt_tokens ? inf_impl_->inf_->cur_length_ - prompt_tokens : 0;
 
     if (ckpt_capable_.load())
     {
@@ -1086,19 +1092,71 @@ json GenieContext::HandleProfile()
                 const auto &last_event = events.back();
                 if (last_event.at("type") == "GenieDialog_query")
                 {
-                    result["time_to_first_token"] =
-                            FormatFixed2(last_event.at("time-to-first-token")["value"].get<double>() / 1000000.0);
-                    result["token_generation_time"] =
-                            FormatFixed2(last_event.at("token-generation-time")["value"].get<double>() / 1000000.0);
-                    result["prompt_processing_rate"] =
-                            FormatFixed2(last_event.at("prompt-processing-rate")["value"].get<double>());
-                    result["token_generation_rate"] =
-                            FormatFixed2(last_event.at("token-generation-rate")["value"].get<double>());
+                    const std::string event_sig = last_event.dump();
+                    bool stale = false;
+                    {
+                        std::lock_guard<std::mutex> sig_guard(profile_cache_mutex_);
+                        const uint64_t seq = query_seq_.load();
+                        if (seq != profile_sig_seq_)
+                        {
+                            if (event_sig == profile_sig_)
+                            {
+                                stale = true;
+                            }
+                            else
+                            {
+                                profile_sig_ = event_sig;
+                                profile_sig_seq_ = seq;
+                            }
+                        }
+                    }
+                    if (stale)
+                    {
+                        My_Log{My_Log::Level::kWarning}
+                                << "[QNN] Genie profile has no new event for this query (e.g. context full); "
+                                   "timing stats suppressed, token counts come from the service counters\n";
+                        result["stale_profile"] = true;
+                        result["num_prompt_tokens"] = last_query_prompt_tokens_.load();
+                        result["num_generated_tokens"] = last_query_gen_tokens_.load();
+                    }
+                    else
+                    {
+                        result["time_to_first_token"] =
+                                FormatFixed2(last_event.at("time-to-first-token")["value"].get<double>() / 1000000.0);
+                        result["token_generation_time"] =
+                                FormatFixed2(last_event.at("token-generation-time")["value"].get<double>() / 1000000.0);
+                        result["prompt_processing_rate"] =
+                                FormatFixed2(last_event.at("prompt-processing-rate")["value"].get<double>());
+                        result["token_generation_rate"] =
+                                FormatFixed2(last_event.at("token-generation-rate")["value"].get<double>());
 
-                    result["num_prompt_tokens"] = last_event.at("num-prompt-tokens")["value"];
-                    const int64_t generated = last_event.at("num-generated-tokens")["value"].get<int64_t>();
-                    const int64_t gen_base = profile_gen_base_.load();
-                    result["num_generated_tokens"] = generated > gen_base ? generated - gen_base : 0;
+                        result["num_prompt_tokens"] = last_event.at("num-prompt-tokens")["value"];
+                        const int64_t generated = last_event.at("num-generated-tokens")["value"].get<int64_t>();
+                        const int64_t gen_base = profile_gen_base_.load();
+                        result["num_generated_tokens"] = generated > gen_base ? generated - gen_base : 0;
+
+                        const json trace = GetLastQueryTraceMetrics();
+                        if (trace.is_object() && trace.value("suffix_mode", false))
+                        {
+                            const double total = trace.value("prompt_tokens", 0.0);
+                            const double reused = trace.value("prefix_reused_tokens", 0.0);
+                            const double fresh = total > reused ? total - reused : 0.0;
+                            const double sdk_ttft_s =
+                                    last_event.at("time-to-first-token")["value"].get<double>() / 1000000.0;
+                            const double ttft_ms = trace.value("ttft_ms", -1.0);
+                            const double ttft_s = ttft_ms > 0.0
+                                    ? ttft_ms / 1000.0
+                                    : (trace.value("ckpt_restore_ms", 0.0) + trace.value("prefill_ms", 0.0)) / 1000.0
+                                      + sdk_ttft_s;
+                            const double save_s = trace.value("ckpt_save_ms", 0.0) / 1000.0;
+                            const double prefill_s = ttft_s > save_s ? ttft_s - save_s : ttft_s;
+                            result["num_prompt_tokens"] = static_cast<int64_t>(total);
+                            result["num_prefill_tokens"] = static_cast<int64_t>(fresh);
+                            result["time_to_first_token"] = FormatFixed2(ttft_s);
+                            result["prefill_time"] = FormatFixed2(prefill_s);
+                            result["prompt_processing_rate"] = FormatFixed2(prefill_s > 0.0 ? fresh / prefill_s : 0.0);
+                        }
+                    }
                 }
             }
         }
@@ -1183,6 +1241,7 @@ void GenieContext::PublishTraceMetrics(const CheckpointRun &run, size_t prompt_t
     m["prompt_tokens"] = prompt_tokens;
     m["gen_tokens"] = cur_length > prompt_tokens ? cur_length - prompt_tokens : 0;
     m["prefix_reused_tokens"] = run.reused_tokens;
+    m["suffix_mode"] = run.suffix_mode;
     m["ttft_ms"] = ttft_ms;
     m["prefill_ms"] = static_cast<int64_t>(run.prefill_ms);
     m["ckpt_hit"] = run.hit;

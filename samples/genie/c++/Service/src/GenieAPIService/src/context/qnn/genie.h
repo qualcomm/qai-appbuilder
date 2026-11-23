@@ -167,6 +167,11 @@ private:
     std::atomic<bool> busy_after_timeout_{false};
     std::mutex profile_cache_mutex_;
     json last_profile_;
+    std::atomic<uint64_t> query_seq_{0};
+    uint64_t profile_sig_seq_{0};
+    std::string profile_sig_;
+    std::atomic<size_t> last_query_prompt_tokens_{0};
+    std::atomic<size_t> last_query_gen_tokens_{0};
 
     std::string m_stream_answer;
     std::mutex m_stream_lock;

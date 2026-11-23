@@ -27,6 +27,8 @@ namespace
         double tg_rate_sum{0.0};
         double prefill_tokens{0.0};
         double prefill_seconds{0.0};
+        double gen_tokens{0.0};
+        double gen_seconds{0.0};
     };
 
     struct ProfileTotals
@@ -76,6 +78,22 @@ void ResponseDispatcher::PrintProfile()
 
     try
     {
+        if (json_str.value("stale_profile", false))
+        {
+            const std::vector<std::string> stale_prompt_row{
+                "Prompt (TTFT)", LogTable::JsonText(json_str.at("num_prompt_tokens")),
+                std::to_string(model_input_.text_.length()), "-", "-", "-"};
+            const std::vector<std::string> stale_generation_row{
+                "Generation", LogTable::JsonText(json_str.at("num_generated_tokens")),
+                std::to_string(response_buffer.length()), "-", "-", "-"};
+            table.SetTitle(title + " - SDK profile not updated for this query, timing unavailable");
+            table.SetHeader({"Phase", "Tokens", "Text Length", "Time (s)", "Rate (toks/s)", "Slot Avg (toks/s)"},
+                            {LogTable::Align::kLeft, LogTable::Align::kRight, LogTable::Align::kRight,
+                             LogTable::Align::kRight, LogTable::Align::kRight, LogTable::Align::kRight});
+            table.AddRow(stale_prompt_row).AddRow(stale_generation_row);
+            My_Log{}.original() << table.Str() << std::flush;
+            return;
+        }
         const double pp_rate = std::stod(json_str.at("prompt_processing_rate").get<std::string>());
         const double tg_rate = std::stod(json_str.at("token_generation_rate").get<std::string>());
         uint64_t samples;
@@ -84,6 +102,20 @@ void ResponseDispatcher::PrintProfile()
         const bool weighted = json_str.contains("num_prefill_tokens") && json_str.contains("prefill_time");
         const double prefill_tokens = weighted ? json_str.at("num_prefill_tokens").get<double>() : 0.0;
         const double prefill_seconds = weighted ? std::stod(json_str.at("prefill_time").get<std::string>()) : 0.0;
+        const auto number_of = [&json_str](const char *key) {
+            return json_str.contains(key) && json_str.at(key).is_number() ? json_str.at(key).get<double>() : 0.0;
+        };
+        double acc_prefill_tokens = prefill_tokens;
+        double acc_prefill_seconds = prefill_seconds;
+        const double prompt_tokens_n = number_of("num_prompt_tokens");
+        if (!weighted && pp_rate > 0.0 && prompt_tokens_n > 0.0)
+        {
+            acc_prefill_tokens = prompt_tokens_n;
+            acc_prefill_seconds = prompt_tokens_n / pp_rate;
+        }
+        const double gen_tokens_n = number_of("num_generated_tokens");
+        const double acc_gen_tokens = (tg_rate > 0.0 && gen_tokens_n > 0.0) ? gen_tokens_n : 0.0;
+        const double acc_gen_seconds = acc_gen_tokens > 0.0 ? gen_tokens_n / tg_rate : 0.0;
         {
             auto &totals = GetProfileTotals();
             std::lock_guard<std::mutex> lk(totals.mtx);
@@ -91,15 +123,16 @@ void ResponseDispatcher::PrintProfile()
             samples = ++slot_totals.samples;
             slot_totals.pp_rate_sum += pp_rate;
             slot_totals.tg_rate_sum += tg_rate;
-            if (weighted)
-            {
-                slot_totals.prefill_tokens += prefill_tokens;
-                slot_totals.prefill_seconds += prefill_seconds;
-            }
+            slot_totals.prefill_tokens += acc_prefill_tokens;
+            slot_totals.prefill_seconds += acc_prefill_seconds;
+            slot_totals.gen_tokens += acc_gen_tokens;
+            slot_totals.gen_seconds += acc_gen_seconds;
             pp_avg = slot_totals.prefill_seconds > 0.0
                 ? slot_totals.prefill_tokens / slot_totals.prefill_seconds
                 : slot_totals.pp_rate_sum / static_cast<double>(samples);
-            tg_avg = slot_totals.tg_rate_sum / static_cast<double>(samples);
+            tg_avg = slot_totals.gen_seconds > 0.0
+                ? slot_totals.gen_tokens / slot_totals.gen_seconds
+                : slot_totals.tg_rate_sum / static_cast<double>(samples);
         }
 
         const std::string prompt_tokens_text = weighted

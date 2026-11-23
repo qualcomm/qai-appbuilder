@@ -2516,7 +2516,11 @@ private:
         {
             LogTable table{"Token Summary [Summarization]"};
             auto profile = context_->HandleProfile();
-            if (!profile.empty())
+            if (profile.is_object() && profile.value("stale_profile", false))
+            {
+                table.SetTitle("Token Summary [Summarization] - SDK profile not updated for this query");
+            }
+            else if (!profile.empty())
             {
                 try
                 {
