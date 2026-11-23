@@ -44,7 +44,6 @@ import { apiJson } from "@/api";
 import { saveChatModelPreference } from "@/composables/chat/useChatModelPreference";
 import { resumeConversationIfRunning } from "@/composables/chat/useActiveChatRunAttach";
 import { useReboot } from "@/composables/useReboot";
-import { IS_INTERNAL } from "@/edition";
 import { fmtTokenCount } from "@/utils/contextBadge";
 import { useChatTabsStore, type TabId, type ChatTab } from "@/stores/chatTabs";
 import {
@@ -703,16 +702,10 @@ export function useChatCommands() {
   }
 
   function cmdHelp(tab: ChatTab): void {
-    // V1 `/help` (useChat.js:1630-1636) — uses the help namespace text.
-    // Internal builds also append the Qualcomm support address so users
-    // who prefer the /help command (rather than the sidebar user menu)
-    // can still find it. IS_INTERNAL is a build-time constant, so the
-    // append branch is DCE'd on external/Release builds — the internal
-    // support address never ships in the open-source bundle.
-    let text = t("help.mainText");
-    if (IS_INTERNAL) {
-      text += "\n\n📮 Support: qai-appbuilder.support@qti.qualcomm.com";
-    }
+    // V1 `/help` (useChat.js:1630-1636) — uses the help namespace text,
+    // plus the support address so users who prefer /help (rather than the
+    // sidebar user menu's "Contact support") can still find it.
+    const text = `${t("help.mainText")}\n\n📮 Support: qaiappbuilder.support@qti.qualcomm.com`;
     reply(tab.id, text);
   }
 

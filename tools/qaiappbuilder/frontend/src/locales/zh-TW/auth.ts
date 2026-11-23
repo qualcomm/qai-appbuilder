@@ -18,7 +18,17 @@
 
 const auth = {
   account_menu: "帳戶選單",
+  backend_log_copied: "後端日誌已複製到剪貼簿",
+  backend_log_copy_failed: "後端日誌複製失敗",
+  backend_log_exported: "後端日誌已匯出",
+  backend_log_export_failed: "後端日誌匯出失敗",
   contact_support: "聯絡支援",
+  copy_backend_log: "複製日誌",
+  copy_email: "複製信箱",
+  email_copied: "支援信箱已複製",
+  export_backend_log: "匯出日誌",
+  no_mail_client_message: "這台電腦上找不到郵件程式。請將問題寄送到：\n\n{email}\n\n提示：可以使用本選單裡的「複製日誌」，再把日誌貼到郵件裡。",
+  no_mail_client_title: "聯絡支援",
   prompt_hint: "您將被跳轉到 Qualcomm 登入頁面。",
   prompt_message: "請使用您的 Qualcomm 帳號登入後繼續使用 QAI AppBuilder。",
   prompt_title: "需要登入",

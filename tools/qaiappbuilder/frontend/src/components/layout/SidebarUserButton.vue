@@ -39,17 +39,21 @@ import { rearmAuthGate } from "@/api/http";
 import { useAuthStore } from "@/stores/auth";
 import { useConfirm } from "@/composables/useConfirm";
 import { useReboot } from "@/composables/useReboot";
-import { IS_INTERNAL } from "@/edition";
+import { useToast } from "@/composables/useToast";
+import {
+  COPY_LOG_LINES,
+  EXPORT_LOG_LINES,
+  copyText,
+  downloadText,
+  fetchBackendLogText,
+  requestContactSupport,
+} from "@/diagnostics/backendLog";
 
 /**
- * Internal-only support contact. Rendered only when `IS_INTERNAL === true`
- * (Rollup dead-code-eliminates the menu item on external/Release builds),
- * so the internal Qualcomm support address never ships in the open-source
- * bundle. The mailto: click hands off to the OS default mail client; if
- * no client is configured the browser silently no-ops — this is a best-effort
- * shortcut, not a critical path.
+ * Support address, shown when no mail client is available (the backend
+ * reports the same one; this copy is the fallback when that request fails).
  */
-const SUPPORT_EMAIL = "qai-appbuilder.support@qti.qualcomm.com";
+const SUPPORT_EMAIL = "qaiappbuilder.support@qti.qualcomm.com";
 
 const props = withDefaults(
   defineProps<{ collapsed?: boolean }>(),
@@ -60,6 +64,7 @@ const { t } = useI18n();
 const auth = useAuthStore();
 const { confirm } = useConfirm();
 const { requestReboot } = useReboot();
+const toast = useToast();
 
 const open = ref(false);
 const rootRef = ref<HTMLElement | null>(null);
@@ -130,16 +135,50 @@ function restart(): void {
 }
 
 /**
- * Open the OS mail client with a pre-filled To: for the internal support
- * address. Uses `window.location.href` (not `window.open`) so the browser
- * doesn't try to open a blank tab that then immediately closes — Windows
- * hands the mailto: off to the registered handler in place. If no handler
- * is registered, the browser no-ops silently, which is fine (the address
- * is still visible in the /help output as a fallback per the release plan).
+ * Open the default mail client on a pre-filled message to support. The
+ * BACKEND opens it (same machine in both editions; the desktop window would
+ * swallow a `mailto:` navigation). When no mail client is available, or the
+ * request fails, show the address with a "copy" action instead.
  */
-function contactSupport(): void {
+async function contactSupport(): Promise<void> {
   close();
-  window.location.href = `mailto:${SUPPORT_EMAIL}`;
+  let email = SUPPORT_EMAIL;
+  try {
+    const res = await requestContactSupport();
+    if (res.opened) return;
+    email = res.email || SUPPORT_EMAIL;
+  } catch {
+    // fall through: show the address
+  }
+  const copy = await confirm({
+    title: t("auth.no_mail_client_title"),
+    message: t("auth.no_mail_client_message", { email }),
+    confirmText: t("auth.copy_email"),
+    cancelText: t("common.close"),
+    icon: "✉️",
+  });
+  if (copy && (await copyText(email))) toast.success(t("auth.email_copied"));
+}
+
+async function copyBackendLog(): Promise<void> {
+  close();
+  try {
+    const text = await fetchBackendLogText(COPY_LOG_LINES);
+    if (!(await copyText(text))) throw new Error("clipboard unavailable");
+    toast.success(t("auth.backend_log_copied"));
+  } catch {
+    toast.error(t("auth.backend_log_copy_failed"));
+  }
+}
+
+async function exportBackendLog(): Promise<void> {
+  close();
+  try {
+    downloadText(await fetchBackendLogText(EXPORT_LOG_LINES));
+    toast.success(t("auth.backend_log_exported"));
+  } catch {
+    toast.error(t("auth.backend_log_export_failed"));
+  }
 }
 
 async function signOut(): Promise<void> {
@@ -258,12 +297,53 @@ onBeforeUnmount(() => {
           <span class="sidebar-user-item-label">{{ t("sidebar.reboot") }}</span>
         </button>
 
-        <!-- Contact Support (internal-only) — opens the OS mail client with
-             the Qualcomm internal support address pre-filled. IS_INTERNAL
-             is a build-time constant; the entire button is DCE'd out of the
-             external/Release bundle, so the internal email never ships. -->
+        <!-- Copy / export the backend log (credentials masked by the backend)
+             for a problem report. -->
         <button
-          v-if="IS_INTERNAL"
+          type="button"
+          class="sidebar-user-item"
+          role="menuitem"
+          data-testid="sidebar-user-copy-backend-log"
+          @click="copyBackendLog"
+        >
+          <svg
+            class="sidebar-user-item-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            aria-hidden="true"
+          >
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+          <span class="sidebar-user-item-label">{{ t("auth.copy_backend_log") }}</span>
+        </button>
+        <button
+          type="button"
+          class="sidebar-user-item"
+          role="menuitem"
+          data-testid="sidebar-user-export-backend-log"
+          @click="exportBackendLog"
+        >
+          <svg
+            class="sidebar-user-item-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+            aria-hidden="true"
+          >
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          <span class="sidebar-user-item-label">{{ t("auth.export_backend_log") }}</span>
+        </button>
+
+        <!-- Contact support: the backend opens the default mail client on a
+             pre-filled message; without one, a dialog shows the address. -->
+        <button
           type="button"
           class="sidebar-user-item"
           role="menuitem"
