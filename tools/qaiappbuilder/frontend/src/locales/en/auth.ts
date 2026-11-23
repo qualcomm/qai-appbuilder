@@ -18,7 +18,17 @@
 
 const auth = {
   account_menu: "Account menu",
+  backend_log_copied: "Backend log copied to clipboard",
+  backend_log_copy_failed: "Could not copy the backend log",
+  backend_log_exported: "Backend log exported",
+  backend_log_export_failed: "Could not export the backend log",
   contact_support: "Contact support",
+  copy_backend_log: "Copy log",
+  copy_email: "Copy address",
+  email_copied: "Support address copied",
+  export_backend_log: "Export log",
+  no_mail_client_message: "No e-mail app was found on this computer. Please send your report to:\n\n{email}\n\nTip: use “Copy log” in this menu and paste the log into your e-mail.",
+  no_mail_client_title: "Contact support",
   prompt_hint: "You'll be redirected to the Qualcomm sign-in page.",
   prompt_message: "Please sign in with your Qualcomm account to continue using QAI AppBuilder.",
   prompt_title: "Sign in required",
