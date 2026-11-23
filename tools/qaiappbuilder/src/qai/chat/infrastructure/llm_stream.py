@@ -222,6 +222,14 @@ _CHAT_CONTROL_KEYS: frozenset[str] = frozenset(
         # pure noise (and ``workspace_context_files`` can be tens of KB).
         "_session_workspace_root",
         "workspace_context_files",
+        # Persona memory (memory/SOUL.md + USER.md block, IDENTITY.md override)
+        # and the signed-in user's display name: already rendered into the
+        # system prompt by the builder. Forwarding them would send the whole
+        # persona text and the user's name to the provider as unknown
+        # top-level body fields.
+        "long_term_memory_block",
+        "persona_identity",
+        "user_display_name",
         # Per-turn runtime debug flags stashed by ``StreamChatUseCase._run``
         # from the forge-config ``service_launch`` reader (prompt_debug /
         # show_prompt_in_ui). Consumed by the use case only (console dump +
