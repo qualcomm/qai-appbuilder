@@ -67,6 +67,8 @@ OutputBaseFilename=QAIAppBuilder-{#AppVersion}-qairt{#QairtTag}-{#Arch}-setup
 Compression=lzma2/ultra64
 SolidCompression=yes
 WizardStyle=modern
+; 20% larger than the default so the environment-setup page has room for its live log box.
+WizardSizePercent=120
 ; _setup_env.bat (without --builder) creates the runtime venv in {app}\app\envs (~0.75 GB, measured) plus download caches
 ; (+ ~0.2 GB vendor wheels on ARM64), + Chromium (~0.7 GB unpacked, in {app}\app\envs\ms-playwright) and
 ; ast-grep (~0.1 GB). The converter venv (.venv_x64_310) and the QAIRT SDK are NOT installed here.
@@ -85,7 +87,14 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "chinesesimp"; MessagesFile: "ChineseSimplified.isl"
 
 [Files]
-Source: "{#StageDir}\*"; DestDir: "{app}\app"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#StageDir}\*"; DestDir: "{app}\app"; Excludes: "\config\*,\memory\USER.md"; Flags: recursesubdirs createallsubdirs ignoreversion
+; config\ holds files the user may tune (model_family_overrides.json): installed on the first install only, a later
+; install or upgrade keeps the existing copy. Removed with app\ on uninstall like every other program file.
+Source: "{#StageDir}\config\*"; DestDir: "{app}\app\config"; Flags: onlyifdoesntexist recursesubdirs createallsubdirs
+; memory\USER.md is the user's profile (how to address them, notes): first install only, never overwritten, and left
+; to the [Code] uninstall step, which keeps it with "Your data" unless the user ticks that. memory\IDENTITY.md and
+; SOUL.md are product persona files: refreshed by the main entry above on every install.
+Source: "{#StageDir}\memory\USER.md"; DestDir: "{app}\app\memory"; Flags: onlyifdoesntexist uninsneveruninstall
 
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\app\desktop\QAIAppBuilder.exe"; WorkingDir: "{app}\app"; Comment: "Open QAI AppBuilder (desktop window)"
@@ -101,7 +110,7 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\app\desktop\QAIAppBuilder.exe
 Filename: "{app}\app\desktop\QAIAppBuilder.exe"; Description: "{cm:LaunchNow}"; WorkingDir: "{app}\app"; Flags: postinstall nowait skipifsilent; Check: EnvOk
 
 [UninstallDelete]
-; Everything under {app}\app except data\ is removed by the [Code] uninstall step (it deletes the folder as a
+; Everything under {app}\app except data\ and memory\ (the user's own content) is removed by the [Code] uninstall step (it deletes the folder as a
 ; whole, including what the app wrote at run time). Only these temp files inside data\ need a rule: they are not
 ; user data, so they go even when data\ is kept. ~2.3 GB. Exact names, no wildcard (`_qairt_tmp.zip*` would also
 ; catch unrelated files that merely start with that name).
@@ -115,18 +124,13 @@ english.NetDesc=Choose the package source. "Auto" probes the network and picks o
 english.MirrorAuto=Auto-detect (recommended)
 english.MirrorOfficial=Official sources (pypi.org, github.com)
 english.MirrorCn=China mirrors (use if github.com / pypi.org are slow or blocked)
-english.ProxyTitle=Proxy (optional)
-english.ProxySub=Leave empty if you do not use a proxy.
-english.ProxyDesc=HTTP proxy, for example http://host:port
-english.ProxyLabel=Proxy URL:
-english.ProxyBad=The proxy must start with http:// or https://
 english.PathWarn=The install path contains spaces or non-ASCII characters, which can break some setup scripts.%n%nContinue anyway?
 english.OldLayout=An older version of QAI AppBuilder is installed in:%n%1%n%nThis version uses a different folder layout and cannot upgrade it. Uninstall the old version first (Settings > Apps, or its Start-menu uninstall shortcut), then run this installer again.
 english.AppDirTaken=The folder%n%1%nalready contains files that were not installed by QAI AppBuilder.%n%nQAI AppBuilder installs into an "app" subfolder of the folder you choose and deletes that subfolder when uninstalled. Choose a different folder.
 english.SettingUp=Setting up the Python environment and the browser (downloads about 1.2 GB, this can take 10-20 minutes)...
 english.StepFmt=Step %1 of 7: %2
 english.ElapsedFmt=Elapsed %1
-english.LogHint=Detailed log: %1
+english.LogHint=Full log: %1
 english.Step1=Checking the network
 english.Step2=Preparing download tools (aria2c, uv)
 english.Step3=Installing Python 3.13 and creating the environment
@@ -140,7 +144,7 @@ english.RepairName=Repair or complete environment setup
 english.LaunchNow=Start QAI AppBuilder now
 english.UninstTitle=Choose what else to remove
 english.UninstIntro=Untick what you want to keep for a later reinstall.
-english.UninstData=Your data (chat history, settings, secrets)
+english.UninstData=Your data (chat history, settings, secrets, assistant persona and user profile)
 english.UninstSdk=QAIRT SDK %1 (model conversion, several GB; other tools may use it too)
 english.UninstOk=Uninstall
 english.UninstCancel=Cancel
@@ -151,18 +155,13 @@ chinesesimp.NetDesc=选择软件包来源。"自动"会探测网络并自行选�
 chinesesimp.MirrorAuto=自动检测(推荐)
 chinesesimp.MirrorOfficial=官方源(pypi.org、github.com)
 chinesesimp.MirrorCn=国内镜像(github.com / pypi.org 慢或无法访问时选择)
-chinesesimp.ProxyTitle=代理(可选)
-chinesesimp.ProxySub=不使用代理请留空。
-chinesesimp.ProxyDesc=HTTP 代理,例如 http://host:port
-chinesesimp.ProxyLabel=代理地址:
-chinesesimp.ProxyBad=代理地址必须以 http:// 或 https:// 开头
 chinesesimp.PathWarn=安装路径包含空格或非 ASCII 字符,可能导致部分安装脚本出错。%n%n仍要继续吗?
 chinesesimp.OldLayout=以下位置已安装旧版本的 QAI AppBuilder:%n%1%n%n新版本使用不同的目录结构,无法直接升级。请先卸载旧版本(“设置 > 应用”,或开始菜单中的卸载快捷方式),然后重新运行本安装程序。
 chinesesimp.AppDirTaken=文件夹%n%1%n中已有不是 QAI AppBuilder 安装的文件。%n%nQAI AppBuilder 会安装到你所选文件夹下的 "app" 子文件夹,卸载时会删除该子文件夹。请选择其他文件夹。
 chinesesimp.SettingUp=正在配置 Python 环境和浏览器(需下载约 1.2 GB,可能需要 10-20 分钟)...
 chinesesimp.StepFmt=第 %1 步，共 7 步：%2
 chinesesimp.ElapsedFmt=已用时 %1
-chinesesimp.LogHint=详细日志：%1
+chinesesimp.LogHint=完整日志：%1
 chinesesimp.Step1=检测网络
 chinesesimp.Step2=准备下载工具(aria2c、uv)
 chinesesimp.Step3=安装 Python 3.13 并创建环境
@@ -176,7 +175,7 @@ chinesesimp.RepairName=修复或完成环境配置
 chinesesimp.LaunchNow=立即启动 QAI AppBuilder
 chinesesimp.UninstTitle=选择还要删除的内容
 chinesesimp.UninstIntro=取消勾选即可保留,供以后重新安装使用。
-chinesesimp.UninstData=你的数据(聊天记录、设置、密钥)
+chinesesimp.UninstData=你的数据(聊天记录、设置、密钥、AI 人设与用户画像)
 chinesesimp.UninstSdk=QAIRT SDK %1(模型转换用,占用数 GB;其他工具也可能在使用)
 chinesesimp.UninstOk=卸载
 chinesesimp.UninstCancel=取消
@@ -197,10 +196,12 @@ function EnableWindow(hWnd: Longword; bEnable: LongBool): LongBool;
 
 var
   NetPage: TInputOptionWizardPage;
-  ProxyPage: TInputQueryWizardPage;
   SetupExit: Integer;
   DetailLabel: TNewStaticText;
   ElapsedLabel: TNewStaticText;
+  LogPathLabel: TNewStaticText;
+  LogMemo: TNewMemo;
+  LastLogText: String;
   SetupTimer: Longword;
   SetupRunning: Boolean;
   SetupLog, SetupBat: String;
@@ -216,10 +217,8 @@ begin
   NetPage.Add(CustomMessage('MirrorOfficial'));
   NetPage.Add(CustomMessage('MirrorCn'));
   NetPage.SelectedValueIndex := 0;
-
-  ProxyPage := CreateInputQueryPage(NetPage.ID, CustomMessage('ProxyTitle'), CustomMessage('ProxySub'),
-    CustomMessage('ProxyDesc'));
-  ProxyPage.Add(CustomMessage('ProxyLabel'), False);
+  // No proxy page: a proxy is rarely needed. _setup_env.bat still honours HTTPS_PROXY, and the Start-menu
+  // repair can be run by hand with --proxy http://host:port.
 end;
 
 function HasSpaceOrNonAscii(const S: String): Boolean;
@@ -233,6 +232,13 @@ begin
       Result := True;
       Exit;
     end;
+end;
+
+// The folders under {app}\app that hold the user's own content and go with "Your data" on uninstall: data\ (chats,
+// settings, secrets) and memory\ (USER.md, the user profile; IDENTITY.md / SOUL.md are product files Inno removes).
+function IsKeptUserDir(const Name: String): Boolean;
+begin
+  Result := (CompareText(Name, 'data') = 0) or (CompareText(Name, 'memory') = 0);
 end;
 
 // Why the chosen folder cannot be used, or '' when it is fine. {app} is the PARENT; our files go to {app}\app,
@@ -254,12 +260,12 @@ begin
   App := AddBackslash(Dir) + 'app';
   if not DirExists(App) then Exit;
   if FileExists(AddBackslash(App) + 'unins000.dat') then Exit;  // our own earlier install: upgrade in place
-  // Left over by an uninstall that kept data: only data\ remains. Anything else is not ours.
+  // Left over by an uninstall that kept the user's data: only data\ and memory\ remain. Anything else is not ours.
   Foreign := False;
   if FindFirst(AddBackslash(App) + '*', FR) then
   try
     repeat
-      if (FR.Name <> '.') and (FR.Name <> '..') and (CompareText(FR.Name, 'data') <> 0) then Foreign := True;
+      if (FR.Name <> '.') and (FR.Name <> '..') and not IsKeptUserDir(FR.Name) then Foreign := True;
     until Foreign or (not FindNext(FR));
   finally
     FindClose(FR);
@@ -283,30 +289,16 @@ begin
     end;
     if HasSpaceOrNonAscii(WizardDirValue) then
       Result := MsgBox(CustomMessage('PathWarn'), mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
-  end
-  else if CurPageID = ProxyPage.ID then
-  begin
-    P := Trim(ProxyPage.Values[0]);
-    if (P <> '') and (Pos('http://', LowerCase(P)) <> 1) and (Pos('https://', LowerCase(P)) <> 1) then
-    begin
-      MsgBox(CustomMessage('ProxyBad'), mbError, MB_OK);
-      Result := False;
-    end;
   end;
 end;
 
 function SetupArgs: String;
-var
-  P: String;
 begin
   Result := '--arch {#Arch} --no-pause {#SetupComponents}';
   case NetPage.SelectedValueIndex of
     1: Result := Result + ' --mirror official';
     2: Result := Result + ' --mirror cn';
   end;
-  P := Trim(ProxyPage.Values[0]);
-  if P <> '' then
-    Result := Result + ' --proxy ' + P;
 end;
 
 function EnvOk: Boolean;
@@ -379,7 +371,7 @@ begin
   end;
 end;
 
-// Last meaningful output line, trimmed for the wizard (skips blank lines and the [TIME] bookkeeping).
+// Position of the last C in S, 0 when there is none.
 function LastCharPos(C: Char; const S: String): Integer;
 var
   K: Integer;
@@ -393,27 +385,82 @@ begin
     end;
 end;
 
-function LastOutputLine(const LogFile: String): String;
+// Drop ANSI colour sequences (ESC [ ... <letter>) that uv / playwright print; the log box would show them as junk.
+function StripAnsi(const S: String): String;
 var
-  Lines: TArrayOfString;
   I, N: Integer;
+begin
+  Result := '';
+  I := 1;
+  N := Length(S);
+  while I <= N do
+  begin
+    if (S[I] = #27) and (I < N) and (S[I + 1] = '[') then
+    begin
+      I := I + 2;
+      while (I <= N) and not (((S[I] >= 'A') and (S[I] <= 'Z')) or ((S[I] >= 'a') and (S[I] <= 'z'))) do
+        I := I + 1;
+      I := I + 1;  // the final letter
+    end
+    else
+    begin
+      Result := Result + S[I];
+      I := I + 1;
+    end;
+  end;
+end;
+
+// One log line as the box shows it: a CR-overwritten progress line (aria2c, the PowerShell downloader) keeps only
+// its last state, colour codes are removed.
+function CleanLogLine(S: String): String;
+begin
+  S := TrimRight(S);
+  if Pos(#13, S) > 0 then S := Copy(S, LastCharPos(#13, S) + 1, Length(S));
+  if Pos(#27, S) > 0 then S := StripAnsi(S);
+  Result := TrimRight(S);
+end;
+
+// The last MaxLines non-blank lines of the log, cleaned, oldest first. Only those lines are processed, so a long log
+// costs no more per tick than a short one.
+function RecentLogText(const LogFile: String; MaxLines: Integer): String;
+var
+  Lines, Kept: TArrayOfString;
+  I, Count: Integer;
   S: String;
 begin
   Result := '';
   if not LoadStringsFromLockedFile(LogFile, Lines) then Exit;
-  N := GetArrayLength(Lines);
-  for I := N - 1 downto 0 do
+  SetArrayLength(Kept, MaxLines);
+  Count := 0;
+  for I := GetArrayLength(Lines) - 1 downto 0 do
   begin
-    S := Trim(Lines[I]);
-    if (S <> '') and (Copy(S, 1, 6) <> '[TIME]') and (Copy(S, 1, 3) <> '-- ') then
+    S := CleanLogLine(Lines[I]);
+    if Trim(S) <> '' then
     begin
-      // aria2c progress lines are CR-overwritten; keep only the last segment.
-      if Pos(#13, S) > 0 then S := Trim(Copy(S, LastCharPos(#13, S) + 1, Length(S)));
-      if Length(S) > 90 then S := Copy(S, 1, 87) + '...';
-      Result := S;
-      Exit;
+      Kept[Count] := S;
+      Count := Count + 1;
+      if Count >= MaxLines then Break;
     end;
   end;
+  for I := Count - 1 downto 0 do
+  begin
+    Result := Result + Kept[I];
+    if I > 0 then Result := Result + #13#10;
+  end;
+end;
+
+// Refresh the log box when the log changed, and keep it scrolled to the newest line.
+procedure RefreshLogView;
+var
+  T: String;
+begin
+  if LogMemo = nil then Exit;
+  T := RecentLogText(SetupLog, 200);
+  if T = LastLogText then Exit;
+  LastLogText := T;
+  LogMemo.Text := T;
+  LogMemo.SelStart := Length(T);
+  SendMessage(LogMemo.Handle, $0115 {WM_VSCROLL}, 7 {SB_BOTTOM}, 0);
 end;
 
 function FmtElapsed(Sec: Integer): String;
@@ -440,6 +487,28 @@ begin
   ElapsedLabel.Width := WizardForm.ProgressGauge.Width;
   ElapsedLabel.AutoSize := False;
   ElapsedLabel.Height := ScaleY(16);
+  // Live log: the newest lines of install_setup_env.log, so the user sees what is being downloaded / installed.
+  LogPathLabel := TNewStaticText.Create(WizardForm);
+  LogPathLabel.Parent := WizardForm.InstallingPage;
+  LogPathLabel.Left := WizardForm.ProgressGauge.Left;
+  LogPathLabel.Top := ElapsedLabel.Top + ElapsedLabel.Height + ScaleY(6);
+  LogPathLabel.Width := WizardForm.ProgressGauge.Width;
+  LogPathLabel.AutoSize := False;
+  LogPathLabel.Height := ScaleY(16);
+  LogPathLabel.Caption := FmtMessage(CustomMessage('LogHint'), [SetupLog]);
+  LogMemo := TNewMemo.Create(WizardForm);
+  LogMemo.Parent := WizardForm.InstallingPage;
+  LogMemo.Left := WizardForm.ProgressGauge.Left;
+  LogMemo.Top := LogPathLabel.Top + LogPathLabel.Height + ScaleY(2);
+  LogMemo.Width := WizardForm.ProgressGauge.Width;
+  LogMemo.Height := WizardForm.InstallingPage.ClientHeight - LogMemo.Top - ScaleY(4);
+  if LogMemo.Height < ScaleY(80) then LogMemo.Height := ScaleY(80);
+  LogMemo.ReadOnly := True;
+  LogMemo.WordWrap := False;
+  LogMemo.ScrollBars := ssBoth;
+  LogMemo.Font.Name := 'Consolas';
+  LogMemo.Font.Size := 8;
+  LastLogText := '';
 end;
 
 // Percent of the bar for step N, T seconds into it: finished steps count fully; inside a step the bar
@@ -484,9 +553,10 @@ begin
       DetailLabel.Caption := CustomMessage('StepDone')
     else
       DetailLabel.Caption := FmtMessage(CustomMessage('StepFmt'), [IntToStr(Step), StepName(Step)]);
-    WizardForm.FilenameLabel.Caption := LastOutputLine(SetupLog);
-    ElapsedLabel.Caption := FmtMessage(CustomMessage('ElapsedFmt'), [FmtElapsed((Now - SetupStartTick) div 1000)]) +
-                            '    ' + FmtMessage(CustomMessage('LogHint'), [SetupLog]);
+    // The last line now lives in the log box below; keep this label empty instead of repeating it.
+    WizardForm.FilenameLabel.Caption := '';
+    ElapsedLabel.Caption := FmtMessage(CustomMessage('ElapsedFmt'), [FmtElapsed((Now - SetupStartTick) div 1000)]);
+    RefreshLogView;
   except
     // A transient read error (log being written) must not kill the timer; the next tick retries.
   end;
@@ -532,6 +602,11 @@ begin
   finally
     SetupRunning := False;
     KillTimer(0, SetupTimer);
+  end;
+  // Show the final lines too (success or the error), they stay visible after the run.
+  try
+    RefreshLogView;
+  except
   end;
   if SetupExit = 0 then WizardForm.ProgressGauge.Position := 100;
   DeleteFile(SetupBat);
@@ -638,8 +713,9 @@ begin
     '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + Script + '"', '', SW_HIDE, ewWaitUntilTerminated, Rc);
 end;
 
-// Delete every entry of Dir except the one named Keep ('' = keep nothing, then Dir itself goes too).
-procedure DeleteDirContentsExcept(const Dir, Keep: String);
+// Delete every entry of Dir, except the user's own folders (IsKeptUserDir) when KeepUserDirs. Dir itself goes too
+// once it is empty (RemoveDir fails harmlessly while kept folders are still in it).
+procedure DeleteDirContentsExcept(const Dir: String; KeepUserDirs: Boolean);
 var
   FR: TFindRec;
   P: String;
@@ -647,7 +723,7 @@ begin
   if FindFirst(AddBackslash(Dir) + '*', FR) then
   try
     repeat
-      if (FR.Name <> '.') and (FR.Name <> '..') and ((Keep = '') or (CompareText(FR.Name, Keep) <> 0)) then
+      if (FR.Name <> '.') and (FR.Name <> '..') and not (KeepUserDirs and IsKeptUserDir(FR.Name)) then
       begin
         P := AddBackslash(Dir) + FR.Name;
         if FR.Attributes and FILE_ATTRIBUTE_DIRECTORY <> 0 then
@@ -659,7 +735,7 @@ begin
   finally
     FindClose(FR);
   end;
-  if Keep = '' then RemoveDir(Dir);
+  RemoveDir(Dir);
 end;
 
 var
@@ -684,14 +760,15 @@ var
   List: TNewCheckListBox;
   OkBtn, KeepBtn: TNewButton;
   IxData, IxSdk, W, H, Pct: Integer;
-  DataDir: String;
+  DataDir, MemoryDir: String;
 begin
   Result := True;
   RemoveAllData := False;
   DelSdk := False;
   DataDir := ExpandConstant('{app}\app\data');
+  MemoryDir := ExpandConstant('{app}\app\memory');
   SdkPath := SdkToOffer;
-  if not (DirExists(DataDir) or (SdkPath <> '')) then Exit;
+  if not (DirExists(DataDir) or DirExists(MemoryDir) or (SdkPath <> '')) then Exit;
 
   // CreateCustomForm scales its size arguments to the screen DPI itself, so give it 96-dpi numbers: take the
   // Uninstall Status window's pixel size and divide the DPI factor back out (ScaleX(100) px = 100 units).
@@ -737,10 +814,11 @@ begin
     List.AddGroup(CustomMessage('UninstIntro'), '', 0, nil);
     // The desktop window's WebView2 profile is not offered here: it is window state only and is always removed
     // (see CurUninstallStepChanged).
-    if DirExists(DataDir) then
+    if DirExists(DataDir) or DirExists(MemoryDir) then
     begin
       IxData := List.AddCheckBox(CustomMessage('UninstData'), '', 0, True, True, False, False, nil);
-      List.AddGroup(DataDir, '', 1, nil);
+      if DirExists(DataDir) then List.AddGroup(DataDir, '', 1, nil);
+      if DirExists(MemoryDir) then List.AddGroup(MemoryDir, '', 1, nil);
     end;
     if SdkPath <> '' then
     begin
@@ -797,15 +875,11 @@ begin
   if CurUninstallStep = usPostUninstall then
   begin
     // Inno has removed the files it installed. Whatever is left in {app}\app was created at run time (envs\ with
-    // the venvs, models\, vendor\, logs, caches ...) and is ours too: remove it all, keeping only data\ unless the
-    // user chose to delete their data.
+    // the venvs, models\, vendor\, logs, caches ...) and is ours too: remove it all, keeping the user's own
+    // folders (data\, memory\ with USER.md) unless the user chose to delete their data. A silent uninstall keeps
+    // them too.
     if DirExists(App) then
-    begin
-      if RemoveAllData or (not DirExists(AddBackslash(App) + 'data')) then
-        DeleteDirContentsExcept(App, '')
-      else
-        DeleteDirContentsExcept(App, 'data');
-    end;
+      DeleteDirContentsExcept(App, not RemoveAllData);
     // The parent the user picked: removed only when nothing is left in it (RemoveDir fails on a non-empty dir),
     // e.g. %LOCALAPPDATA%\QAIAppBuilder once app\ is gone.
     RemoveDir(ExpandConstant('{app}'));
