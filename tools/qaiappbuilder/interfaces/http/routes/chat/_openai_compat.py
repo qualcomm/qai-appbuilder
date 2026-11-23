@@ -78,6 +78,7 @@ from fastapi import APIRouter, Depends, Header, Path, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from qai.chat.application.use_cases._long_term_memory import USER_DISPLAY_NAME_EXTRA_KEY
 from qai.chat.application.use_cases.streaming import StreamChatInput
 from qai.chat.domain.content import MessageContent
 from qai.chat.domain.ids import ConversationId, TabId
@@ -405,7 +406,7 @@ def _build_extra_from_request(
     *,
     passthrough_headers: dict[str, str] | None = None,
     unknown_fields: dict[str, Any] | None = None,
-) -> dict[str, Any] | None:
+) -> dict[str, Any]:
     """Pack OpenAI sampling/tool fields into ``StreamChatInput.extra``.
 
     PR-D1 (F-11): the chat use case → LLM stream pipeline already
@@ -415,9 +416,8 @@ def _build_extra_from_request(
     other recognised OpenAI top-level key like ``tool_choice`` /
     ``response_format``). This helper is the only translation point.
 
-    Returns ``None`` when the request carries no forwardable knobs so
-    callers can keep ``extra`` unset (matching previous behaviour for
-    minimal /v1 calls).
+    Always returns a dict: besides any forwarded knobs it carries an empty
+    ``user_display_name`` so a /v1 turn is never addressed by the SSO name.
     """
     extra: dict[str, Any] = {}
     if body.temperature is not None:
@@ -487,7 +487,11 @@ def _build_extra_from_request(
     # them onto the upstream request. Credential values are NOT logged.
     if passthrough_headers:
         extra["passthrough_headers"] = dict(passthrough_headers)
-    return extra or None
+    # A /v1 caller is some program on this machine, not necessarily the person
+    # signed in to the app: never address it by the SSO name. The explicit empty
+    # value stops the chat use case from filling one in.
+    extra[USER_DISPLAY_NAME_EXTRA_KEY] = ""
+    return extra
 
 
 # ---- Streaming bridge: OpenAI-shape frames over StreamChatUseCase --------

@@ -2223,6 +2223,21 @@ def build_chat_services(container: Container) -> ChatServices:
 
     _code_persona_resolver = CodePersonaResolverBridge(container=container)
 
+    # Signed-in user's display name for the chat prompt (cloud and local), so
+    # the assistant addresses the user by the SSO name. Same gate as the usage
+    # reporter's login-name source (lifespan.py): read the login switch LIVE,
+    # and with SSO off return "" -> the user is not addressed by any name.
+    # Imported here, in the apps composition root: the chat context must not
+    # import the interfaces auth module.
+    from interfaces.http.middleware.auth import last_login_display_name
+
+    _auth_settings_for_name = container.settings.auth
+
+    def _user_display_name() -> str:
+        if not bool(getattr(_auth_settings_for_name, "enabled", False)):
+            return ""
+        return last_login_display_name()
+
     # ----- System prompt builder (Batch B / B-1 + B-2 + B-3) -----
     # The builder injects two pieces of context into every default /
     # app-builder / feature turn:
@@ -2592,6 +2607,7 @@ def build_chat_services(container: Container) -> ChatServices:
         # in the background, so the parent turn is never blocked on a child.
         sub_agent_bridge=sub_agent_bridge,
         code_persona_resolver=_code_persona_resolver,
+        user_display_name_provider=_user_display_name,
         max_followup_rounds=-1,
         turn_warning_provider=_build_turn_warning_reader(container),
         hook_engine=hook_engine,
