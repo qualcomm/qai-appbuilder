@@ -67,6 +67,8 @@ from qai.chat.application.use_cases._workspace_context import (
 from qai.chat.application.use_cases._long_term_memory import (
     MEMORY_BLOCK_EXTRA_KEY,
     PERSONA_IDENTITY_EXTRA_KEY,
+    USER_DISPLAY_NAME_EXTRA_KEY,
+    render_user_name_block,
 )
 from qai.chat.domain.template_i18n import (
     normalize_ui_language as _domain_normalize_ui_language,
@@ -1547,6 +1549,17 @@ class RichSystemPromptBuilder(SystemPromptBuilderPort):
         block = (extra or {}).get(MEMORY_BLOCK_EXTRA_KEY)
         return block if isinstance(block, str) and block.strip() else ""
 
+    @staticmethod
+    def _maybe_user_name_block(extra: dict[str, Any]) -> str:
+        """``## User`` section with the signed-in user's name, if the use case set one.
+
+        Independent of the persona block, so it is still added when ``memory/``
+        is absent (the installed build does not ship it). Empty when nobody is
+        signed in / SSO is off, which keeps "do not address the user by name".
+        """
+        name = (extra or {}).get(USER_DISPLAY_NAME_EXTRA_KEY)
+        return render_user_name_block(name) if isinstance(name, str) else ""
+
     def _effective_identity(self, extra: dict[str, Any]) -> str:
         """Identity intro to use: IDENTITY.md override, else the default.
 
@@ -1791,6 +1804,9 @@ class RichSystemPromptBuilder(SystemPromptBuilderPort):
         _ltm_block = self._maybe_long_term_memory_block(extra)
         if _ltm_block:
             feature_parts.append(_ltm_block)
+        _user_block = self._maybe_user_name_block(extra)
+        if _user_block:
+            feature_parts.append(_user_block)
 
         if tools_text:
             feature_parts.append(tools_text)
@@ -1955,6 +1971,9 @@ class RichSystemPromptBuilder(SystemPromptBuilderPort):
         _ltm_block = self._maybe_long_term_memory_block(extra)
         if _ltm_block:
             parts.append(_ltm_block)
+        _user_block = self._maybe_user_name_block(extra)
+        if _user_block:
+            parts.append(_user_block)
 
         # Append tools section if available.
         if tools_text:
@@ -2134,6 +2153,9 @@ class RichSystemPromptBuilder(SystemPromptBuilderPort):
         _ltm_block = self._maybe_long_term_memory_block(extra)
         if _ltm_block:
             parts.append(_ltm_block)
+        _user_block = self._maybe_user_name_block(extra)
+        if _user_block:
+            parts.append(_user_block)
 
         # 5. Skill Catalog (structured listing)
         if catalog_rows:

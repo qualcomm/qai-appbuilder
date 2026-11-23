@@ -65,8 +65,8 @@ from interfaces.http.middleware.auth import (
     get_current_user,
     load_session_full,
     public_user,
+    record_login_user,
     session_secret,
-    set_last_login_name,
 )
 from qai.platform.logging import get_logger
 
@@ -671,7 +671,7 @@ def build_router(
         # reporter reports the logged-in name even before the SPA issues its
         # next authenticated request (the middleware also records it per
         # request). Cleared on logout below.
-        set_last_login_name(str(user.get("username") or ""))
+        record_login_user(user)
         logger.info(
             "auth.callback.login_ok",
             username=user.get("username"),
@@ -805,7 +805,7 @@ def build_router(
                         samesite="lax",
                         path="/",
                     )
-                    set_last_login_name(str(device_user.get("username") or ""))
+                    record_login_user(device_user)
                     logger.info(
                         "auth.me.device_session_ok",
                         username=device_user.get("username"),

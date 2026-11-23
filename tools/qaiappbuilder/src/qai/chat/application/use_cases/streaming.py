@@ -225,6 +225,8 @@ from qai.chat.application.use_cases._workspace_context import (
 from qai.chat.application.use_cases._long_term_memory import (
     MEMORY_BLOCK_EXTRA_KEY,
     PERSONA_IDENTITY_EXTRA_KEY,
+    USER_DISPLAY_NAME_EXTRA_KEY,
+    render_user_name_block as _render_user_name_block,
     resolve_persona_memory as _resolve_persona_memory_fn,
 )
 from qai.chat.application.use_cases.tool_advertise import (
@@ -557,6 +559,12 @@ _LOCAL_MODEL_HINT_PREFIX = "local::"
 # GenieAPIService's PromptOptimizer.DetectAgentType() take the MAIN_AGENT
 # optimisation path.
 _LOCAL_AGENT_MAIN_MARKER = "agent=main"
+
+#: Identity line of the on-device prompt. The cloud prompt opens with the
+#: builder's default identity ("You are QAI AppBuilder ..."); the minimal local
+#: prompt had none, so a local model introduced itself as its base model
+#: (e.g. "I am Qwen"). Kept to one short sentence for on-device context budgets.
+_LOCAL_IDENTITY = "You are QAI AppBuilder, an AI assistant running locally on this PC."
 
 #: Language-follow rule for the on-device (local model) system prompt. The
 #: local path assembles its prompt here and does NOT flow through
@@ -1907,6 +1915,11 @@ class StreamChatUseCase:
         # the ``apps/api`` bridge so the chat context never imports
         # user_prefs.  ``None`` disables persona injection.
         code_persona_resolver: CodePersonaResolverPort | None = None,
+        # Returns the signed-in (SSO) user's display name, "" when nobody is
+        # signed in or SSO is off. Wired at the apps composition root (the chat
+        # context must not import the interfaces auth module). ``None`` = never
+        # address the user by name.
+        user_display_name_provider: Callable[[], str] | None = None,
         max_followup_rounds: int = DEFAULT_MAX_FOLLOWUP_ROUNDS,
         # ---- Per-turn max-rounds reader (user-configurable safety net) ----
         # When wired, called once per turn to read the user's optional round
@@ -2253,6 +2266,7 @@ class StreamChatUseCase:
         # R12 dealign: optional cross-BC code-persona resolver (apps
         # bridge); ``None`` disables persona injection.
         self._code_persona_resolver = code_persona_resolver
+        self._user_display_name_provider = user_display_name_provider
         # Unified sub-agent spawn bridge: the ONLY way an ``agent`` tool_call
         # becomes a running sub-agent.  ``None`` ⇒ no spawn capability.
         self._sub_agent_bridge = sub_agent_bridge
@@ -8771,6 +8785,9 @@ class StreamChatUseCase:
         # <long_term_memory> block and applies the IDENTITY.md override. Same
         # scope/gate as the workspace-context block above.
         self._resolve_persona_memory(extra=extra, request=request)
+        # Cloud AND local: the signed-in user's name, so both prompt paths can
+        # address the user by it.
+        self._resolve_user_display_name(extra=extra)
         self._apply_system_prompt(extra=extra, request=request)
 
         # Surface the FULLY-built system prompt back onto ``request.extra``
@@ -9550,6 +9567,26 @@ class StreamChatUseCase:
             identity_chars=len(identity) if identity else 0,
         )
 
+    def _resolve_user_display_name(self, *, extra: dict[str, Any]) -> None:
+        """Publish the signed-in user's name on ``extra`` (cloud and local).
+
+        Skipped for channel turns (WeChat / Feishu): the person writing there is
+        a remote channel user, not whoever is signed in to this app. A value a
+        caller already put on ``extra`` is kept. Best-effort: a failing provider
+        only means the user is not addressed by name.
+        """
+        if self._user_display_name_provider is None:
+            return
+        if USER_DISPLAY_NAME_EXTRA_KEY in extra or "channel_kind" in extra:
+            return
+        try:
+            name = str(self._user_display_name_provider() or "").strip()
+        except Exception:  # noqa: BLE001 — never break prompt assembly
+            _log.warning("chat.user_display_name.provider_failed", exc_info=True)
+            return
+        if name:
+            extra[USER_DISPLAY_NAME_EXTRA_KEY] = name
+
     def _effective_workspace_root_str(self, session_root: str | None) -> str:
         """Resolve the effective workspace root string (V1-parity fallback).
 
@@ -9691,7 +9728,7 @@ class StreamChatUseCase:
             workspace_root = _builder_ws if isinstance(_builder_ws, str) else ""
         workspace_directive = _build_local_workspace_directive(workspace_root)
 
-        parts: list[str] = [_LOCAL_AGENT_MAIN_MARKER, workspace_directive]
+        parts: list[str] = [_LOCAL_AGENT_MAIN_MARKER, _LOCAL_IDENTITY, workspace_directive]
         if _local_has_execution_tools(extra):
             parts.append(_build_local_env_facts())
         if skills_xml:
@@ -9735,6 +9772,10 @@ class StreamChatUseCase:
         # Language-follow rule (on-device counterpart of the cloud
         # LANGUAGE_RULE_GUIDANCE; see _LOCAL_LANGUAGE_RULE). Headed like the
         # sections above so the sections stay separable to a small model.
+        user_name = extra.get(USER_DISPLAY_NAME_EXTRA_KEY)
+        user_block = _render_user_name_block(user_name) if isinstance(user_name, str) else ""
+        if user_block:
+            parts.append(user_block)
         parts.append(f"## Language\n{_LOCAL_LANGUAGE_RULE}")
         injection = "\n\n".join(parts)
 
