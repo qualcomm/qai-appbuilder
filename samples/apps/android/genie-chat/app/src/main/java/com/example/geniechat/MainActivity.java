@@ -76,6 +76,11 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
     private static final int PICK_DOCUMENT_REQUEST_CODE = 103;
     private static final long MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB limit
 
+    // Conversation context sent with every request (the service is stateless).
+    private static final int MAX_HISTORY_CHARS = 3000;   // rough budget for on-device model context
+    private static final int MAX_HISTORY_TURNS = 10;     // max user/assistant pairs
+    private static final int MAX_IMAGE_REUSE_TURNS = 3;  // re-attach a recent image to follow-up questions
+
     private RecyclerView recyclerView;
     private EditText editTextMessage;
     private FloatingActionButton buttonSend;
@@ -111,6 +116,16 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
         initRecyclerView();
         initHttpClient();
 
+        // Restore the persisted conversation (only on a fresh process; the
+        // ViewModel keeps it across configuration changes).
+        List<Message> current = chatViewModel.getMessages().getValue();
+        if (current == null || current.isEmpty()) {
+            List<Message> saved = ChatStorage.load(this);
+            if (!saved.isEmpty()) {
+                chatViewModel.setMessages(saved);
+            }
+        }
+
         observeViewModel();
 
         chatViewModel.setInitialWelcomeMessage();
@@ -132,7 +147,13 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
         clearDocsButton = findViewById(R.id.clearDocsButton);
         
         setSupportActionBar(findViewById(R.id.toolbar));
-        buttonSend.setOnClickListener(v -> sendMessage());
+        buttonSend.setOnClickListener(v -> {
+            if (Boolean.TRUE.equals(chatViewModel.getIsModelReplying().getValue())) {
+                stopGeneration();
+            } else {
+                sendMessage();
+            }
+        });
         buttonAddAttachment.setOnClickListener(v -> showAttachmentDialog());
         
 
@@ -161,13 +182,30 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
         chatViewModel.getIsModelReplying().observe(this, isReplying -> {
             boolean enabled = !(isReplying != null && isReplying);
             setUiEnabled(enabled);
+            if (enabled) {
+                // A reply just finished (or nothing is running): persist the chat.
+                saveChat();
+            }
         });
+    }
+
+    private void saveChat() {
+        List<Message> messages = chatViewModel.getMessages().getValue();
+        if (messages != null) {
+            ChatStorage.save(this, new ArrayList<>(messages));
+        }
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        saveChat();
     }
 
 
     private void initHttpClient() {
         client = new OkHttpClient.Builder()
-                .readTimeout(60, TimeUnit.SECONDS)
+                .readTimeout(120, TimeUnit.SECONDS)
                 .build();
         gson = new Gson();
     }
@@ -201,6 +239,22 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
             startActivity(intent);
             return true;
         }
+        if (item.getItemId() == R.id.action_clear_chat) {
+            if (Boolean.TRUE.equals(chatViewModel.getIsModelReplying().getValue())) {
+                Toast.makeText(this, "Generating, please stop first", Toast.LENGTH_SHORT).show();
+                return true;
+            }
+            new AlertDialog.Builder(this)
+                    .setMessage(R.string.clear_chat_confirm)
+                    .setPositiveButton(R.string.confirm, (d, w) -> {
+                        chatViewModel.clearMessages();
+                        ChatStorage.clear(this);
+                        chatViewModel.setInitialWelcomeMessage();
+                    })
+                    .setNegativeButton(R.string.cancel, null)
+                    .show();
+            return true;
+        }
         return super.onOptionsItemSelected(item);
     }
 
@@ -232,8 +286,11 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
     private void setUiEnabled(boolean enabled) {
         runOnUiThread(() -> {
             editTextMessage.setEnabled(enabled);
-            buttonSend.setEnabled(enabled);
-            buttonSend.setAlpha(enabled ? 1.0f : 0.5f);
+            // While the model is replying the send button turns into a "stop" button.
+            buttonSend.setEnabled(true);
+            buttonSend.setAlpha(1.0f);
+            buttonSend.setImageResource(enabled ? R.drawable.ic_send : R.drawable.ic_stop);
+            buttonSend.setContentDescription(getString(enabled ? R.string.send_message : R.string.stop_generation));
             buttonAddAttachment.setEnabled(enabled);
             buttonAddAttachment.setAlpha(enabled ? 1.0f : 0.5f);
             if (settingsMenuItem != null) {
@@ -461,16 +518,176 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
         chatViewModel.appendToLastMessage(chunk);
     }
 
+    // ---------------------------------------------------------------------------------
+    // Conversation context helpers
+    // ---------------------------------------------------------------------------------
+
+    private static String cleanReply(String text) {
+        if (text == null) return "";
+        return text.replace(ChatViewModel.STOPPED_MARK, "").trim();
+    }
+
+    private static boolean isValidReply(Message m) {
+        if (m.isSentByUser()) return false;
+        String t = cleanReply(m.getText());
+        if (t.isEmpty() || ChatViewModel.PLACEHOLDER.equals(t) || ChatViewModel.WELCOME_TEXT.equals(t)) {
+            return false;
+        }
+        return !(t.startsWith("网络错误") || t.startsWith("请求失败") || t.startsWith("处理回复时出错")
+                || t.startsWith("(模型"));
+    }
+
+    /** Messages that precede {@code userMessage} in the conversation. */
+    private List<Message> getMessagesBefore(Message userMessage) {
+        List<Message> all = chatViewModel.getMessages().getValue();
+        List<Message> before = new ArrayList<>();
+        if (all == null) return before;
+        for (Message m : new ArrayList<>(all)) {
+            if (m.isSentByUser() && m.getTimestamp() == userMessage.getTimestamp()) break;
+            before.add(m);
+        }
+        return before;
+    }
+
+    private static String historyUserText(Message m) {
+        StringBuilder sb = new StringBuilder();
+        if (m.getText() != null) sb.append(m.getText());
+        if (m.hasAttachments()) {
+            for (Message.Attachment a : m.getAttachments()) {
+                sb.append(a.getType() == Message.AttachmentType.IMAGE
+                        ? "\n[图片: " : "\n[文本附件: ").append(a.getFileName()).append("]");
+            }
+        }
+        return sb.toString().trim();
+    }
+
+    /** Builds the previous user/assistant turns that fit the context budget (oldest first). */
+    private List<JsonObject> buildHistory(List<Message> before) {
+        List<Message[]> pairs = new ArrayList<>();
+        for (int i = 0; i + 1 < before.size(); i++) {
+            Message u = before.get(i);
+            Message a = before.get(i + 1);
+            if (u.isSentByUser() && u.getStatus() != Message.Status.FAILED && isValidReply(a)) {
+                pairs.add(new Message[]{u, a});
+                i++;
+            }
+        }
+
+        List<JsonObject> reversed = new ArrayList<>();
+        int chars = 0;
+        int turns = 0;
+        for (int i = pairs.size() - 1; i >= 0 && turns < MAX_HISTORY_TURNS; i--) {
+            String u = historyUserText(pairs.get(i)[0]);
+            String a = cleanReply(pairs.get(i)[1].getText());
+            int len = u.length() + a.length();
+            if (chars + len > MAX_HISTORY_CHARS) break;
+            chars += len;
+            turns++;
+
+            JsonObject ao = new JsonObject();
+            ao.addProperty("role", "assistant");
+            ao.addProperty("content", a);
+            reversed.add(ao);
+            JsonObject uo = new JsonObject();
+            uo.addProperty("role", "user");
+            uo.addProperty("content", u);
+            reversed.add(uo);
+        }
+        List<JsonObject> history = new ArrayList<>(reversed.size());
+        for (int i = reversed.size() - 1; i >= 0; i--) history.add(reversed.get(i));
+        return history;
+    }
+
+    /** Image of a recent earlier user turn, so follow-up questions still "see" it. */
+    private String findRecentImage(List<Message> before) {
+        int userTurns = 0;
+        for (int i = before.size() - 1; i >= 0 && userTurns < MAX_IMAGE_REUSE_TURNS; i--) {
+            Message m = before.get(i);
+            if (!m.isSentByUser()) continue;
+            userTurns++;
+            if (m.hasAttachments()) {
+                for (Message.Attachment a : m.getAttachments()) {
+                    if (a.getType() == Message.AttachmentType.IMAGE) return a.getBase64Content();
+                }
+            }
+        }
+        return null;
+    }
+
+    // ---------------------------------------------------------------------------------
+    // Request / streaming
+    // ---------------------------------------------------------------------------------
+
+    private void finishReply(Message userMessage, int callId) {
+        if (!chatViewModel.finishCall(callId)) return;
+        chatViewModel.fillEmptyReply("(模型没有返回内容，请重试，或查看 GenieAPIService 日志)");
+        chatViewModel.updateUserMessageStatus(userMessage, Message.Status.SENT);
+        chatViewModel.endModelReply();
+    }
+
+    private void failReply(Message userMessage, int callId, String error) {
+        if (!chatViewModel.finishCall(callId)) return;
+        chatViewModel.updateUserMessageStatus(userMessage, Message.Status.FAILED);
+        appendToLastMessage(error);
+        chatViewModel.endModelReply();
+    }
+
+    /** Stops the running generation: cancels the HTTP stream and tells the service to stop inference. */
+    private void stopGeneration() {
+        if (!Boolean.TRUE.equals(chatViewModel.getIsModelReplying().getValue())) return;
+        chatViewModel.cancelActiveCall();
+        chatViewModel.markLastReplyStopped();
+
+        // The user message was delivered; keep it as SENT so it is not shown as failed.
+        List<Message> msgs = chatViewModel.getMessages().getValue();
+        if (msgs != null) {
+            for (int i = msgs.size() - 1; i >= 0; i--) {
+                if (msgs.get(i).isSentByUser()) {
+                    chatViewModel.updateUserMessageStatus(msgs.get(i), Message.Status.SENT);
+                    break;
+                }
+            }
+        }
+        chatViewModel.endModelReply();
+
+        // Ask the service to terminate the on-device inference as well.
+        SharedPreferences sp = PreferenceManager.getDefaultSharedPreferences(this);
+        String ip = sp.getString("ip_address", "127.0.0.1:8910");
+        String model = sp.getString("model_name", "qwen2.0_7b");
+        try {
+            JsonObject stopBody = new JsonObject();
+            stopBody.addProperty("text", "stop");
+            stopBody.addProperty("model", model);
+            Request stopRequest = new Request.Builder()
+                    .url("http://" + ip + "/stop")
+                    .post(RequestBody.create(gson.toJson(stopBody), MediaType.get("application/json; charset=utf-8")))
+                    .build();
+            client.newCall(stopRequest).enqueue(new Callback() {
+                @Override
+                public void onFailure(@NonNull Call call, @NonNull IOException e) {
+                    Log.w(TAG, "Stop request failed: ", e);
+                }
+
+                @Override
+                public void onResponse(@NonNull Call call, @NonNull Response response) {
+                    response.close();
+                }
+            });
+        } catch (Exception e) {
+            Log.w(TAG, "Stop request error: ", e);
+        }
+    }
+
     private void callChatApi(Message userMessage) {
         // Add a placeholder for the AI's response
-        addMessage(new Message("...", false));
+        addMessage(new Message(ChatViewModel.PLACEHOLDER, false));
 
         SharedPreferences sharedPreferences = PreferenceManager.getDefaultSharedPreferences(this);
         String ipAddress = sharedPreferences.getString("ip_address", "127.0.0.1:8910");
         String modelName = sharedPreferences.getString("model_name", "qwen2.0_7b");
-        float temperature = sharedPreferences.getInt("temperature", 150) / 100.0f;
-        float topP = sharedPreferences.getInt("top_p", 60) / 100.0f;
-        int topK = sharedPreferences.getInt("top_k", 13);
+        float temperature = sharedPreferences.getInt("temperature", 70) / 100.0f;
+        float topP = sharedPreferences.getInt("top_p", 80) / 100.0f;
+        int topK = sharedPreferences.getInt("top_k", 40);
 
         String apiUrl = "http://" + ipAddress + "/v1/chat/completions";
 
@@ -479,39 +696,17 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
         jsonBody.addProperty("model", modelName);
         jsonBody.addProperty("stream", true);
 
+        // --- conversation history (the service is stateless) ---
+        List<Message> before = getMessagesBefore(userMessage);
+        List<JsonObject> history = buildHistory(before);
 
-        boolean hasImageAttachment = userMessage.hasAttachments() && userMessage.getImageCount() > 0;
-        
-        if (hasImageAttachment) {
-
-            JsonArray placeholderMessages = new JsonArray();
-            JsonObject placeholderMsg = new JsonObject();
-            placeholderMsg.addProperty("role", "user");
-            placeholderMsg.addProperty("content", "placeholder");
-            placeholderMessages.add(placeholderMsg);
-            jsonBody.add("messages", placeholderMessages);
-            
-
-            JsonArray customMessages = new JsonArray();
-            
-            JsonObject systemMessage = new JsonObject();
-            systemMessage.addProperty("role", "system");
-            systemMessage.addProperty("content", "You are a helpful assistant.");
-            customMessages.add(systemMessage);
-            
-
-            JsonObject userMsg = new JsonObject();
-            userMsg.addProperty("role", "user");
-            
-            JsonObject contentObj = new JsonObject();
-            
-
-            StringBuilder questionBuilder = new StringBuilder();
-            if (userMessage.getText() != null && !userMessage.getText().isEmpty()) {
-                questionBuilder.append(userMessage.getText());
-            }
-            
-
+        // --- current user turn ---
+        StringBuilder questionBuilder = new StringBuilder();
+        if (userMessage.getText() != null && !userMessage.getText().isEmpty()) {
+            questionBuilder.append(userMessage.getText());
+        }
+        String imageBase64 = null;
+        if (userMessage.hasAttachments()) {
             for (Message.Attachment attachment : userMessage.getAttachments()) {
                 if (attachment.getType() == Message.AttachmentType.TEXT_FILE) {
                     try {
@@ -521,67 +716,44 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
                     } catch (Exception e) {
                         Log.e(TAG, "Error decoding text file: ", e);
                     }
+                } else if (imageBase64 == null) {
+                    imageBase64 = attachment.getBase64Content();
                 }
             }
-            
-            contentObj.addProperty("question", questionBuilder.toString());
-            
-
-            for (Message.Attachment attachment : userMessage.getAttachments()) {
-                if (attachment.getType() == Message.AttachmentType.IMAGE) {
-                    contentObj.addProperty("image", attachment.getBase64Content());
-                    break; 
-                }
-            }
-            
-            userMsg.add("content", contentObj);
-            customMessages.add(userMsg);
-            
-
-            jsonBody.add("messages", customMessages);
-            
-        } else {
-
-            JsonArray messages = new JsonArray();
-            JsonObject systemMessage = new JsonObject();
-            systemMessage.addProperty("role", "system");
-            systemMessage.addProperty("content", "You are a helpful assistant.");
-            messages.add(systemMessage);
-
-            JsonObject userMsg = new JsonObject();
-            userMsg.addProperty("role", "user");
-            
-
-            StringBuilder contentBuilder = new StringBuilder();
-            if (userMessage.getText() != null && !userMessage.getText().isEmpty()) {
-                contentBuilder.append(userMessage.getText());
-            }
-            
-            for (Message.Attachment attachment : userMessage.getAttachments()) {
-                if (attachment.getType() == Message.AttachmentType.TEXT_FILE) {
-                    try {
-                        String decodedContent = new String(Base64.decode(attachment.getBase64Content(), Base64.NO_WRAP));
-                        contentBuilder.append("\n\n--- ").append(attachment.getFileName()).append(" ---\n");
-                        contentBuilder.append(decodedContent);
-                    } catch (Exception e) {
-                        Log.e(TAG, "Error decoding text file: ", e);
-                    }
-                }
-            }
-            
-            userMsg.addProperty("content", contentBuilder.toString());
-            messages.add(userMsg);
-
-            jsonBody.add("messages", messages);
         }
-        
+        // Follow-up question without a new image: re-attach the most recent one.
+        if (imageBase64 == null) {
+            imageBase64 = findRecentImage(before);
+        }
+
+        JsonArray messages = new JsonArray();
+        JsonObject systemMessage = new JsonObject();
+        systemMessage.addProperty("role", "system");
+        systemMessage.addProperty("content", "You are a helpful assistant.");
+        messages.add(systemMessage);
+        for (JsonObject h : history) messages.add(h);
+
+        JsonObject userMsg = new JsonObject();
+        userMsg.addProperty("role", "user");
+        if (imageBase64 != null) {
+            // GenieAPIClient-style content object for VLM models.
+            JsonObject contentObj = new JsonObject();
+            contentObj.addProperty("question", questionBuilder.toString());
+            contentObj.addProperty("image", imageBase64);
+            userMsg.add("content", contentObj);
+        } else {
+            userMsg.addProperty("content", questionBuilder.toString());
+        }
+        messages.add(userMsg);
+        jsonBody.add("messages", messages);
+
         jsonBody.addProperty("temperature", temperature);
         jsonBody.addProperty("top_p", topP);
         jsonBody.addProperty("top_k", topK);
 
         String requestBodyString = gson.toJson(jsonBody);
-        Log.d(TAG, "Request URL: " + apiUrl);
-        Log.d(TAG, "Request Body: " + requestBodyString);
+        Log.d(TAG, "Request URL: " + apiUrl + ", history messages: " + history.size()
+                + ", image: " + (imageBase64 != null) + ", body chars: " + requestBodyString.length());
 
         RequestBody body = RequestBody.create(requestBodyString, JSON);
         Request request = new Request.Builder()
@@ -589,14 +761,16 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
                 .post(body)
                 .build();
 
-        client.newCall(request).enqueue(new Callback() {
+        final int callId = chatViewModel.nextCallId();
+        Call newCall = client.newCall(request);
+        chatViewModel.setActiveCall(callId, newCall);
+
+        newCall.enqueue(new Callback() {
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException e) {
+                if (call.isCanceled()) return; // stopped by the user, already handled
                 Log.e(TAG, "API Call Failed: ", e);
-                chatViewModel.updateUserMessageStatus(userMessage, Message.Status.FAILED);
-                appendToLastMessage("\n\n网络错误: " + e.getMessage());
-                // End model reply; LiveData observer will re-enable UI.
-                chatViewModel.endModelReply();
+                failReply(userMessage, callId, "\n\n网络错误: " + e.getMessage());
             }
 
             @Override
@@ -609,45 +783,45 @@ public class MainActivity extends AppCompatActivity implements MessageAdapter.On
                         // ignore
                     }
                     Log.e(TAG, "API Call Unsuccessful (" + response.code() + "): " + errorBody);
-                    chatViewModel.updateUserMessageStatus(userMessage, Message.Status.FAILED);
-                    appendToLastMessage("\n\n请求失败: " + response.code());
-                    chatViewModel.endModelReply();
+                    failReply(userMessage, callId, "\n\n请求失败: " + response.code());
                     return;
                 }
 
                 try (ResponseBody responseBody = response.body()) {
-                    if (responseBody == null) return;
+                    if (responseBody == null) {
+                        failReply(userMessage, callId, "\n\n请求失败: 空响应");
+                        return;
+                    }
 
-                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(responseBody.byteStream()))) {
+                    try (BufferedReader reader = new BufferedReader(
+                            new InputStreamReader(responseBody.byteStream(), java.nio.charset.StandardCharsets.UTF_8))) {
                         String line;
                         while ((line = reader.readLine()) != null) {
-                            if (line.startsWith("data:")) {
-                                String jsonData = line.substring(5).trim();
+                            if (!chatViewModel.isActiveCall(callId)) return; // stopped / superseded
+                            if (!line.startsWith("data:")) continue;
+                            String jsonData = line.substring(5).trim();
 
-                                if ("[DONE]".equals(jsonData)) {
-                                    chatViewModel.updateUserMessageStatus(userMessage, Message.Status.SENT);
-                                        chatViewModel.endModelReply();
-                                    break;
-                                }
+                            if ("[DONE]".equals(jsonData)) {
+                                break;
+                            }
 
-                                JsonObject chunkObject = gson.fromJson(jsonData, JsonObject.class);
-                                JsonArray choices = chunkObject.getAsJsonArray("choices");
-                                if (choices != null && !choices.isEmpty()) {
-                                    JsonObject delta = choices.get(0).getAsJsonObject().getAsJsonObject("delta");
-                                    if (delta != null && delta.has("content")) {
-                                        String contentChunk = delta.get("content").getAsString();
-                                        appendToLastMessage(contentChunk);
-                                    }
+                            JsonObject chunkObject = gson.fromJson(jsonData, JsonObject.class);
+                            JsonArray choices = chunkObject.getAsJsonArray("choices");
+                            if (choices != null && choices.size() > 0) {
+                                JsonObject delta = choices.get(0).getAsJsonObject().getAsJsonObject("delta");
+                                if (delta != null && delta.has("content") && !delta.get("content").isJsonNull()) {
+                                    appendToLastMessage(delta.get("content").getAsString());
                                 }
                             }
                         }
                     }
+                    // [DONE] received, or the stream simply ended: always finish so the UI never gets stuck.
+                    finishReply(userMessage, callId);
 
                 } catch (Exception e) {
+                    if (call.isCanceled() || !chatViewModel.isActiveCall(callId)) return;
                     Log.e(TAG, "Response processing error: ", e);
-                    appendToLastMessage("\n\n处理回复时出错。");
-                    chatViewModel.updateUserMessageStatus(userMessage, Message.Status.FAILED);
-                        chatViewModel.endModelReply();
+                    failReply(userMessage, callId, "\n\n处理回复时出错。");
                 }
             }
         });

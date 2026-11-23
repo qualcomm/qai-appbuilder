@@ -4,4 +4,8 @@
         android:id="@+id/action_settings"
         android:title="@string/action_settings"
         app:showAsAction="never" />
+    <item
+        android:id="@+id/action_clear_chat"
+        android:title="@string/action_clear_chat"
+        app:showAsAction="never" />
 </menu>
