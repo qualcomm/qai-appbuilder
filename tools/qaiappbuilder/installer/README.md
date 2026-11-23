@@ -138,7 +138,7 @@ QAIAppBuilder-<版本>-qairt<A.B.C>-<架构>-setup.exe
 
 ## 包里有什么(白名单)
 
-`src` `apps` `factory` `scripts` `interfaces` `skills` `frontend\dist` `pyproject.toml` `build_info.json`
+`src` `apps` `factory` `scripts` `interfaces` `skills` `tools` `config` `samples` `memory` `frontend\dist` `pyproject.toml` `build_info.json`
 `desktop\QAIAppBuilder.exe`(桌面版窗口,见下)、`_setup_env.bat` `Start.bat` `qai.bat` `Console.bat` `Uninstall.bat` `clean_env.bat` 及 README,
 外加 `data\bin\uv\uv.exe`(**按目标架构**从 PyPI 取)、`data\bin\aria2c\aria2c.exe`,以及 **FileGuard 的 `vendor\bin\<arch>\guard64.dll`**(ARM64 另有 `guard-injector.exe`)和标记文件 `vendor\bin\guard.source`。
 
@@ -156,7 +156,11 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 
 还有 **`vendor\tiktoken\`**(约 5.3 MB,压缩后约 1.5 MB):`cl100k_base` 和 `o200k_base` 两个 BPE 词表,程序用它离线估算 token 数。词表不在 PyPI 的 tiktoken wheel 里,不打进包的话运行时会去 `openaipublic.blob.core.windows.net` 下载,下不到就退回按长度粗估。打包时的来源顺序:`.build\installer\_dl\tiktoken` 缓存、官方 URL、`Downloads\vendor-deps.7z`(用 `tar.exe` 只解出这两个文件);下载内容会校验大小和首行格式。每个词表写两份文件名(URL 的 SHA1 是 tiktoken 实际读取的名字,SHA256 是 `download_bpe_files.py` 文档里的名字,内容相同)。两个词表任一拿不到就整体不放,安装后行为同没有这个目录。
 
-排除:`tests`、`__pycache__`、`*.pyc`、`node_modules`、`docs`、`samples`、`models`、`.qai`、`desktop`(源码;编译好的 exe 已单独打入)、`vendor`(除上面的 guard 文件和 tiktoken 词表)、`data`(用户数据)。
+`config\`(`model_family_overrides.json`,可手工调参)只在首次安装时放入，重装或升级时已有的文件不覆盖;卸载时随 `app\` 一起删除。`samples\` 和其他程序文件一样每次覆盖。
+
+`memory\` 是云端模型对话用的人设文件:`IDENTITY.md`(助手身份,QAI AppBuilder)、`SOUL.md`(价值观与边界)是产品文件，每次安装都更新;`USER.md`(用户画像、称呼)只在首次安装时放入，之后不覆盖，卸载时和 `data\` 一样归入"你的数据"。称呼留空时按 SSO 登录名称呼用户。
+
+排除:`tests`、`__pycache__`、`*.pyc`、`node_modules`、`docs`、`models`、`.qai`、`desktop`(源码;编译好的 exe 已单独打入)、`vendor`(除上面的 guard 文件和 tiktoken 词表)、`data`(用户数据)。
 新增运行时依赖的目录时,要把它加进 `build_installer.ps1` 的 `$Dirs`。
 
 ## 安装时发生什么
@@ -166,8 +170,9 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
    - 所选目录下的 `app\` 已有不是本程序装的文件:拒绝安装,提示换目录。
    - 所选目录是旧版本的安装目录(旧版直接装在 `...\QAIModelBuilder\app` 里,没有再嵌套一层):拒绝安装,提示先卸载旧版。新旧目录结构不兼容。
    - `app\` 里只剩上次卸载保留的 `data\`:允许覆盖安装,数据原样保留。
-2. 向导里可选:镜像(自动 / 官方 / 国内)、HTTP 代理。
-3. 执行 `_setup_env.bat --arch <arch> --no-pause --with-browser --with-astgrep [--mirror ..] [--proxy ..]`(**不带 `--builder`**;两个 `--with-*` 写在 `.iss` 的 `#define SetupComponents` 里,安装和"修复"快捷方式共用):
+2. 向导里可选:镜像(自动 / 官方 / 国内)。向导里没有代理设置;需要代理时设系统环境变量 `HTTPS_PROXY`(`_setup_env.bat` 会用它),或安装后从开始菜单"修复"失败时，在应用目录手动运行 `installer\_setup_env.bat --arch <arch> --proxy http://host:port`。
+   环境配置期间，进度页下方实时显示安装日志的最后 200 行(下载进度、安装的包等),完整日志路径显示在日志框上方。
+3. 执行 `_setup_env.bat --arch <arch> --no-pause --with-browser --with-astgrep [--mirror ..]`(**不带 `--builder`**;两个 `--with-*` 写在 `.iss` 的 `#define SetupComponents` 里,安装和"修复"快捷方式共用):
    建 Python 3.13 运行时 venv(`<安装目录>\app\envs\`,和 `data\` 同级)、装依赖、初始化 `data\`。
    **不再下载 `vendor-deps.7z`**:ARM64 和 x64 一样,所有依赖都从 PyPI 取。需要旧行为时手动运行 `_setup_env.bat --with-vendor`(仅 ARM64,约 210 MB,来自 aidevhome.com;下载失败只警告,不会中断安装)。
    ARM64 不用这个包时只缺一样东西:依赖 `pyclipper` 的 App Builder 模型,其余功能不受影响。`tiktoken` 在 PyPI 没有 Windows ARM64 版,改由内置的纯 Python 分词器(`src/qai/platform/bpe.py`,与 tiktoken 的 token id 完全一致,只依赖 `regex`)提供精确计数;`cl100k_base` 词表(约 1.7 MB)在后端首次启动时从 OpenAI 官方地址下载并校验 SHA-256,缓存到 `vendor\tiktoken\`,下不到就退回按长度粗估,下次启动再试。
@@ -189,11 +194,11 @@ guard 文件取自发布页的 `guard.zip`,**只放本架构的那几个**(x64 �
 
 控制面板 / 开始菜单卸载会先弹出一个选项窗口(大小、位置与"卸载状态"窗口一致,单独一个窗口,不在状态窗口里:Inno 在卸载期间会禁用状态窗口,放进去的按钮点不了),列出可选删除的内容,**默认全部勾选**(取消勾选即保留)。点"卸载"按勾选开始卸载:先结束从 `app\`(含 `app\envs\`)启动的进程(后台服务、转换、下载),再删除文件。点"取消"或关闭窗口则**取消卸载**,什么都不动(进程也不结束)。没有可选内容时不弹窗口,直接卸载:
 
-- **你的数据**(`app\data`:聊天记录、设置、密钥):目录存在就列出。
+- **你的数据**(`app\data`:聊天记录、设置、密钥;`app\memory`:AI 人设与用户画像 `USER.md`):两个目录有一个存在就列出。
 - **QAIRT SDK `<版本>`**:`data\config\qairt_env.json` 的 `qairt_sdk_root` 指向的目录存在就列出(不再检查标记文件;默认位置 `C:\Qualcomm\AIStack\QAIRT\<版本>`,在 `app\` 之外)。路径必须是绝对本地路径且至少 3 层深,避免误删盘根或 `C:\Qualcomm`。勾选项旁边显示完整路径。
 - 程序文件、Python 环境和浏览工具用的 Chromium(都在 `app\envs\` 下)一定会删。Playwright 的共享缓存 `%LOCALAPPDATA%\ms-playwright` 不是本程序的,不动(旧版本曾装在那里,需要的话手动删)。
 - 桌面窗口的 WebView2 数据 `%LOCALAPPDATA%\<tauri identifier>`(打开的 TAB 布局、Cookie、缓存)只是窗口状态,不算用户数据,**一定会删**,不在窗口里列出(静默卸载也删)。否则重装后旧 TAB 布局会指向新数据库里没有的会话。identifier 由 `build_installer.ps1` 从 `desktop\src-tauri\tauri.conf.json` 读取后传给 ISCC。
-- 没勾"你的数据"时:删除 `app\` 里除 `data\` 以外的全部内容(包括运行时下载的 `models\` 等)。勾了:删除整个 `app\`;所选的上层目录空了也一起删除。`data\downloads\_qairt_tmp.zip` 这类下载临时文件无论如何都会删。
+- 没勾"你的数据"时:删除 `app\` 里除 `data\`、`memory\`(此时只剩 `USER.md`)以外的全部内容(包括运行时下载的 `models\` 等)。勾了:删除整个 `app\`;所选的上层目录空了也一起删除。`data\downloads\_qairt_tmp.zip` 这类下载临时文件无论如何都会删。
 - 静默卸载(`/SILENT`、`/VERYSILENT`)不弹窗,什么可选内容都不删(相当于全部取消勾选后点"卸载");`app\envs\` 和 WebView2 数据照样删除。
 - uv 的按用户目录(`%APPDATA%\uv` 里的 Python 解释器、`%LOCALAPPDATA%\uv` 里的包缓存)是机器上所有用 uv 的程序共享的,重装时也能直接复用,**一律保留**,不在窗口里列出。
 
