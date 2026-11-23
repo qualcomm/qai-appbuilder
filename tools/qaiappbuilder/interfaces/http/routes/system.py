@@ -34,6 +34,7 @@ The historical migration audit lives in ``PR-030-manifest.md`` §3.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import platform
 import shutil
@@ -43,7 +44,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Query, status
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -119,6 +121,17 @@ class DiskUsageResponse(BaseModel):
     used: int
     free: int
     path: str
+
+
+class ContactSupportResponse(BaseModel):
+    """``POST /api/system/contact-support`` payload.
+
+    ``opened`` is ``False`` when no mail client is available (or launching it
+    failed): the UI then shows ``email`` so the user can write to it by hand.
+    """
+
+    opened: bool
+    email: str
 
 
 class EnvResponse(BaseModel):
@@ -343,6 +356,49 @@ def build_router(*, container: "Container") -> APIRouter:
             active_version=active_version,
             versions=versions,
         )
+
+    @router.post("/contact-support", response_model=ContactSupportResponse)
+    async def contact_support() -> ContactSupportResponse:
+        """Open the default mail client on a pre-filled message to the support address.
+
+        Done here, not with a ``mailto:`` link in the page: the backend runs on
+        the user's machine in both editions, and the desktop window refuses
+        non-http(s) navigations.
+        """
+        from qai.platform import support  # noqa: PLC0415
+
+        url = support.build_support_mailto(
+            version=_app_version(container.repo_root),
+            edition=str(container.settings.edition),
+            system=platform.system(),
+            machine=platform.machine(),
+            release=platform.release(),
+        )
+        opened = await asyncio.to_thread(support.open_support_mail, url)
+        return ContactSupportResponse(opened=opened, email=support.SUPPORT_EMAIL)
+
+    @router.get("/backend-log", response_class=PlainTextResponse)
+    async def backend_log(
+        lines: int = Query(default=2000, ge=1, le=20000),
+    ) -> PlainTextResponse:
+        """Tail of ``data/logs/backend.log`` (+ ``desktop-backend.log``), credentials masked.
+
+        For the "copy / export backend log" menu items, so a user can attach it
+        to a problem report. Behind the normal session gate.
+        """
+        from qai.platform import support  # noqa: PLC0415
+
+        header = (
+            f"QAI AppBuilder {_app_version(container.repo_root)} ({container.settings.edition})",
+            f"OS: {platform.system()} {platform.release()} ({platform.machine()})",
+        )
+        text = await asyncio.to_thread(
+            support.backend_log_text,
+            container.data_paths.root / "logs",
+            lines=lines,
+            header=header,
+        )
+        return PlainTextResponse(text, media_type="text/plain; charset=utf-8")
 
     return router
 
