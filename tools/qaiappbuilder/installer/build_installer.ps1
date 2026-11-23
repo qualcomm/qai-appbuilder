@@ -202,7 +202,9 @@ foreach ($da in $desktopArches) {
 }
 
 # ---- whitelist ------------------------------------------------------------
-$Dirs = @('src', 'apps', 'factory', 'scripts', 'interfaces', 'skills', 'tools')
+# config\ (model_family_overrides.json) and memory\USER.md are user-tunable: the .iss installs them without
+# overwriting an existing copy (memory\IDENTITY.md and SOUL.md are refreshed on every install).
+$Dirs = @('src', 'apps', 'factory', 'scripts', 'interfaces', 'skills', 'tools', 'config', 'samples', 'memory')
 $Files = @(
     'pyproject.toml', 'build_info.json',
     'installer\_setup_env.bat', 'Start.bat', 'qai.bat', 'Console.bat', 'Uninstall.bat', 'clean_env.bat',
