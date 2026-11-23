@@ -14,6 +14,7 @@
 #include "watermark_provider_host.h"
 #include <algorithm>
 #include <atomic>
+#include <cstdarg>
 #include <cstring>
 #include <filesystem>
 #include <mutex>
@@ -162,15 +163,23 @@ void GenieLog_Callback(const GenieLog_Handle_t  /*handle*/,
                        uint64_t /*timestamp*/,
                        va_list args)
 {
-    auto length = std::vsnprintf(nullptr, 0, fmt, args);
+    if (My_Log::Level_ < My_Log::Level::kDebug)
+    {
+        return;
+    }
+
+    va_list args_copy;
+    va_copy(args_copy, args);
+    auto length = std::vsnprintf(nullptr, 0, fmt, args_copy);
+    va_end(args_copy);
     if (length < 0)
     {
         My_Log{My_Log::Level::kWarning} << "bad args and fmt in genie callback" << std::endl;
         return;
     }
 
-    std::vector<char> buf(length);
-    My_Log::Level my_level;
+    std::vector<char> buf(static_cast<size_t>(length) + 1);
+    My_Log::Level my_level = My_Log::Level::kInfo;
     switch (level)
     {
         case GENIE_LOG_LEVEL_ERROR:
@@ -187,12 +196,13 @@ void GenieLog_Callback(const GenieLog_Handle_t  /*handle*/,
             break;
     }
 
-    std::vsnprintf(buf.data(), length, fmt, args);
-    while (buf[length - 2] == '\n')
+    std::vsnprintf(buf.data(), buf.size(), fmt, args);
+    while (length > 0 && (buf[length - 1] == '\n' || buf[length - 1] == '\r'))
     {
-        buf[length - 2] = '\0';
+        buf[length - 1] = '\0';
         length--;
     }
+    My_Log{my_level}.original(true) << buf.data() << std::endl;
 }
 
 #if GENIE_API_VERSION_MAJOR > 1 || GENIE_API_VERSION_MINOR >= 15
