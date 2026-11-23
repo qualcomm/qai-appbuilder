@@ -79,6 +79,8 @@ __all__ = [
     "last_login_name",
     "set_last_login_name",
     "clear_last_login_name",
+    "last_login_display_name",
+    "record_login_user",
     "register_login_callback",
 ]
 
@@ -142,10 +144,58 @@ def last_login_name() -> str:
 
 
 def clear_last_login_name() -> None:
-    """Forget the recorded login name (called on logout)."""
-    global _last_login_name
+    """Forget the recorded login (called on logout): handle and display name."""
+    global _last_login_name, _last_login_display_name
     with _last_login_lock:
         _last_login_name = ""
+        _last_login_display_name = ""
+
+
+# Display name of the same login, for the chat layer to address the user by.
+# Kept apart from ``_last_login_name`` (a bare handle such as ``jingweif`` that
+# the usage reporter needs as-is).
+_last_login_display_name: str = ""
+_DISPLAY_NAME_MAX = 64
+
+
+def clean_display_name(raw: object) -> str:
+    """A name that is safe to put into a system prompt, or ``""``.
+
+    Control characters (newlines included) are dropped so the value cannot
+    start a new prompt section; an e-mail address keeps only its local part;
+    the result is capped at :data:`_DISPLAY_NAME_MAX` characters.
+    """
+    text = "".join(ch if ch.isprintable() else " " for ch in str(raw or ""))
+    text = " ".join(text.split())
+    if "@" in text and " " not in text:
+        text = text.split("@", 1)[0]
+    return text[:_DISPLAY_NAME_MAX].strip()
+
+
+def _display_name_of(user: dict[str, Any]) -> str:
+    """``display_name`` -> ``name`` -> login handle; never ``email`` / ``sub``."""
+    for key in ("display_name", "name"):
+        name = clean_display_name(user.get(key))
+        if name:
+            return name
+    return clean_display_name(str(user.get("username") or "").split("@")[0])
+
+
+def record_login_user(user: dict[str, Any]) -> None:
+    """Record a signed-in user: login handle (usage reporter) and display name."""
+    set_last_login_name(str(user.get("username") or ""))
+    name = _display_name_of(user)
+    if not name:
+        return
+    global _last_login_display_name
+    with _last_login_lock:
+        _last_login_display_name = name
+
+
+def last_login_display_name() -> str:
+    """Display name of the most recent login, or ``""`` when none seen."""
+    with _last_login_lock:
+        return _last_login_display_name
 
 
 # ── base64url (no padding) ─────────────────────────────────────────────────
@@ -405,7 +455,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
             request.state.user = user
             # Feed the process-level holder so non-request consumers (usage
             # reporter) can report the logged-in name, not just the OS name.
-            set_last_login_name(str(user.get("username") or ""))
+            record_login_user(user)
             return await call_next(request)
 
         # ── Device-flow (RFC 8628) silent bootstrap ──────────────────────
@@ -446,7 +496,7 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 # routes must see the bootstrapped identity on this very first
                 # request, not only on the next request after the cookie lands.
                 request.state.user = device_user
-                set_last_login_name(str(device_user.get("username") or ""))
+                record_login_user(device_user)
                 response = await call_next(request)
                 cookie = dump_session(
                     device_user,

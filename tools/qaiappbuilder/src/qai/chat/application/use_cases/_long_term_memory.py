@@ -49,6 +49,10 @@ IDENTITY_FILENAME: str = "IDENTITY.md"
 MEMORY_BLOCK_EXTRA_KEY: str = "long_term_memory_block"
 PERSONA_IDENTITY_EXTRA_KEY: str = "persona_identity"
 
+#: ``extra`` key carrying the signed-in user's display name (from SSO), set by
+#: the use case and rendered by both the cloud builder and the local prompt.
+USER_DISPLAY_NAME_EXTRA_KEY: str = "user_display_name"
+
 #: Per-file byte cap (persona files are hand-maintained prose, expected small).
 #: A file larger than this has its body truncated to this many bytes with a
 #: short notice appended, guarding the context window without a hard ceiling on
@@ -170,6 +174,24 @@ def render_long_term_memory_block() -> str:
     )
 
 
+def render_user_name_block(name: str) -> str:
+    """``## User`` section naming the signed-in user, or ``""`` without a name.
+
+    English on purpose: the model answers in the conversation's language anyway,
+    and one wording keeps the prompt byte-stable across UI locales. A
+    ``memory/USER.md`` preferred name (where that file exists) still wins.
+    """
+    name = (name or "").strip()
+    if not name:
+        return ""
+    return (
+        "## User\n"
+        f'The user is signed in as "{name}". When you address the user, use this '
+        "name (unless USER.md in the long-term memory gives a different preferred "
+        "name); never use or invent any other name."
+    )
+
+
 def resolve_persona_memory() -> tuple[str, str | None]:
     """Resolve both persona artefacts in one pass.
 
@@ -185,6 +207,8 @@ __all__ = [
     "IDENTITY_FILENAME",
     "MEMORY_BLOCK_EXTRA_KEY",
     "PERSONA_IDENTITY_EXTRA_KEY",
+    "USER_DISPLAY_NAME_EXTRA_KEY",
+    "render_user_name_block",
     "MEMORY_FILE_MAX_BYTES",
     "MEMORY_DIR_ENV_VAR",
     "resolve_memory_dir",
