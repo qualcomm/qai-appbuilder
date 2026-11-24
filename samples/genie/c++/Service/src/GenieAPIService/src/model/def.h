@@ -20,6 +20,7 @@ struct ModelInput
 {
     std::string system_;
     std::string text_;
+    std::string rethink_text_;
     std::string image_;
     std::string audio_;
     std::string agent_type_ = "sub";
@@ -29,6 +30,8 @@ struct ModelInput
     int think_ctx_reserve_ = 0;
 
     bool think_force_min_floor_ = false;
+
+    bool skip_checkpoint_save_ = false;
 };
 
 struct PromptType : public BaseEnum

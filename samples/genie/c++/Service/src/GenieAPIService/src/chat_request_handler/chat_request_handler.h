@@ -11,10 +11,19 @@
 
 #include <httplib.h>
 #include <memory>
+#include <mutex>
 
 class GenieService;
 class ModelManager;
 class GenieRoutingGateway;
+
+enum class ApiVersion
+{
+    kV1,
+    kV2
+};
+
+ApiVersion GetApiVersion(const httplib::Request &req);
 
 class ChatRequestHandler
 {
@@ -49,9 +58,12 @@ public:
 
     void UnloadModel(const httplib::Request &req, httplib::Response &res);
 
+    void UnloadAllModels(const httplib::Request &req, httplib::Response &res);
+
 private:
     ModelManager &model_manager;
     GenieService *srv_;
+    std::mutex v1_switch_mutex_;
 
     std::shared_ptr<GenieRoutingGateway> genieRoutingGateway_;
 };

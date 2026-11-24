@@ -8,11 +8,13 @@
 
 #include "llama_speculative_config.h"
 
+#include <cstring>
 #include <filesystem>
 
 #ifdef USE_GGUF
 #include "gguf.h"
 #include "ggml-backend.h"
+#include "llama_cpp.h"
 #endif
 #include "utils.h"
 
@@ -93,6 +95,26 @@ uint64_t EstimateAttentionKvCacheBytes(const GgufModelShape &shape, uint64_t con
     const uint64_t full = EstimateKvCacheBytes(shape, context_size);
     return shape.full_attention_interval > 1 ? full / shape.full_attention_interval : full;
 }
+
+ggml_backend_dev_t FindGpuMemoryDevice()
+{
+    const size_t count = ggml_backend_dev_count();
+    for (size_t i = 0; i < count; ++i)
+    {
+        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+        if (ggml_backend_dev_type(dev) != GGML_BACKEND_DEVICE_TYPE_GPU)
+        {
+            continue;
+        }
+        const char *name = ggml_backend_dev_name(dev);
+        if (name && std::strncmp(name, "HTP", 3) == 0)
+        {
+            continue;
+        }
+        return dev;
+    }
+    return nullptr;
+}
 #endif
 
 constexpr uint64_t kFullGpuComputeReserveBytes = 1024ULL * 1024 * 1024;
@@ -148,22 +170,47 @@ DraftModelConfig DraftModelConfig::ParseFrom(const json &model_config_json)
 
     if (block.contains("samplers") && block["samplers"].is_string())
     {
-        result.samplers = block["samplers"].get<std::string>();
+        result.target_samplers = block["samplers"].get<std::string>();
     }
 
     if (block.contains("temp") && block["temp"].is_number())
     {
-        result.temp = block["temp"].get<float>();
+        result.target_temp = block["temp"].get<float>();
     }
 
     if (block.contains("top_k") && block["top_k"].is_number_integer())
     {
-        result.top_k = block["top_k"].get<int>();
+        result.target_top_k = block["top_k"].get<int>();
     }
 
     if (block.contains("top_p") && block["top_p"].is_number())
     {
-        result.top_p = block["top_p"].get<float>();
+        result.target_top_p = block["top_p"].get<float>();
+    }
+
+    if (block.contains("target_sampling") && block["target_sampling"].is_object())
+    {
+        const json &sampling = block["target_sampling"];
+
+        if (sampling.contains("samplers") && sampling["samplers"].is_string())
+        {
+            result.target_samplers = sampling["samplers"].get<std::string>();
+        }
+
+        if (sampling.contains("temp") && sampling["temp"].is_number())
+        {
+            result.target_temp = sampling["temp"].get<float>();
+        }
+
+        if (sampling.contains("top_k") && sampling["top_k"].is_number_integer())
+        {
+            result.target_top_k = sampling["top_k"].get<int>();
+        }
+
+        if (sampling.contains("top_p") && sampling["top_p"].is_number())
+        {
+            result.target_top_p = sampling["top_p"].get<float>();
+        }
     }
 
     if (block.contains("ngram_mod_n_min") && block["ngram_mod_n_min"].is_number_integer())
@@ -341,8 +388,8 @@ bool SpeculativeFitsFullGpu(const std::string &model_dir, const std::string &dra
         return false;
     }
 
-    ggml_backend_load_all();
-    ggml_backend_dev_t gpu = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
+    EnsureGgmlBackendsLoaded();
+    ggml_backend_dev_t gpu = FindGpuMemoryDevice();
     if (!gpu)
     {
         return false;
@@ -371,6 +418,53 @@ bool SpeculativeFitsFullGpu(const std::string &model_dir, const std::string &dra
     (void) available_out;
     return false;
 #endif
+}
+
+uint64_t EstimateHtpMappedBytes(const std::string &gguf_path, uint64_t context_size)
+{
+#ifdef USE_GGUF
+    constexpr uint64_t kHtpRecurrentAndComputeBytes = 800ULL * 1024 * 1024;
+    return File::get_file_size(gguf_path, std::ios::binary) +
+           EstimateAttentionKvCacheBytes(ReadGgufModelShape(gguf_path), context_size) +
+           kHtpRecurrentAndComputeBytes;
+#else
+    (void) gguf_path;
+    (void) context_size;
+    return 0;
+#endif
+}
+
+uint64_t EstimateMainModelBytes(const std::string &model_dir, const std::string &draft_relative_path,
+                                uint64_t context_size)
+{
+    const std::string draft_gguf_path =
+            draft_relative_path.empty() ? std::string() : (std::filesystem::path(model_dir) / draft_relative_path).string();
+    const std::string main_gguf_path = FindMainGguf(model_dir, draft_gguf_path);
+    return main_gguf_path.empty() ? 0 : EstimateHtpMappedBytes(main_gguf_path, context_size);
+}
+
+uint64_t GetGpuFreeBytes()
+{
+#ifdef USE_GGUF
+    EnsureGgmlBackendsLoaded();
+    ggml_backend_dev_t gpu = FindGpuMemoryDevice();
+    if (!gpu)
+    {
+        return 0;
+    }
+    size_t free = 0;
+    size_t total = 0;
+    ggml_backend_dev_memory(gpu, &free, &total);
+    return free;
+#else
+    return 0;
+#endif
+}
+
+uint64_t GetHtpBudgetBytes()
+{
+    const uint64_t total = GetTotalPhysicalMemoryBytes();
+    return total == UINT64_MAX ? 0 : total / 2;
 }
 
 uint32_t ReadGgufBlockCount(const std::string &gguf_path)
@@ -434,8 +528,8 @@ llama_runtime::RuntimePlan PlanSpeculativeRuntime(const std::string &model_dir,
 
     in.host_avail = GetAvailablePhysicalMemoryBytes();
 #ifdef USE_GGUF
-    ggml_backend_load_all();
-    ggml_backend_dev_t gpu = ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU);
+    EnsureGgmlBackendsLoaded();
+    ggml_backend_dev_t gpu = FindGpuMemoryDevice();
     if (gpu)
     {
         size_t free = 0;

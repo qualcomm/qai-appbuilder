@@ -195,6 +195,30 @@ void GenieLog_Callback(const GenieLog_Handle_t  /*handle*/,
     }
 }
 
+#if GENIE_API_VERSION_MAJOR > 1 || GENIE_API_VERSION_MINOR >= 15
+#define QNN_CKPT_OCCUPANCY_API 1
+#else
+#define QNN_CKPT_OCCUPANCY_API 0
+#endif
+
+namespace
+{
+
+#if QNN_CKPT_OCCUPANCY_API
+thread_local void *g_value_alloc = nullptr;
+#endif
+
+void NoopDialogCallback(const char *, GenieDialog_SentenceCode_t, const void *)
+{
+}
+
+double ElapsedMs(std::chrono::steady_clock::time_point since)
+{
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - since).count();
+}
+
+}
+
 void GenieContext::inference_thread()
 {
     while (true)
@@ -298,6 +322,10 @@ bool GenieContext::Query(const ModelInput &model_input, const Callback &callback
     {
         My_Log{} << "[QNN] query_mutex_ acquired immediately (wait=" << lock_wait_ms << "ms)\n";
     }
+    {
+        std::lock_guard<std::mutex> metrics_lock(trace_metrics_mutex_);
+        last_trace_metrics_ = json::object();
+    }
     if (query_scope.stopped())
     {
         My_Log{My_Log::Level::kWarning}
@@ -321,6 +349,12 @@ bool GenieContext::Query(const ModelInput &model_input, const Callback &callback
         busy_after_timeout_ = false;
     }
 
+    if (m_DialogHandle == nullptr)
+    {
+        My_Log{My_Log::Level::kError} << "[QNN] Query rejected: the Genie dialog is unavailable\n";
+        return false;
+    }
+
     if (prefill_heartbeat && !prefill_heartbeat())
         return false;
 
@@ -330,10 +364,6 @@ bool GenieContext::Query(const ModelInput &model_input, const Callback &callback
              << ", model_dir=" << m_model_dir_ << std::endl;
 
     Genie_Status_t status = 0;
-    if (!kv_path_.empty() && GENIE_STATUS_SUCCESS != (status = GenieDialog_restore(m_DialogHandle, kv_path_.c_str())))
-    {
-        throw std::runtime_error("restore kv failed: " + std::to_string(status));
-    }
 
     stopped_by_output_limit_ = false;
     struct LimitCommit
@@ -342,10 +372,48 @@ bool GenieContext::Query(const ModelInput &model_input, const Callback &callback
 
         ~LimitCommit() { self->last_stopped_by_output_limit_.store(self->stopped_by_output_limit_.load()); }
     } limit_commit{this};
-    inf_impl_->inf_->cur_length_ = TokenLengthUnlocked(model_input.text_);
+    const size_t prompt_tokens = TokenLengthUnlocked(model_input.text_);
+    inf_impl_->inf_->cur_length_ = prompt_tokens;
     if (!inf_impl_->inf_->set_content(const_cast<ModelInput &>(model_input)))
     {
         return false;
+    }
+
+    CheckpointRun ckpt_run;
+    bool ckpt_retried = false;
+prefill_start:
+    if (!PrepareCheckpointedPrefill(model_input, query_scope, prefill_heartbeat, query_type, ckpt_retried, ckpt_run))
+    {
+        return false;
+    }
+    profile_gen_base_ = ckpt_run.suffix_mode ? ckpt_run.gen_base : 0;
+    if (ckpt_run.suffix_mode)
+    {
+        inf_impl_->inf_->OverrideInput(ckpt_suffix_, GENIE_DIALOG_SENTENCE_END);
+    }
+    else
+    {
+        inf_impl_->inf_->OverrideInput(model_input.text_, GENIE_DIALOG_SENTENCE_COMPLETE);
+        if (!kv_path_.empty() &&
+            GENIE_STATUS_SUCCESS != (status = GenieDialog_restore(m_DialogHandle, kv_path_.c_str())))
+        {
+            throw std::runtime_error("restore kv failed: " + std::to_string(status));
+        }
+    }
+    if (CheckpointEligible(query_type))
+    {
+        My_Log{} << "[QNN] " << query_type << " Prefix cache: enabled=1"
+                 << " | reused_tokens=" << ckpt_run.reused_tokens
+                 << " | checkpoint_at=" << ckpt_run.checkpoint_at
+                 << " | prompt_tokens=" << prompt_tokens
+                 << " | hit=" << ckpt_run.hit
+                 << " | n_past=" << ckpt_run.reused_n_past
+                 << " | created=" << ckpt_run.created
+                 << " | restore_ms=" << static_cast<int64_t>(ckpt_run.restore_ms)
+                 << " | save_ms=" << static_cast<int64_t>(ckpt_run.save_ms)
+                 << " | prefill_ms=" << static_cast<int64_t>(ckpt_run.prefill_ms)
+                 << " | suffix=" << ckpt_run.suffix_mode
+                 << " | fallback=" << (ckpt_run.fallback.empty() ? "none" : ckpt_run.fallback) << "\n";
     }
 
     if (watermark_active_ && wm_state_)
@@ -385,6 +453,8 @@ bool GenieContext::Query(const ModelInput &model_input, const Callback &callback
     std::string response;
     bool callback_rejected = false;
     bool stop_forwarded = false;
+    bool output_emitted = false;
+    int64_t ttft_ms = -1;
     auto last_output_time = std::chrono::steady_clock::now();
 
     while (m_inference_busy)
@@ -430,6 +500,11 @@ bool GenieContext::Query(const ModelInput &model_input, const Callback &callback
             continue;
         }
 
+        if (!output_emitted)
+        {
+            output_emitted = true;
+            ttft_ms = static_cast<int64_t>(ElapsedMs(t_lock_acquired));
+        }
         if (!callback(response))
         {
             callback_rejected = true;
@@ -468,6 +543,18 @@ bool GenieContext::Query(const ModelInput &model_input, const Callback &callback
 
     if (!inference_succeed_)
     {
+        if (ckpt_run.suffix_mode && !output_emitted && !ckpt_retried && !callback_rejected && !query_scope.stopped())
+        {
+            ckpt_retried = true;
+            if (ckpt_run.hit)
+            {
+                InvalidateCheckpoint(ckpt_run.hit_name, "query_failed");
+            }
+            if (RebuildDialog())
+            {
+                goto prefill_start;
+            }
+        }
         return false;
     }
 
@@ -480,6 +567,11 @@ bool GenieContext::Query(const ModelInput &model_input, const Callback &callback
     if (!callback_rejected && !tail_answer.empty())
     {
         callback(tail_answer);
+    }
+
+    if (ckpt_capable_.load())
+    {
+        PublishTraceMetrics(ckpt_run, prompt_tokens, inf_impl_->inf_->cur_length_, ttft_ms);
     }
 
     if (std::string(query_type) != "MAINAGENT_INFERENCE" &&
@@ -645,6 +737,39 @@ GenieContext::GenieContext(const ModelInstanceConfig &model_config) :
         m_stream_thread = std::make_unique<std::thread>(&GenieContext::inference_thread, this);
     }
 
+    const auto &prompt_template = model_config.get_prompt_template();
+    const bool chatml_template = prompt_template.is_object() && prompt_template.contains("start") &&
+                                 prompt_template["start"].is_string() &&
+                                 prompt_template["start"].get<std::string>().find(qnn_ckpt::kMarker) !=
+                                 std::string::npos;
+    ckpt_capable_ = QNN_CKPT_OCCUPANCY_API && qnn_ckpt::GlobalConfig().enabled.load() && !fixer.has_ssd_prefix_ &&
+                    fixer.kv_restore_eligible_ && !watermark_active_ && chatml_template &&
+                    model_config.i_model_config_.get_qnn_embedding().embedding_type_ == QNNEmbeddingType::None;
+#if !QNN_CKPT_OCCUPANCY_API
+    if (qnn_ckpt::GlobalConfig().enabled.load())
+    {
+        My_Log{My_Log::Level::kWarning}
+                << "[QNN] prefix checkpoints disabled: Genie API " << GENIE_API_VERSION_MAJOR << '.'
+                << GENIE_API_VERSION_MINOR << " has no GenieDialog_getValue (needs 1.15)\n";
+    }
+#endif
+    if (ckpt_capable_)
+    {
+        bool encoded = true;
+        const std::vector<int32_t> marker = EncodeTokens(qnn_ckpt::kMarker, encoded);
+        if (encoded && marker.size() == 1)
+        {
+            ckpt_marker_id_ = marker[0];
+            RefreshCheckpointStore();
+        }
+        else
+        {
+            ckpt_capable_ = false;
+            My_Log{My_Log::Level::kWarning}
+                    << "[QNN] prefix checkpoints disabled: the template marker is not a single token\n";
+        }
+    }
+
     if (watermark_active_)
     {
         My_Log{My_Log::Level::kInfo}
@@ -776,6 +901,11 @@ bool GenieContext::Stop()
 
 bool GenieContext::AbortInference()
 {
+    std::lock_guard<std::mutex> handle_lock(dialog_handle_mutex_);
+    if (m_DialogHandle == nullptr)
+    {
+        return false;
+    }
     if (GENIE_STATUS_SUCCESS != GenieDialog_signal(m_DialogHandle, GENIE_DIALOG_ACTION_ABORT))
     {
         My_Log{} << "Failed to stop generation.\n";
@@ -793,6 +923,7 @@ bool GenieContext::SetStopSequence(const std::string &stop_sequences)
         My_Log{} << "Failed to set stop sequence.\n";
         return false;
     }
+    stop_sequences_ = stop_sequences;
 
     return true;
 }
@@ -871,6 +1002,11 @@ void GenieContext::applyLora(const std::string &engineRole, const std::string &l
     {
         throw std::runtime_error("Failed to apply the LoRA adapter.");
     }
+    lora_applied_[engineRole] = loraAdapterName;
+    if (ckpt_capable_.load())
+    {
+        RefreshCheckpointStore();
+    }
 }
 
 void GenieContext::setLoraStrength(const std::string &engineRole,
@@ -884,6 +1020,11 @@ void GenieContext::setLoraStrength(const std::string &engineRole,
         {
             throw std::runtime_error("Failed to set the LoRA alpha strength.");
         }
+        lora_strengths_[{engineRole, it->first}] = it->second;
+    }
+    if (ckpt_capable_.load())
+    {
+        RefreshCheckpointStore();
     }
 }
 
@@ -926,9 +1067,20 @@ json GenieContext::HandleProfile()
     try
     {
         json j = json::parse(jsonStr);
-        if (!j["components"].empty() && j["components"][0]["type"] == "dialog")
+        size_t dialog_idx = 0;
+        for (size_t i = j["components"].size(); i > 0; --i)
         {
-            const auto &events = j["components"][0]["events"];
+            const auto &component = j["components"][i - 1];
+            if (component.value("type", std::string()) == "dialog" && component.contains("events") &&
+                !component["events"].empty())
+            {
+                dialog_idx = i - 1;
+                break;
+            }
+        }
+        if (!j["components"].empty() && j["components"][dialog_idx]["type"] == "dialog")
+        {
+            const auto &events = j["components"][dialog_idx]["events"];
             if (!events.empty())
             {
                 const auto &last_event = events.back();
@@ -944,7 +1096,9 @@ json GenieContext::HandleProfile()
                             FormatFixed2(last_event.at("token-generation-rate")["value"].get<double>());
 
                     result["num_prompt_tokens"] = last_event.at("num-prompt-tokens")["value"];
-                    result["num_generated_tokens"] = last_event.at("num-generated-tokens")["value"];
+                    const int64_t generated = last_event.at("num-generated-tokens")["value"].get<int64_t>();
+                    const int64_t gen_base = profile_gen_base_.load();
+                    result["num_generated_tokens"] = generated > gen_base ? generated - gen_base : 0;
                 }
             }
         }
@@ -998,4 +1152,472 @@ void GenieContext::ClearConversationState()
 {
     std::lock_guard<std::mutex> lock(query_mutex_);
     ResetUnlocked();
+}
+
+void GenieContext::ConfigureCheckpoint(bool enabled, uint64_t max_bytes, int max_checkpoints, bool tail_fallback,
+                                       const std::string &dir)
+{
+    auto &cfg = qnn_ckpt::GlobalConfig();
+    cfg.enabled.store(enabled);
+    cfg.max_bytes.store(max_bytes);
+    cfg.max_checkpoints.store(max_checkpoints);
+    cfg.tail_fallback.store(tail_fallback);
+    cfg.dir = dir;
+}
+
+bool GenieContext::UsesCrossRequestPrefixCache() const
+{
+    return ckpt_capable_.load() && qnn_ckpt::GlobalConfig().enabled.load();
+}
+
+json GenieContext::GetLastQueryTraceMetrics() const
+{
+    std::lock_guard<std::mutex> lock(trace_metrics_mutex_);
+    return last_trace_metrics_;
+}
+
+void GenieContext::PublishTraceMetrics(const CheckpointRun &run, size_t prompt_tokens, size_t cur_length,
+                                       int64_t ttft_ms)
+{
+    json m = json::object();
+    m["prompt_tokens"] = prompt_tokens;
+    m["gen_tokens"] = cur_length > prompt_tokens ? cur_length - prompt_tokens : 0;
+    m["prefix_reused_tokens"] = run.reused_tokens;
+    m["ttft_ms"] = ttft_ms;
+    m["prefill_ms"] = static_cast<int64_t>(run.prefill_ms);
+    m["ckpt_hit"] = run.hit;
+    m["ckpt_created"] = run.created;
+    m["ckpt_restore_ms"] = static_cast<int64_t>(run.restore_ms);
+    m["ckpt_save_ms"] = static_cast<int64_t>(run.save_ms);
+    m["ckpt_fallback"] = run.fallback;
+    m["ckpt_store_count"] = ckpt_store_.Count();
+    m["ckpt_store_bytes"] = ckpt_store_.Bytes();
+    std::lock_guard<std::mutex> lock(trace_metrics_mutex_);
+    last_trace_metrics_ = std::move(m);
+}
+
+bool GenieContext::CheckpointEligible(const char *query_type) const
+{
+    if (!ckpt_capable_.load() || !qnn_ckpt::GlobalConfig().enabled.load() || m_DialogHandle == nullptr)
+    {
+        return false;
+    }
+    const std::string type = query_type;
+    return type == "MAINAGENT_INFERENCE" || type == "SUBAGENT_INFERENCE";
+}
+
+std::vector<int32_t> GenieContext::EncodeTokens(const std::string &text, bool &ok)
+{
+    const int32_t *buf = nullptr;
+    uint32_t len = 0;
+    ok = GenerateTextToken(text, buf, len);
+    std::vector<int32_t> out;
+    if (ok && buf != nullptr && len > 0)
+    {
+        out.assign(buf, buf + len);
+    }
+    if (buf != nullptr)
+    {
+        free(const_cast<int32_t *>(buf));
+    }
+    return out;
+}
+
+int64_t GenieContext::ReadOccupancy()
+{
+#if QNN_CKPT_OCCUPANCY_API
+    Genie_DataType_t type;
+    Genie_Value_t value;
+    memset(&value, 0, sizeof(value));
+    g_value_alloc = nullptr;
+    const Genie_Status_t status = GenieDialog_getValue(
+            m_DialogHandle, GENIE_DIALOG_PARAM_CONTEXT_OCCUPANCY,
+            [](const size_t size, const char **data)
+            {
+                g_value_alloc = calloc(1, size);
+                *data = static_cast<const char *>(g_value_alloc);
+            },
+            &type, &value);
+    if (g_value_alloc != nullptr)
+    {
+        free(g_value_alloc);
+        g_value_alloc = nullptr;
+    }
+    if (status != GENIE_STATUS_SUCCESS)
+    {
+        return -1;
+    }
+    return static_cast<int64_t>(value.uint32Value);
+#else
+    return -1;
+#endif
+}
+
+bool GenieContext::SaveCheckpoint(const std::string &name, uint32_t n_tokens, bool head, double &save_ms)
+{
+    const auto t0 = std::chrono::steady_clock::now();
+    const qnn_ckpt::fs::path tmp = ckpt_store_.NewTempDir();
+    std::error_code ec;
+    std::string why;
+    bool ok = false;
+    qnn_ckpt::Entry entry;
+    const Genie_Status_t status = GenieDialog_save(m_DialogHandle, tmp.generic_string().c_str());
+    const int64_t occupancy = ReadOccupancy();
+    if (status != GENIE_STATUS_SUCCESS)
+    {
+        why = "save_status_" + std::to_string(status);
+        qnn_ckpt::fs::remove_all(tmp, ec);
+    }
+    else if (occupancy <= 0)
+    {
+        why = "occupancy_unreadable";
+        qnn_ckpt::fs::remove_all(tmp, ec);
+    }
+    else
+    {
+        ok = ckpt_store_.Commit(tmp, name, static_cast<uint32_t>(occupancy), n_tokens, head, entry, why);
+    }
+    const double ms = ElapsedMs(t0);
+    save_ms += ms;
+    if (ok)
+    {
+        My_Log{} << "[QNN] checkpoint saved: tokens=" << n_tokens << " n_past=" << entry.n_past
+                 << " bytes=" << entry.total_bytes << " ms=" << static_cast<int64_t>(ms)
+                 << " store_count=" << ckpt_store_.Count() << " store_bytes=" << ckpt_store_.Bytes() << "\n";
+    }
+    else
+    {
+        My_Log{My_Log::Level::kWarning} << "[QNN] checkpoint save skipped: tokens=" << n_tokens
+                                        << " reason=" << why << "\n";
+    }
+    return ok;
+}
+
+void GenieContext::InvalidateCheckpoint(const std::string &name, const char *why)
+{
+    ckpt_store_.Remove(name);
+    My_Log{My_Log::Level::kWarning} << "[QNN] checkpoint invalidated: reason=" << why
+                                    << " store_count=" << ckpt_store_.Count() << "\n";
+}
+
+bool GenieContext::RebuildDialog()
+{
+    My_Log{My_Log::Level::kWarning} << "[QNN] rebuilding the Genie dialog (free + create)\n";
+    const auto t0 = std::chrono::steady_clock::now();
+    std::lock_guard<std::mutex> handle_lock(dialog_handle_mutex_);
+    if (m_DialogHandle != nullptr)
+    {
+        GenieDialog_free(m_DialogHandle);
+        m_DialogHandle = nullptr;
+        m_SamplerHandle = nullptr;
+    }
+    bool faulted = false;
+#ifdef _WIN32
+    const Genie_Status_t status = GenieDialogCreateGuarded(m_ConfigHandle, &m_DialogHandle, &faulted);
+#else
+    const Genie_Status_t status = GenieDialog_create(m_ConfigHandle, &m_DialogHandle);
+#endif
+    if (faulted || status != GENIE_STATUS_SUCCESS || m_DialogHandle == nullptr)
+    {
+        m_DialogHandle = nullptr;
+        ckpt_capable_ = false;
+        My_Log{My_Log::Level::kError} << "[QNN] rebuilding the Genie dialog failed: status=" << status << "\n";
+        return false;
+    }
+    if (GENIE_STATUS_SUCCESS != GenieDialog_getSampler(m_DialogHandle, &m_SamplerHandle))
+    {
+        m_SamplerHandle = nullptr;
+        My_Log{My_Log::Level::kWarning} << "[QNN] rebuilt dialog has no sampler handle\n";
+    }
+    if (m_SamplerHandle != nullptr && !watermark_active_)
+    {
+        GenieSampler_applyConfig(m_SamplerHandle, m_SamplerConfigHandle);
+    }
+    bool replay_failed = false;
+    if (!stop_sequences_.empty() &&
+        GENIE_STATUS_SUCCESS != GenieDialog_setStopSequence(m_DialogHandle, stop_sequences_.c_str()))
+    {
+        replay_failed = true;
+    }
+    for (const auto &applied: lora_applied_)
+    {
+        if (GENIE_STATUS_SUCCESS !=
+            GenieDialog_applyLora(m_DialogHandle, applied.first.c_str(), applied.second.c_str()))
+        {
+            replay_failed = true;
+        }
+    }
+    for (const auto &strength: lora_strengths_)
+    {
+        if (GENIE_STATUS_SUCCESS != GenieDialog_setLoraStrength(m_DialogHandle, strength.first.first.c_str(),
+                                                                strength.first.second.c_str(), strength.second))
+        {
+            replay_failed = true;
+        }
+    }
+    if (replay_failed)
+    {
+        ckpt_capable_ = false;
+        My_Log{My_Log::Level::kError}
+                << "[QNN] replaying the dialog settings after the rebuild failed; prefix checkpoints are disabled "
+                   "for this model until it is reloaded\n";
+    }
+    My_Log{My_Log::Level::kWarning} << "[QNN] Genie dialog rebuilt in " << static_cast<int64_t>(ElapsedMs(t0))
+                                    << " ms\n";
+    return true;
+}
+
+void GenieContext::RefreshCheckpointStore()
+{
+    namespace fs = std::filesystem;
+    std::ostringstream key;
+    key << model_config_.get_model_name() << '|' << model_config_.get_model_path() << '|'
+        << model_config_.get_context_size() << '|' << model_config_.getloraAdapter() << '|'
+        << model_config_.getloraAlpha() << "|genie=" << Genie_getApiMajorVersion() << '.'
+        << Genie_getApiMinorVersion() << '.' << Genie_getApiPatchVersion();
+    for (const auto &applied: lora_applied_)
+    {
+        key << "|lora:" << applied.first << ':' << applied.second;
+    }
+    for (const auto &strength: lora_strengths_)
+    {
+        key << "|alpha:" << strength.first.first << ':' << strength.first.second << ':' << strength.second;
+    }
+    std::error_code ec;
+    std::vector<std::string> weights;
+    for (fs::directory_iterator it(model_config_.get_model_path(), ec), end; !ec && it != end; it.increment(ec))
+    {
+        std::error_code ec2;
+        if (!it->is_regular_file(ec2))
+        {
+            continue;
+        }
+        weights.push_back(it->path().filename().string() + ':' + std::to_string(it->file_size(ec2)) + ':' +
+                          std::to_string(static_cast<int64_t>(it->last_write_time(ec2).time_since_epoch().count())));
+    }
+    std::sort(weights.begin(), weights.end());
+    for (const auto &w: weights)
+    {
+        key << "|w:" << w;
+    }
+    if (!kv_path_.empty())
+    {
+        const fs::path kv = fs::path(kv_path_) / qnn_ckpt::kKvFile;
+        key << "|static:" << fs::file_size(kv, ec) << ':'
+            << static_cast<int64_t>(fs::last_write_time(kv, ec).time_since_epoch().count());
+    }
+    else
+    {
+        key << "|static:none";
+    }
+    if (key.str() == ckpt_key_text_)
+    {
+        return;
+    }
+    ckpt_key_text_ = key.str();
+    const std::string ctx_name = qnn_ckpt::HashString(ckpt_key_text_);
+    const std::string &configured = qnn_ckpt::GlobalConfig().dir;
+    const fs::path root_base =
+        configured.empty() ? fs::path(RootDir.empty() ? fs::current_path(ec).string() : RootDir) : fs::path(configured);
+    const fs::path root = root_base / "qnn_prefix_cache";
+    ckpt_store_.Open(root, ctx_name);
+    My_Log{} << "[QNN] checkpoint store: dir=" << (root / ctx_name).generic_string()
+             << " entries=" << ckpt_store_.Count() << " bytes=" << ckpt_store_.Bytes() << "\n";
+}
+
+bool GenieContext::PrepareCheckpointedPrefill(const ModelInput &model_input, QueryScope &scope,
+                                              const PrefillHeartbeatCallback &heartbeat, const char *query_type,
+                                              bool bypass, CheckpointRun &run)
+{
+    run = CheckpointRun{};
+    if (bypass)
+    {
+        run.fallback = "retry_full_prefill";
+        return true;
+    }
+    if (!CheckpointEligible(query_type))
+    {
+        return true;
+    }
+    const std::string &text = model_input.text_;
+    const std::vector<size_t> cuts = qnn_ckpt::FindBoundaries(text);
+    if (cuts.empty())
+    {
+        run.fallback = "no_boundary";
+        return true;
+    }
+    bool ok = true;
+    const std::vector<int32_t> full = EncodeTokens(text, ok);
+    if (!ok || full.empty())
+    {
+        run.fallback = "encode_failed";
+        return true;
+    }
+    const std::vector<std::string> names = qnn_ckpt::PrefixNames(text, cuts);
+
+    auto verify_cut = [&](size_t i, uint32_t &n_tokens)
+    {
+        bool encoded = true;
+        const std::vector<int32_t> prefix = EncodeTokens(text.substr(0, cuts[i]), encoded);
+        if (!encoded || prefix.empty() || prefix.size() >= full.size() ||
+            !std::equal(prefix.begin(), prefix.end(), full.begin()) || full[prefix.size()] != ckpt_marker_id_)
+        {
+            return false;
+        }
+        n_tokens = static_cast<uint32_t>(prefix.size());
+        return true;
+    };
+
+    qnn_ckpt::Entry hit;
+    int hit_idx = -1;
+    for (int i = static_cast<int>(cuts.size()) - 1; i >= 0; --i)
+    {
+        std::string why;
+        if (ckpt_store_.Lookup(names[i], hit, why))
+        {
+            hit_idx = i;
+            break;
+        }
+        if (!why.empty())
+        {
+            My_Log{My_Log::Level::kWarning} << "[QNN] checkpoint dropped on lookup: reason=" << why << "\n";
+        }
+    }
+    if (hit_idx >= 0)
+    {
+        uint32_t n_tokens = 0;
+        if (!verify_cut(static_cast<size_t>(hit_idx), n_tokens) || n_tokens != hit.n_tokens)
+        {
+            InvalidateCheckpoint(hit.name, "token_split_changed");
+            run.fallback = "token_split_changed";
+            hit_idx = -1;
+        }
+    }
+
+    std::vector<size_t> want{cuts.size() - 1};
+    if (qnn_ckpt::GlobalConfig().tail_fallback.load() && cuts.size() >= 2)
+    {
+        want.push_back(cuts.size() - 2);
+    }
+    const int head_idx = qnn_ckpt::HeadIndex(text, cuts);
+    if (head_idx >= 0)
+    {
+        want.push_back(static_cast<size_t>(head_idx));
+    }
+    std::sort(want.begin(), want.end());
+    want.erase(std::unique(want.begin(), want.end()), want.end());
+    std::vector<size_t> create;
+    for (size_t idx: want)
+    {
+        if (!model_input.skip_checkpoint_save_ && static_cast<int>(idx) > hit_idx)
+        {
+            create.push_back(idx);
+        }
+    }
+
+    const auto t_begin = std::chrono::steady_clock::now();
+    bool primed = false;
+    bool began = false;
+    size_t pos = 0;
+    if (hit_idx >= 0)
+    {
+        if (scope.stopped() || (heartbeat && !heartbeat()))
+        {
+            return false;
+        }
+        const auto t_restore = std::chrono::steady_clock::now();
+        GenieDialog_reset(m_DialogHandle);
+        const Genie_Status_t restore_status = GenieDialog_restore(
+                m_DialogHandle, qnn_ckpt::fs::path(hit.dir).generic_string().c_str());
+        const int64_t occupancy = restore_status == GENIE_STATUS_SUCCESS ? ReadOccupancy() : -1;
+        run.restore_ms = ElapsedMs(t_restore);
+        if (restore_status != GENIE_STATUS_SUCCESS || occupancy != static_cast<int64_t>(hit.n_past))
+        {
+            run.fallback = restore_status != GENIE_STATUS_SUCCESS ? "restore_failed" : "occupancy_mismatch";
+            My_Log{My_Log::Level::kWarning} << "[QNN] checkpoint restore rejected: status=" << restore_status
+                                            << " occupancy=" << occupancy << " expected=" << hit.n_past << "\n";
+            InvalidateCheckpoint(hit.name, run.fallback.c_str());
+            if (!RebuildDialog())
+            {
+                throw std::runtime_error("rebuild genie dialog failed");
+            }
+            return true;
+        }
+        ckpt_store_.Touch(hit.name);
+        primed = true;
+        began = true;
+        pos = cuts[static_cast<size_t>(hit_idx)];
+        run.hit = true;
+        run.hit_name = hit.name;
+        run.reused_tokens = hit.n_tokens;
+        run.reused_n_past = hit.n_past;
+        run.gen_base = hit.n_gen;
+        run.checkpoint_at = hit.n_tokens;
+    }
+
+    for (size_t idx: create)
+    {
+        if (scope.stopped() || (heartbeat && !heartbeat()))
+        {
+            return false;
+        }
+        uint32_t n_tokens = 0;
+        if (!verify_cut(idx, n_tokens))
+        {
+            run.fallback = "token_split";
+            break;
+        }
+        if (!primed)
+        {
+            GenieDialog_reset(m_DialogHandle);
+            Genie_Status_t static_status = GENIE_STATUS_SUCCESS;
+            if (!kv_path_.empty() &&
+                GENIE_STATUS_SUCCESS != (static_status = GenieDialog_restore(m_DialogHandle, kv_path_.c_str())))
+            {
+                throw std::runtime_error("restore kv failed: " + std::to_string(static_status));
+            }
+            primed = true;
+        }
+        const std::string segment = text.substr(pos, cuts[idx] - pos);
+        const Genie_Status_t status = GenieDialog_query(
+                m_DialogHandle, segment.c_str(),
+                began ? GENIE_DIALOG_SENTENCE_CONTINUE : GENIE_DIALOG_SENTENCE_BEGIN, NoopDialogCallback, nullptr);
+        if (status == GENIE_STATUS_WARNING_ABORTED || scope.stopped())
+        {
+            return false;
+        }
+        if (status != GENIE_STATUS_SUCCESS)
+        {
+            My_Log{My_Log::Level::kWarning} << "[QNN] checkpointed prefill failed: status=" << status << "\n";
+            if (run.hit)
+            {
+                InvalidateCheckpoint(run.hit_name, "prefill_failed");
+            }
+            const int created = run.created;
+            run = CheckpointRun{};
+            run.created = created;
+            run.fallback = "prefill_failed";
+            if (!RebuildDialog())
+            {
+                throw std::runtime_error("rebuild genie dialog failed");
+            }
+            return true;
+        }
+        began = true;
+        ++run.gen_base;
+        pos = cuts[idx];
+        if (SaveCheckpoint(names[idx], n_tokens, static_cast<int>(idx) == head_idx, run.save_ms))
+        {
+            ++run.created;
+            run.checkpoint_at = n_tokens;
+        }
+    }
+    if (!primed)
+    {
+        return true;
+    }
+    run.suffix_mode = true;
+    ckpt_suffix_ = text.substr(pos);
+    run.prefill_ms = ElapsedMs(t_begin) - run.restore_ms;
+    return true;
 }

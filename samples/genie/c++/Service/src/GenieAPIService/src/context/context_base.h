@@ -72,6 +72,8 @@ public:
 
     virtual bool was_stopped_by_output_limit() const { return false; }
 
+    virtual bool was_stopped_by_repeat_guard() const { return false; }
+
     virtual json GetLastQueryTraceMetrics() const { return nullptr; }
 
     virtual bool UsesCrossRequestPrefixCache() const { return false; }

@@ -30,6 +30,7 @@ from service_tests.common import (
     TestResult,
     detect_modality,
     infer_backend,
+    parse_gguf_devices,
     wait_http_ok,
     wait_port_closed,
     wait_port_open,
@@ -45,6 +46,7 @@ from service_tests.multi_model import discover_models, discover_models_remote
 from service_tests.report import ReportGenerator
 from service_tests.suite_long_task_memory import _run_long_task_memory_suite
 from service_tests.suite_prompt_fidelity import _run_prompt_fidelity_suite
+from service_tests.suite_api_versions import _run_api_versions_suite
 from service_tests.suite_skill_capacity import _run_skill_capacity_suite
 from service_tests.suites import (
     _finalize_and_exit,
@@ -71,6 +73,7 @@ SUITE_HANDLERS = {
     "qnn": _run_qnn_suite,
     "graceful_shutdown": _run_graceful_shutdown_suite,
     "prompt_fidelity": _run_prompt_fidelity_suite,
+    "api_versions": _run_api_versions_suite,
     "skill_capacity": _run_skill_capacity_suite,
     "long_task_memory": _run_long_task_memory_suite,
 }
@@ -95,6 +98,7 @@ def main():
     # 按套件精确运行:
     python test_service.py --exe_dir ./GenieService_v2.3.7 --models ./models --suite sampleapp
     python test_service.py --exe_dir ./GenieService_v2.3.7 --models ./models --suite gguf --gguf_devices gpu
+    python test_service.py --exe_dir ./GenieService_v2.3.7 --models ./models --suite gguf --gguf_devices gpu,cpu,npu,npu_legacy,list,invalid
     python test_service.py --exe_dir ./GenieService_v2.3.7 --models ./models --suite mnn
     python test_service.py --exe_dir ./GenieService_v2.3.7 --models ./models --suite qnn
         """
@@ -124,7 +128,11 @@ def main():
                              "<data_dir>/bin/<name> 以触发 Builder 官方自愈式安装发现），默认复用 --exe_dir。"
                              "供 skill_capacity 的 builder 模式使用")
     parser.add_argument("--gguf_model", default=None, help="GGUF 显式加载回归限定的单个模型目录名（默认留空，测试全部已发现的 GGUF 模型）")
-    parser.add_argument("--gguf_devices", choices=("both", "gpu", "cpu"), default="both", help="GGUF 显式加载回归的设备筛选：both/gpu/cpu（默认 both）")
+    parser.add_argument("--gguf_devices", type=parse_gguf_devices, default=parse_gguf_devices("both"),
+                        help="GGUF 显式加载回归的用例，逗号分隔（both 等价于 gpu,cpu，默认 both）：gpu/cpu 走旧 device 字段，"
+                             "npu 写 \"devices\": \"npu\"，npu_legacy 走旧 device 字段写 npu；npu 类用例放不下按 npu→gpu→cpu 溢出，"
+                             "HTP0 不可用时降级仍判通过并在 detail 标注；list（devices 写成列表）与 invalid（\"devices\": \"tpu\"）"
+                             "期望加载前报错且权重未开始加载")
     parser.add_argument("--skill_capacity_models", default=None,
                         help="--suite skill_capacity 限定测试的目标模型简写，逗号分隔（qwen3-8b/qwen2.5_omini），"
                              "留空则两个目标模型都测（各自缺失时精确跳过，不影响另一个）")
@@ -143,7 +151,7 @@ def main():
                              "fidelity.{cjk,ascii}_chars_per_token=4.0 + budget_partition.enabled=false，改前备份、"
                              "finally 还原）；optimized=Step2 改造后的默认档位（不写覆盖，直接用 C++ 侧新默认值）；"
                              "both=依次跑两档并在 data 里各自记录 frontier_skills，供报告算提升倍数")
-    parser.add_argument("--suite", choices=("full", "model", "sampleapp", "multimodal", "gguf", "multi_model", "mnn", "qnn", "graceful_shutdown", "prompt_fidelity", "skill_capacity", "long_task_memory"),
+    parser.add_argument("--suite", choices=("full", "model", "sampleapp", "multimodal", "gguf", "multi_model", "mnn", "qnn", "graceful_shutdown", "prompt_fidelity", "api_versions", "skill_capacity", "long_task_memory"),
                         default=None, help="选择要运行的测试套件（必传参数，不再有隐式默认值；如需完整回归请显式传入 full）")
     parser.add_argument("--long_task_memory_models", default=None,
                         help="--suite long_task_memory 限定测试的目标模型简写，逗号分隔（qwen3-8b/gguf-20b/mnn-20b），"

@@ -14,6 +14,7 @@
 #include <iostream>
 #include <string>
 #include <log.h>
+#include <log_table.h>
 #include <utils.h>
 #include "config.h"
 #include "chat_request_handler/chat_request_handler.h"
@@ -33,6 +34,20 @@ static constexpr int kShutdownWatchdogExitCode = 124;
 namespace
 {
     volatile std::sig_atomic_t g_pending_signal = 0;
+
+    std::string Utf8PreviewPrefix(const std::string &body, size_t max_bytes)
+    {
+        if (body.size() <= max_bytes)
+        {
+            return body;
+        }
+        size_t cut = max_bytes;
+        while (cut > 0 && (static_cast<unsigned char>(body[cut]) & 0xC0) == 0x80)
+        {
+            --cut;
+        }
+        return body.substr(0, cut);
+    }
 }
 
 class GenieService::Route : public std::enable_shared_from_this<Route>
@@ -70,10 +85,6 @@ private:
         {
             (self_->svr.*action_func_)(path, [route, this](const httplib::Request &req, httplib::Response &res)
             {
-                My_Log{} << "---------------------------------------------------\n"
-                         << "Time: " << My_Log::GetTimeString() << "\n"
-                         << "Path: " << req.path << std::endl;
-
                 ErrorHandle error_handle;
                 try
                 {
@@ -371,43 +382,108 @@ void GenieService::setupHttpServer()
     svr.set_write_timeout(300, 0);
     svr.set_idle_interval(300, 0);
 
+    svr.set_pre_routing_handler([](const httplib::Request &req, httplib::Response &) -> httplib::Server::HandlerResponse
+    {
+        if (My_Log::Level_ < My_Log::Level::kDebug)
+        {
+            return httplib::Server::HandlerResponse::Unhandled;
+        }
+        LogTable table{"HTTP Request"};
+        table.AddRow({"Time", My_Log::GetTimeString()});
+        table.AddRow({"Path", req.path});
+        table.AddRow({"Method", req.method});
+        table.AddRow({"Target", req.target});
+        table.AddRow({"From", req.remote_addr + ":" + std::to_string(req.remote_port)});
+        static constexpr const char *kLoggedHeaders[] = {
+                "Origin", "Content-Type", "Content-Length", "User-Agent",
+                "Access-Control-Request-Method", "Access-Control-Request-Headers"};
+        for (const char *name: kLoggedHeaders)
+        {
+            if (req.has_header(name))
+            {
+                table.AddRow({name, req.get_header_value(name)});
+            }
+        }
+        My_Log{My_Log::Level::kDebug}.original() << table.Str() << std::endl;
+        return httplib::Server::HandlerResponse::Unhandled;
+    });
+
     svr.set_logger([](const auto &req, const httplib::Response &res)
                    {
                        if (!res.has_header("X-Skip"))
                        {
-                           My_Log{} << req.path << " handling is done";
-                           My_Log{}.original(true) << "\n\n";
+                           std::string line = req.method + " " + req.path + " -> " + std::to_string(res.status) + ", ";
+                           if (req.matched_route.empty())
+                           {
+                               line += "no route matched";
+                               if (!req.body.empty())
+                               {
+                                   line += "\nbody (" + std::to_string(req.body.size()) + " bytes): " +
+                                           Utf8PreviewPrefix(req.body, 256);
+                               }
+                           }
+                           else
+                           {
+                               line += "route " + req.matched_route;
+                           }
+                           line += " handling is done";
+                           My_Log{My_Log::Level::kDebug} << line;
+                           My_Log{My_Log::Level::kDebug}.original(true) << "\n\n";
                        }
                    });
 
+    svr.set_default_headers({{"Access-Control-Allow-Origin", "*"},
+                             {"Access-Control-Expose-Headers", "*"}});
+
+    svr.Options(R"(.*)", [](const httplib::Request &req, httplib::Response &res)
+    {
+        res.set_header("Access-Control-Allow-Methods",
+                       req.get_header_value("Access-Control-Request-Method", "GET, POST, OPTIONS"));
+        res.set_header("Access-Control-Allow-Headers",
+                       req.get_header_value("Access-Control-Request-Headers", "*"));
+        if (req.has_header("Access-Control-Request-Private-Network"))
+        {
+            res.set_header("Access-Control-Allow-Private-Network", "true");
+        }
+        res.set_header("Access-Control-Max-Age", "86400");
+        res.status = 204;
+    });
+
     Route::CreateGetRoute({"/"}, &ChatRequestHandler::HandleWelcome);
 
-    Route::CreatePostRoute({"/completions", "/v1/completions", "/chat/completions", "/v1/chat/completions"},
+    Route::CreatePostRoute({"/completions", "/v1/completions", "/v2/completions",
+                            "/chat/completions", "/v1/chat/completions", "/v2/chat/completions"},
                            &ChatRequestHandler::ChatCompletions);
 
-    Route::CreatePostRoute({"/textsplitter", "/v1/textsplitter"}, &ChatRequestHandler::TextSplitter);
+    Route::CreatePostRoute({"/textsplitter", "/v1/textsplitter", "/v2/textsplitter"},
+                           &ChatRequestHandler::TextSplitter);
 
-    Route::CreateGetRoute({"/models", "/v1/models"}, &ChatRequestHandler::FetchModelList);
+    Route::CreateGetRoute({"/models", "/v1/models", "/v2/models"}, &ChatRequestHandler::FetchModelList);
 
-    Route::CreateGetRoute({"/profile"}, &ChatRequestHandler::FetchProfile);
+    Route::CreateGetRoute({"/profile", "/v1/profile", "/v2/profile"}, &ChatRequestHandler::FetchProfile);
 
-    Route::CreateGetRoute({"/status"}, &ChatRequestHandler::FetchModelStatus);
+    Route::CreateGetRoute({"/status", "/v1/status", "/v2/status"}, &ChatRequestHandler::FetchModelStatus);
 
-    Route::CreatePostRoute({"/stop"}, &ChatRequestHandler::ModelStop);
+    Route::CreatePostRoute({"/stop", "/v1/stop", "/v2/stop"}, &ChatRequestHandler::ModelStop);
 
-    Route::CreatePostRoute({"/clear"}, &ChatRequestHandler::ClearMessage);
+    Route::CreatePostRoute({"/clear", "/v1/clear", "/v2/clear"}, &ChatRequestHandler::ClearMessage);
 
-    Route::CreatePostRoute({"/fetch"}, &ChatRequestHandler::FetchMessage);
+    Route::CreatePostRoute({"/fetch", "/v1/fetch", "/v2/fetch"}, &ChatRequestHandler::FetchMessage);
 
-    Route::CreatePostRoute({"/reload"}, &ChatRequestHandler::ReloadMessage);
+    Route::CreatePostRoute({"/reload", "/v1/reload", "/v2/reload"}, &ChatRequestHandler::ReloadMessage);
 
-    Route::CreatePostRoute({"/servicestop"}, &ChatRequestHandler::ServiceExit);
+    Route::CreatePostRoute({"/servicestop", "/v1/servicestop", "/v2/servicestop"},
+                           &ChatRequestHandler::ServiceExit);
 
-    Route::CreatePostRoute({"/images/generations", "/v1/images/generations"}, &ChatRequestHandler::ImageGenerate);
+    Route::CreatePostRoute({"/images/generations", "/v1/images/generations", "/v2/images/generations"},
+                           &ChatRequestHandler::ImageGenerate);
 
-    Route::CreatePostRoute({"/contextsize"}, &ChatRequestHandler::ContextSize);
+    Route::CreatePostRoute({"/contextsize", "/v1/contextsize", "/v2/contextsize"},
+                           &ChatRequestHandler::ContextSize);
 
-    Route::CreatePostRoute({"/unload"}, &ChatRequestHandler::UnloadModel);
+    Route::CreatePostRoute({"/unload", "/v1/unload", "/v2/unload"}, &ChatRequestHandler::UnloadModel);
+
+    Route::CreatePostRoute({"/v2/unload_all"}, &ChatRequestHandler::UnloadAllModels);
 
     My_Log("GenieService::setupHttpServer end\n");
 }

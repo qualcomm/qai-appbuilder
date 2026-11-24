@@ -30,10 +30,10 @@ struct DraftModelConfig
     bool required = true;
     std::string flash_attn;
     std::string draft_flash_attn;
-    std::string samplers;
-    float temp = 0.0f;
-    int top_k = 1;
-    float top_p = -1.0f;
+    std::string target_samplers;
+    float target_temp = 0.2f;
+    int target_top_k = 10;
+    float target_top_p = -1.0f;
     int ngram_mod_n_min = -1;
     int ngram_mod_n_match = 16;
     bool ngram_mod = true;
@@ -68,6 +68,15 @@ llama_runtime::RuntimePlan PlanSpeculativeRuntime(const std::string &model_dir,
                                                   uint64_t context_size);
 
 uint32_t ReadGgufBlockCount(const std::string &gguf_path);
+
+uint64_t EstimateHtpMappedBytes(const std::string &gguf_path, uint64_t context_size);
+
+uint64_t EstimateMainModelBytes(const std::string &model_dir, const std::string &draft_relative_path,
+                                uint64_t context_size);
+
+uint64_t GetGpuFreeBytes();
+
+uint64_t GetHtpBudgetBytes();
 
 constexpr uint32_t kDflashFfnCpuLayersDefault = 30;
 

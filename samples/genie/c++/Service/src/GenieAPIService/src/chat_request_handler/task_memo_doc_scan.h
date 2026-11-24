@@ -39,6 +39,15 @@ constexpr size_t kMaxReadRangesPerFile = 12;
 constexpr size_t kMaxDigestsPerFile = 8;
 constexpr size_t kDigestGistChars = 48;
 constexpr size_t kDigestsSuffixChars = 260;
+constexpr size_t kSmallBodyMaxChars = 1200;
+constexpr size_t kMaxSmallBodies = 3;
+
+inline constexpr char kRepeatStubPrefix[] = "[Note: this ";
+inline constexpr char kRepeatStubSuffix[] =
+    " call returned the same result as the earlier identical call (only numbers or temp paths may differ), which is still shown above; "
+    "calling it again will not return anything new. Use that result or change approach.";
+inline constexpr char kRepeatStubTailHeader[] = "\nIts last lines:\n";
+inline constexpr char kRepeatStubFullHeader[] = "\nIts full result:\n";
 
 struct Heading
 {
@@ -83,6 +92,8 @@ bool IsRuntimeLogLine(const std::string &line);
 bool IsBinaryContent(const std::string &content);
 
 std::string BinaryResultStub(size_t size);
+
+bool IsRepeatStub(const std::string &content);
 
 bool IsToolNoiseLine(const std::string &trimmed);
 
@@ -168,6 +179,12 @@ void AddPageDigest(json &file_entry, size_t first, size_t last, const std::strin
 
 void FoldPage(json &file_entry, const std::string &text, size_t first_line);
 
+void TrimSmallBodies(json &read_files, size_t keep);
+
+void DropBodyForPath(json &read_files, const std::string &path);
+
+std::string RenderBodySuffix(const json &file_entry);
+
 bool IsMarkedRef(const json &value);
 
 size_t CountMarkedRefs(const json &pending);
@@ -185,13 +202,17 @@ std::string LastNameOf(const std::string &path);
 
 std::vector<Heading> LoadHeadings(const json &file_entry);
 
-std::string RenderSectionsSuffix(const json &file_entry, size_t budget);
+std::string RenderSectionsSuffix(const json &file_entry, size_t budget, bool full_map = false);
 
 std::string RenderCursorSuffix(const json &file_entry);
 
 std::string RenderDigestsSuffix(const json &file_entry, size_t budget);
 
-std::string RenderReadFileSuffix(const json &file_entry, size_t budget);
+std::string RenderReadFileSuffix(const json &file_entry, size_t budget, bool full_map = false);
+
+void SetFullSectionMap(bool enabled);
+
+bool FullSectionMapEnabled();
 
 bool IsFileFullyRead(const json &file_entry);
 

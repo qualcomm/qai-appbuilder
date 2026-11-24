@@ -19,6 +19,10 @@ public:
     using std::runtime_error::runtime_error;
 };
 
+bool LlamaCppHasHtpDevice();
+
+void EnsureGgmlBackendsLoaded();
+
 class LLAMACppBuilder : public ContextBase
 {
 public:
@@ -39,6 +43,8 @@ public:
 
     bool was_stopped_by_output_limit() const override { return stopped_by_output_limit_; }
 
+    bool was_stopped_by_repeat_guard() const override { return stopped_by_repeat_guard_; }
+
     json GetLastQueryTraceMetrics() const override;
 
     static void SetPrefixCacheEnabled(bool enabled);
@@ -46,6 +52,8 @@ public:
     static void SetDegenerateRepeatGuardEnabled(bool enabled);
 
     static void SetDegenerateRepeatGuardMaxPeriod(int max_period);
+
+    static void SetDegenerateRepeatGuardMinSpanBytes(int min_span_bytes);
 
     static void SetPrefixHeadCheckpoints(int n, bool from_config);
 
@@ -60,6 +68,7 @@ private:
 
     Impl *impl_;
     std::atomic<bool> stopped_by_output_limit_{false};
+    std::atomic<bool> stopped_by_repeat_guard_{false};
 };
 
 #endif

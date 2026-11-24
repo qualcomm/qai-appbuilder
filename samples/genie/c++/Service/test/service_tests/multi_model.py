@@ -284,7 +284,7 @@ class MultiModelTester:
             "max_tokens": 32
         }
         start = time.time()
-        r = self._post("/v1/chat/completions", body, timeout=120)
+        r = self._post("/v2/chat/completions", body, timeout=120)
         latency = (time.time() - start) * 1000
 
         if r is None:
@@ -378,7 +378,7 @@ class MultiModelTester:
         name = "MULTI: invalid model route preserves resident slots"
         invalid_model = "__invalid_model_for_negative_route_test__"
         try:
-            before_response = requests.get(f"{self.base_url}/status", timeout=10)
+            before_response = requests.get(f"{self.base_url}/v2/status", timeout=10)
             before_status = before_response.json() if before_response.status_code == 200 else None
         except Exception as e:
             return self._make_result(name, False, 0, f"无法读取请求前 /status: {e}")
@@ -393,7 +393,7 @@ class MultiModelTester:
             "max_tokens": 8
         }
         start = time.time()
-        r = self._post("/v1/chat/completions", body, timeout=30)
+        r = self._post("/v2/chat/completions", body, timeout=30)
         latency_ms = (time.time() - start) * 1000
         if r is None:
             if _confirm_process_dead(self.svc):
@@ -421,7 +421,7 @@ class MultiModelTester:
                 response_data={"invalid_model": invalid_model}
             )
         try:
-            after_response = requests.get(f"{self.base_url}/status", timeout=10)
+            after_response = requests.get(f"{self.base_url}/v2/status", timeout=10)
             after_status = after_response.json() if after_response.status_code == 200 else None
         except Exception as e:
             return self._make_result(name, False, r.status_code,
@@ -480,7 +480,7 @@ class MultiModelTester:
                 "max_tokens": 16
             }
             try:
-                r = requests.post(f"{self.base_url}/v1/chat/completions",
+                r = requests.post(f"{self.base_url}/v2/chat/completions",
                                   json=body, timeout=120)
                 content = ""
                 if r.status_code == 200:
@@ -542,16 +542,8 @@ class MultiModelTester:
             )
         return self._make_result(name, True, 200, detail)
 
-    def test_default_model_routing(self):
-        """向不带 model 字段的请求验证默认模型路由。
-
-        背景（审计发现）：`ChatRequestHandler::ChatCompletions` 每次动态切换成功都会
-        调用 `SetDefaultModel(modelName)`，把服务端的默认模型覆写为“最后一次被动态路由
-        到的模型”，而不是固定为 `service_config.json` 里配置的那个；若该默认模型恰好在某个
-        设备上被驱逐，`GetDefaultModel()` 会退化为 `unordered_map` 的任意元素。本测试不假定
-        具体会路由到哪个模型（该行为目前是既定但不确定的实现细节，非本测试引入的新契约），
-        只监控“不崩溃、不返回 5xx”这一条安全底线，作为回归预防线。"""
-        name = "MULTI: default model route (no 'model' field) after dynamic switches"
+    def test_model_required(self):
+        name = "MULTI: v2 chat requires model"
         body = {
             "messages": [{"role": "user", "content": "Say hi"}],
             "stream": False,
@@ -559,7 +551,7 @@ class MultiModelTester:
         }
         started = time.time()
         try:
-            r = requests.post(f"{self.base_url}/v1/chat/completions", json=body, timeout=60)
+            r = requests.post(f"{self.base_url}/v2/chat/completions", json=body, timeout=60)
         except Exception as e:
             latency = (time.time() - started) * 1000
             if _confirm_process_dead(self.svc):
@@ -584,9 +576,12 @@ class MultiModelTester:
                 detail=f"请求异常: {type(e).__name__}: {e}(进程仍存活,应视为该次请求自身的连接异常)"
             )
         latency_ms = (time.time() - started) * 1000
-        passed = r.status_code == 200
-        detail = (f"status={r.status_code}, latency={latency_ms:.0f}ms（不带 model 字段；当前实现里"
-                  f"默认模型会随动态切换漂移，本检查只监控是否仍能正常响应，不校验具体路由到哪个模型）")
+        try:
+            error = r.json().get("error")
+        except Exception:
+            error = None
+        passed = r.status_code == 400 and error == "model is required"
+        detail = f"status={r.status_code}, latency={latency_ms:.0f}ms, error={error!r}"
         return TestResult(
             name=name, round_num=self.round_num, model_name="_multi_model_",
             passed=passed, status_code=r.status_code, latency_ms=latency_ms,
@@ -652,11 +647,10 @@ class MultiModelTester:
         self.results.append(r)
         print("✓ PASS" if r.passed else ("⚠ SKIP" if r.skipped else f"✗ FAIL ({r.detail})"))
 
-        # 4.5 不带 model 字段的默认路由回归监控（仅在确实发生过跨设备动态切换时才有意义；
-        # 只监控"不崩溃/不返回 5xx"这条安全底线，不假定具体路由到哪个模型——见方法 docstring）。
+        # 4.5 验证 v2 chat 对 model 字段的必填契约。
         if models_by_device and len(models_by_device) > 1:
-            print("  测试默认模型路由 (无 model 字段) ... ", end="", flush=True)
-            r = self.test_default_model_routing()
+            print("  测试 v2 缺少 model 的请求 ... ", end="", flush=True)
+            r = self.test_model_required()
             self.results.append(r)
             print("✓ PASS" if r.passed else ("⚠ SKIP" if r.skipped else f"✗ FAIL ({r.detail})"))
 

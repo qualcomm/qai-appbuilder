@@ -58,10 +58,6 @@ public:
             return std::accumulate(messages.begin(), messages.end(), std::string{});
         }
 
-        size_t last_user = 0;
-        for (size_t i = 0; i < count; i++)
-            if (history[i].role == "user")
-                last_user = i;
         const std::string assistant_tmpl = j["assistant"].get<std::string>();
         const size_t slot = assistant_tmpl.find("string");
         const std::string assistant_tail = slot == std::string::npos ? "" : assistant_tmpl.substr(slot + 6);
@@ -71,7 +67,6 @@ public:
             auto &msg = history[i];
 
             std::string content = msg.content;
-            bool is_after_last_user = (i > last_user);
 
             std::string format_content;
             if (msg.role == "tool")
@@ -82,7 +77,7 @@ public:
             {
                 format_content = str_replace(j["user"], "string", content);
             }
-            else if (msg.role == "assistant" && !assistant_turn_prefix.empty() && is_after_last_user && slot != std::string::npos)
+            else if (msg.role == "assistant" && !assistant_turn_prefix.empty() && slot != std::string::npos)
             {
                 format_content = assistant_turn_prefix + content + assistant_tail;
             }

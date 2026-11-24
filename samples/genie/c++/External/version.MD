@@ -4,7 +4,7 @@
 | json          | https://github.com/nlohmann/json/tree/v3.10.0       | v3.10.0     |
 | cli11         | https://github.com/CLIUtils/CLI11/tree/v2.3.0       | v2.3.0      |
 | cpp-httplib   | https://github.com/yhirose/cpp-httplib/tree/v0.35.0 | v0.35.0     |
-| llama         | https://github.com/ggml-org/llama.cpp/tree/b9986    | b9986       |
+| llama         | https://github.com/qualcomm/llama.cpp/tree/7c371551f00b766f1262d716f72c18b4f3a9ecf4 | 7c371551    |
 | mnn           | https://github.com/alibaba/MNN/tree/3.3.0           | 3.3.0       |
 | stb           | https://github.com/nothings/stb                     | master      |
 | libsamplerate | https://github.com/libsndfile/libsamplerate.git     | master      |

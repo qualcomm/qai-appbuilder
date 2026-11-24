@@ -93,6 +93,75 @@ def infer_backend(model_name):
     return "qnn", "npu"
 
 
+GGUF_CASES = {
+    "gpu": ({"device": "gpu"}, "gpu", None),
+    "cpu": ({"device": "cpu"}, "cpu", None),
+    "npu": ({"device": "gpu", "devices": "npu"}, "npu", None),
+    "npu_legacy": ({"device": "npu"}, "npu", None),
+    "list": ({"device": "gpu", "devices": ["npu", "gpu"]}, None, "must be a plain string"),
+    "invalid": ({"device": "gpu", "devices": "tpu"}, None, "unsupported device 'tpu'"),
+}
+
+
+def parse_gguf_devices(value):
+    """解析 --gguf_devices：逗号分隔的 GGUF_CASES 用例名（config 片段、期望的首选设备、加载前报错标记），
+    'both' 等价于 gpu,cpu。返回去重后保持顺序的用例元组。"""
+    if value.strip().lower() == "both":
+        return ("gpu", "cpu")
+    cases = []
+    for item in (v.strip().lower() for v in value.split(",")):
+        if item not in GGUF_CASES:
+            raise argparse.ArgumentTypeError(
+                f"非法的 --gguf_devices 取值 '{item}'，可选 {', '.join(GGUF_CASES)}，多个用例用 ',' 分隔")
+        if item not in cases:
+            cases.append(item)
+    return tuple(cases)
+
+
+def evaluate_gguf_device_result(requested, actual_device, actual_effective, degrade_logged):
+    """判定一次 GGUF 单设备加载的结果，返回 (device_ok, npu_degraded, fallback_note)。
+    devices 只选一个，放不下按 gpu→npu→cpu / npu→gpu→cpu 顺序溢出，最后全放 cpu：
+    cpu 必须只用 cpu；gpu 的 devices_effective 以 gpu 开头（后面可追加溢出设备），或最终全落到 cpu；
+    npu 以 npu 开头；落到 gpu 开头或全 cpu 只在服务日志有 HTP0 缺失的降级告警（degrade_logged）时才算通过。溢出与降级事实写进 fallback_note。"""
+    if not actual_effective or actual_device != actual_effective[0]:
+        return False, False, ""
+    if not set(actual_effective) <= {"npu", "gpu", "cpu"} or len(set(actual_effective)) != len(actual_effective):
+        return False, False, ""
+    if requested == "cpu":
+        return actual_effective == ["cpu"], False, ""
+    kept_primary = actual_effective[0] == requested
+    fell_to_cpu = actual_effective == ["cpu"]
+    allowed_first = {"gpu"} if requested == "gpu" else {"npu", "gpu"}
+    device_ok = fell_to_cpu or actual_effective[0] in allowed_first
+    npu_degraded = requested == "npu" and not kept_primary
+    device_ok = device_ok and (not npu_degraded or degrade_logged)
+    fallback_note = ""
+    if npu_degraded:
+        fallback_note += f"；npu 未保留，降级为 {'+'.join(actual_effective)}"
+        if not degrade_logged:
+            fallback_note += "，但服务日志没有 HTP0 缺失的降级告警"
+    elif len(actual_effective) > 1:
+        fallback_note += f"；放不下，溢出为 {'+'.join(actual_effective)}"
+    elif not kept_primary:
+        fallback_note += f"；{requested} 加载失败，降级为 {actual_effective[0]}"
+    return device_ok, npu_degraded, fallback_note
+
+
+def evaluate_gguf_slots(model_name, actual_effective, slots):
+    """核对 /v2/status 的 slots 与 devices_effective 是否一致：被该模型占用的槽位集合必须恰好等于
+    devices_effective（槽位按 devices_effective 如实占用）。返回 (ok, occupied_sorted, note)；
+    服务未回报 devices_effective 或 slots 缺失时返回 (None, [], 原因)，调用方据此不判失败。"""
+    if not actual_effective:
+        return None, [], "服务未回报 devices_effective，跳过槽位核对"
+    if not isinstance(slots, list):
+        return None, [], "/v2/status 没有 slots 数组，跳过槽位核对"
+    occupied = sorted({str(s.get("device", "")).lower() for s in slots
+                       if isinstance(s, dict) and s.get("is_loaded") and s.get("model") == model_name})
+    expected = sorted(set(actual_effective))
+    ok = occupied == expected
+    return ok, occupied, ("" if ok else f"槽位占用 {occupied} 与 devices_effective {expected} 不一致")
+
+
 # 纯文本 chat 请求的 3 种 content 格式，按轮次轮流使用，让回归覆盖到服务端支持的全部输入方式，
 # 而不是只测最常见的一种。对应关系（详见 examples/GenieAPIClient/GenieAPIClient.cpp 与
 # ModelInputBuilder::ProcessArray/ProcessObject）：

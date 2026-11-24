@@ -388,9 +388,6 @@ if (MSVC)
         list(APPEND EXTERNAL_BIN ${CMAKE_BINARY_DIR}/adreno-opencl-kernels-src/adreno-opencl-kernels.dll)
 
         # ggml-cpu 后端在 ARM64 上不支持 MSVC(cl.exe),需要 Clang,与 MNN 保持一致的 Ninja + clang-cl 工具链
-        # Libllama.cpp 改为从 Qualcomm fork(github.com/qualcomm/llama.cpp)拉取并 pin 到固定 commit，
-        # 承载该 fork 新增的投机解码(speculative decoding)API；与 Libmbedtls 一致，把源码 clone 到
-        # 独立的 <name>-src 目录，不再复用静态 vendor 的 ${G_EXTERNAL_DIR}/llama.cpp。
         set(KLEIDIAI_SRC_DIR ${CMAKE_BINARY_DIR}/kleidiai-src)
         ExternalProject_Add(KleidiAISrc
                 GIT_REPOSITORY https://github.com/ARM-software/kleidiai.git
@@ -403,10 +400,8 @@ if (MSVC)
                 INSTALL_COMMAND ""
         )
 
-        set(LLAMACPP_SRC_DIR ${CMAKE_BINARY_DIR}/llama-cpp-src)
+        set(LLAMACPP_SRC_DIR ${G_EXTERNAL_DIR}/llama.cpp)
         ExternalProject_Add(Libllama.cpp
-                URL https://codeload.github.com/qualcomm/llama.cpp/zip/7c371551f00b766f1262d716f72c18b4f3a9ecf4
-                DOWNLOAD_EXTRACT_TIMESTAMP TRUE
                 SOURCE_DIR ${LLAMACPP_SRC_DIR}
                 BINARY_DIR ${CMAKE_BINARY_DIR}/llama-cpp-build
                 DEPENDS OpenCLICDLoader KleidiAISrc

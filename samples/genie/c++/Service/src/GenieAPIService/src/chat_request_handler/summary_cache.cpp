@@ -24,7 +24,6 @@ void SummaryCache::Configure(const PromptOptimizationConfig::LongTextSummaryCach
     max_memory_bytes_  = cfg.max_memory_mb > 0
                          ? static_cast<size_t>(cfg.max_memory_mb) * 1024 * 1024
                          : 50ULL * 1024 * 1024;
-    ttl_minutes_       = cfg.ttl_minutes > 0 ? cfg.ttl_minutes : 60;
 
     cache_.clear();
     lru_list_.clear();
@@ -44,8 +43,6 @@ bool SummaryCache::Lookup(const std::string& content, std::string& summary)
     if (!enabled_) return false;
 
     std::lock_guard<std::mutex> lock(mutex_);
-
-    EvictExpired();
 
     CacheKey key = MakeKey(content);
     auto it = cache_.find(key);
@@ -93,7 +90,6 @@ void SummaryCache::Put(const std::string& content, const std::string& summary)
     Entry entry;
     entry.summary      = summary;
     entry.original_len = content.size();
-    entry.created      = std::chrono::steady_clock::now();
 
     entry.memory_bytes = sizeof(CacheKey) + summary.size() + sizeof(Entry) + 64;
 
@@ -114,31 +110,6 @@ size_t SummaryCache::Size() const
 {
     std::lock_guard<std::mutex> lock(mutex_);
     return cache_.size();
-}
-
-void SummaryCache::EvictExpired()
-{
-
-    auto now = std::chrono::steady_clock::now();
-    auto ttl = std::chrono::minutes(ttl_minutes_);
-
-    auto it = lru_list_.end();
-    while (it != lru_list_.begin())
-    {
-        --it;
-        auto cache_it = cache_.find(*it);
-        if (cache_it == cache_.end())
-        {
-            it = lru_list_.erase(it);
-            continue;
-        }
-        if (now - cache_it->second.first.created >= ttl)
-        {
-            total_memory_bytes_ -= cache_it->second.first.memory_bytes;
-            cache_.erase(cache_it);
-            it = lru_list_.erase(it);
-        }
-    }
 }
 
 void SummaryCache::EvictIfNeeded()

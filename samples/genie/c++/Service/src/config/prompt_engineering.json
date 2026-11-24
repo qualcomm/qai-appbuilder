@@ -4,11 +4,13 @@
     "_version": "1.0",
 
     "generation_repeat_guard": {
-        "_comment": "单次生成内的退化 token 循环防护：检测到重复周期后暂存后续 token，确认重复时提前结束并回滚 KV；不影响正常生成",
+        "_comment": "单次生成内的退化 token 循环防护：token 先正常输出，只有尾部同一 token 块连续重复至少 3 次、且重复区的 UTF-8 字符数达到 min_span_bytes 时才判定为死循环并停止生成（不回滚 KV、不暂存 token）；数字 1000/1111、版本号、分隔线等短的合法重复不会触发。停止后对外 finish_reason=length，请求层会先用纠偏消息自动重试一次",
         "_comment_enabled": "true=启用（默认），false=关闭本次生成内退化循环防护",
         "enabled": true,
-        "_comment_max_period_tokens": "检测的最大重复周期长度，默认48；只检测尾部两个完全相同的 token 块",
-        "max_period_tokens": 48
+        "_comment_max_period_tokens": "检测的最大重复周期长度（token 数），默认128；超过该周期的循环不检测，由输出上限兜底",
+        "max_period_tokens": 128,
+        "_comment_min_span_bytes": "重复区的 UTF-8 字符数触发下限（键名 min_span_bytes 为历史命名，单位已是字符），默认256；周期为 1 个 token 时取其一半。多字节字符（如 ═、中文）按一个字符计，不会因字节数大而提前误杀分隔线；调大更不容易误杀合法的长重复，调小更早拦下真循环",
+        "min_span_bytes": 256
     },
 
     "adaptive_thinking": {
@@ -51,8 +53,10 @@
             "hard_block_threshold": 3,
             "_comment_hard_block_stop_after": "同一签名累计被硬拦达到该次数后，降级正文改为明确收尾说明、finish_reason 改为 stop（而不是 length）。原因：本地模型的客户端会对 length 自动续跑，若不收尾则会对同一个被拦动作无限续跑。默认 2；0 表示始终用 length",
             "hard_block_stop_after": 2,
-            "_comment_soft_retry_enabled": "软拦（发前隐形重试）的独立开关，默认 false。硬拦不需要额外推理、零 KV 代价所以默认开；软拦要多付一次全量 prefill，且当前代码层没有「保护/恢复前缀快照」的公开接口，scratch 请求的快照会顶掉原快照、使下一轮真实请求的前缀复用归零。真机 token 级 KV 回归验证通过前保持 false；关闭时 internal_retry_threshold 不起作用，闸门只有「放行/硬拦」两态，功能性保证（结果相同的动作最多执行两次）不变",
+            "_comment_soft_retry_enabled": "软拦（第 2 次尝试就隐形重试）的独立开关，默认 false。第 2 次尝试可能是正当的重跑（改完再查），此时只有一次观察，软拦却会告诉模型「结果没变」；放行分支也没有「已坚持过」标记。重试请求本身不存前缀检查点，KV 不是障碍。关闭时 internal_retry_threshold 不起作用，闸门只有「放行/即将硬拦时重试（见 hard_block_retry_enabled）/硬拦」，功能性保证（结果相同的动作最多执行两次）不变",
             "soft_retry_enabled": false,
+            "_comment_hard_block_retry_enabled": "即将硬拦时先隐形重试一次：把被拦调用连同账本里的旧结果放进工具结果槽位，让模型当场重新选择；换了动作就静默继续任务，仍是同一调用才按原逻辑硬拦。重试请求不存前缀检查点（复用已有检查点，之后缓存状态与不重试时一致），代价约一次几百 token 的预填加一次短生成；没有可复用检查点时放弃重试。与软拦不同，它只在已经确定要拦时触发，不影响正当的第二次调用。每个请求的额外重试额度与 mimicry、Layer2 共用。默认 true；false 恢复为直接硬拦",
+            "hard_block_retry_enabled": true,
             "_comment_max_signatures_per_entry": "单个（会话::模型）条目下最多记多少个签名；超限时按价值打分淘汰（未解决失败 > 累计次数高 > 最近触达），不按插入顺序 FIFO（FIFO 恰好会先丢掉反复失败的那条命令）。默认 256",
             "max_signatures_per_entry": 256,
             "_comment_note_min_interval_turns": "两次同类重复/重访提示之间的最小工具轮间隔（真节流状态，取代取模放行；取模一旦落在放行余数上会导致此后每轮逐字复读）。默认 4",
@@ -72,6 +76,20 @@
         "hint_text": "You are running on Windows. Shell/command-execution tools may route your command to either cmd.exe or PowerShell. cmd.exe: chain with && or ||, read variables as %VAR%, escape quotes as \"\". PowerShell: chain with ;, read variables as $env:VAR, nested quotes need escaping or single-quoting. If a command fails with a shell syntax error, retry using the other shell's syntax. Your command already runs inside a shell: write it directly in PowerShell, never wrapping it in another shell nor mixing cmd syntax in: Write-Output (\"os=\"+$env:OS). Nested quotes must differ from the outer: python -c \"import platform;print('m='+platform.machine())\". Needing two levels means write the script to a file and run it. List files with Get-ChildItem -Name or -Recurse -Filter *.py, not dir /b or /s /b. wmic is gone; use cmdlets."
     },
 
+    "qnn_prefix_cache": {
+        "_comment": "QNN/Genie 跨请求前缀 KV 复用（检查点存取，GenieDialog_save/restore）：在 ChatML 消息边界把提示词前缀的 KV 存盘，命中后只预填后缀；仅对满足条件的 QNN 模型生效（非多模态、非 eaglet/SSD 前缀、无水印、ChatML 模板），其余模型保持每请求全量预填。生效时驱逐迟滞等依赖前缀稳定的机制随之对 QNN 启用",
+        "_comment_enabled": "true=启用（默认），false=完全关闭检查点，行为回到每请求全量预填",
+        "enabled": true,
+        "_comment_max_total_mb": "整个 root（dir 下的 qnn_prefix_cache 子目录）的字节预算（MB），只用于清理空闲目录：已卸载模型、或键已变（模型文件、LoRA、上下文长度变化）的模型留下的目录，超出时按目录 mtime 从最老的整目录删除；每个活跃模型各自的目录按此值计，不会被其他模型挤掉。8K 上下文满载时单个检查点约 600 MB，大上下文模型字节预算先于条数生效；多个 QNN 模型来回切换时需调大，否则已卸载模型的检查点会在下次加载时被清掉",
+        "max_total_mb": 3072,
+        "_comment_max_checkpoints": "整个 root 的检查点条数上限，语义同 max_total_mb：用于清理空闲（已卸载或键已变）模型的目录，每个活跃模型各自的目录按此值计并在目录内按 LRU 淘汰、head 检查点优先保留；多个 QNN 模型来回切换时需调大",
+        "max_checkpoints": 6,
+        "_comment_tail_fallback": "true=额外保存「末条消息之前」的检查点，同前缀换尾时可回退命中（默认）；false=不保存",
+        "tail_fallback": true,
+        "_comment_dir": "检查点根目录，空=服务根目录；实际存放在其下自动追加的专用子目录 qnn_prefix_cache 里，清理只处理该子目录中名字为「32 位十六进制-数字」的上下文目录，其它文件和目录不会被动；不要指向模型目录",
+        "dir": ""
+    },
+
     "debug": {
         "_comment": "本地调试与诊断开关（规则命中日志 log_rule_matches 属于安全检测模块自身的调试项，已归位到 service_config.json 的 routing.sensitivity_detection.debug_log_matches，不在此文件）",
         "_comment_status_update_content_visible": "true=状态更新消息（preparing/inference/tool_call 等）同时将描述文字写入 delta.content，客户端可在对话界面看到状态提示；false=delta.content 为空，客户端不显示状态文字（仅用于保活连接）",
@@ -82,6 +100,12 @@
 
     "prompt_optimization": {
         "_comment": "Prompt 优化与分级压缩配置，控制历史消息的保留与压缩策略",
+        "fidelity": {
+            "_comment_eviction_low_water_ratio": "驱逐低水位比例（占消息预算），仅 GGUF 前缀缓存生效；0.5 为旧行为，降低它会每次驱逐留下更少历史、驱逐更少次但每次保留的原文更少",
+            "eviction_low_water_ratio": 0.3,
+            "_comment_full_section_map": "备忘录已读文件栏：true=先保证章节地图完整（标题缩到 10 字符、必要时均匀抽稀并标注 N of M），剩余预算再给页区间摘要；false=旧行为",
+            "full_section_map": true
+        },
 
         "skill_catalog_format": "structured",
         "enable_skill_auto_correction": true,
@@ -165,9 +189,7 @@
                 "_comment_max_entries": "最大缓存条目数；达到上限时淘汰最旧条目；默认 500",
                 "max_entries": 500,
                 "_comment_max_memory_mb": "缓存最大内存占用（MB）；超出时淘汰最旧条目；默认 50",
-                "max_memory_mb": 50,
-                "_comment_ttl_minutes": "缓存条目 TTL（分钟）；超时后自动失效；代码内默认 60，此处显式调高到 180 以覆盖长任务全程（同一份超长内容在一轮任务内相隔 90 分钟以上被重复摘要时，60 分钟 TTL 会在第二次查询前把条目清掉，白白重跑一次 map/reduce）",
-                "ttl_minutes": 180
+                "max_memory_mb": 50
             }
         },
 

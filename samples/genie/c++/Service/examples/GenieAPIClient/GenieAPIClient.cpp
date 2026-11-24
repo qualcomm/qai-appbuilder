@@ -29,6 +29,7 @@ public:
     std::string model{"IBM-Granite-v3.1-8B"};
     std::string raw_file_;
     bool stream{false};
+    bool api_v2{false};
     std::string host{"127.0.0.1:8910"};
     std::string key_;
     std::string bench_;
@@ -76,6 +77,8 @@ void CLI::Init(int argc, CharT **argv)
         CharT *arg = argv[i];
         if (ArgToString(arg) == "--stream")
             cli_info.stream = true;
+        else if (ArgToString(arg) == "--v2")
+            cli_info.api_v2 = true;
         else if (ArgToString(arg) == "--prompt" && i + 1 < argc)
             cli_info.prompt = ArgToString(argv[++i]);
         else if (ArgToString(arg) == "--system" && i + 1 < argc)
@@ -95,7 +98,8 @@ void CLI::Init(int argc, CharT **argv)
         else if (ArgToString(arg) == "--bench")
             cli_info.bench_ = ArgToString(argv[++i]);
     }
-    SVR_URL = std::string{"http://"} + cli_info.host + "/v1/chat/completions";
+    SVR_URL = std::string{"http://"} + cli_info.host
+            + (cli_info.api_v2 ? "/v2/chat/completions" : "/v1/chat/completions");
     My_Log{} << "url path: " << SVR_URL << "\n";
 }
 
@@ -260,8 +264,9 @@ std::string Do(const std::string &body)
     {
         try
         {
-            full_response = json::parse(message).dump(4);
-            const auto &msg = json::parse(message)["choices"][0]["message"];
+            json response_json = json::parse(message);
+            full_response = response_json.dump(4);
+            const auto &msg = response_json["choices"][0]["message"];
             if (msg.contains("reasoning_content") && msg["reasoning_content"].is_string())
             {
                 My_Log{} << "[Thinking]\n" << msg["reasoning_content"].get<std::string>() << "\n[Answer]\n";
@@ -340,6 +345,15 @@ void BuildUserContentV2(json &j_system, json &j_user)
         img_item["image_url"] = json::object();
         img_item["image_url"]["url"] = "data:image/png;base64," + EncodeBinary(cli_info.picture_path_);
         j_user.push_back(img_item);
+    }
+
+    if (!cli_info.audio_path_.empty())
+    {
+        json audio_item;
+        audio_item["type"] = "input_audio";
+        audio_item["input_audio"] = json::object();
+        audio_item["input_audio"]["data"] = EncodeBinary(cli_info.audio_path_);
+        j_user.push_back(audio_item);
     }
 
     j_system = json::array();
