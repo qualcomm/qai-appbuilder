@@ -275,7 +275,8 @@ def test_cl100k_spec_matches_what_tiktoken_declares() -> None:
     assert CL100K_BASE.pat_str in src
     for name, rank in CL100K_BASE.special_tokens.items():
         assert str(rank) in src, name
-    assert tiktoken_cache_key(CL100K_BASE.url) == hashlib.sha1(CL100K_BASE.url.encode()).hexdigest()
+    expected = hashlib.sha1(CL100K_BASE.url.encode(), usedforsecurity=False).hexdigest()  # nosemgrep
+    assert tiktoken_cache_key(CL100K_BASE.url) == expected
 
 
 def test_app_builder_copy_is_identical() -> None:

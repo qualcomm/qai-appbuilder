@@ -109,7 +109,8 @@ CL100K_BASE = EncodingSpec(
 
 def tiktoken_cache_key(url: str) -> str:
     """The file name tiktoken uses for ``url`` inside ``TIKTOKEN_CACHE_DIR``."""
-    return hashlib.sha1(url.encode()).hexdigest()  # noqa: S324 - cache key, not security
+    # tiktoken names its cache file sha1(url), so we must match it; not a security use.
+    return hashlib.sha1(url.encode(), usedforsecurity=False).hexdigest()  # noqa: S324  # nosemgrep
 
 
 def load_ranks(path: str | os.PathLike[str]) -> dict[bytes, int]:
@@ -355,7 +356,7 @@ def fetch_vocab(
         total = 0
         fd, tmp_name = tempfile.mkstemp(dir=dest_dir, prefix=".bpe-", suffix=".part")
         try:
-            with os.fdopen(fd, "wb") as out, urllib.request.urlopen(  # noqa: S310 - fixed https URL
+            with os.fdopen(fd, "wb") as out, urllib.request.urlopen(  # noqa: S310  # nosemgrep
                 spec.url, timeout=timeout
             ) as resp:
                 while True:
