@@ -28,15 +28,13 @@
 > introduction — [docs/Introduction.md](docs/Introduction.md).
 >
 > **On Windows**, just download the EXE installer (`*-setup.exe`, available for ARM64 and x64)
-> from the release page and run it — no manual environment setup is needed.
+> from the [release page](https://github.com/qualcomm/qai-appbuilder/releases/tag/v3.2.0) and run it — no manual environment setup is needed.
 >
-> **On Linux**, download the `*-linux.tar.gz` package from the release page, extract it, then run
+> **On Linux**, download the `*-linux.tar.gz` package from the [release page](https://github.com/qualcomm/qai-appbuilder/releases/tag/v3.2.0), extract it, then run
 > `bash setup.sh` (one-time environment setup) followed by `bash start.sh` to launch the WebUI.
 
 <div align="center">
-  <a href="https://github.com/qualcomm/qai-appbuilder/releases/tag/v3.2.0"><img src="https://img.shields.io/badge/Download-QAI%20AppBuilder%20v3.2.0-2ea44f?style=for-the-badge" alt="Download QAI AppBuilder"></a>
-  &nbsp;&nbsp;
-  <a href="https://github.com/qualcomm/qai-appbuilder/tree/main/tools/qaiappbuilder"><img src="https://img.shields.io/badge/Browse%20Source-tools/qaiappbuilder-24292e?style=for-the-badge&logo=github" alt="Browse QAI AppBuilder source code"></a>
+  <a href="https://github.com/qualcomm/qai-appbuilder/releases/tag/v3.2.0"><img src="https://img.shields.io/badge/%E2%AC%87%20Download-QAI%20AppBuilder%20v3.2.0-2ea44f?style=for-the-badge&logo=github&logoColor=white" alt="Download QAI AppBuilder v3.2.0" height="64"></a>
 </div>
 
 <br>
