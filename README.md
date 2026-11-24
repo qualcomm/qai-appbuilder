@@ -34,7 +34,7 @@
 > `bash setup.sh` (one-time environment setup) followed by `bash start.sh` to launch the WebUI.
 
 <div align="center">
-  <a href="https://github.com/qualcomm/qai-appbuilder/releases/tag/v3.2.0"><img src="https://img.shields.io/badge/%E2%AC%87%20Download-QAI%20AppBuilder%20v3.2.0-2ea44f?style=for-the-badge&logo=github&logoColor=white" alt="Download QAI AppBuilder v3.2.0" height="64"></a>
+  <a href="https://github.com/qualcomm/qai-appbuilder/releases/tag/v3.2.0"><img src="https://img.shields.io/badge/%E2%AC%87%20Download-QAI%20AppBuilder%20v3.2.0-2ea44f?style=for-the-badge&logo=github&logoColor=white" alt="Download QAI AppBuilder v3.2.0" width="420" height="56"></a>
 </div>
 
 <br>
