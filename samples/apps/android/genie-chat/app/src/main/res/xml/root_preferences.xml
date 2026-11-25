@@ -32,7 +32,7 @@
             app:key="temperature"
             app:title="温度 (Temperature)"
             app:summary="控制生成的随机性，值越高越随机"
-            app:defaultValue="150"
+            app:defaultValue="70"
             android:min="0"
             android:max="200"
             app:showSeekBarValue="true" />
@@ -40,7 +40,7 @@
             app:key="top_p"
             app:title="Top P"
             app:summary="控制生成文本的多样性"
-            app:defaultValue="60"
+            app:defaultValue="80"
             android:min="0"
             android:max="100"
             app:showSeekBarValue="true" />
@@ -48,7 +48,7 @@
             app:key="top_k"
             app:title="Top K"
             app:summary="限制下一个词的选择范围"
-            app:defaultValue="13"
+            app:defaultValue="40"
             android:min="1"
             android:max="50"
             app:showSeekBarValue="true" />

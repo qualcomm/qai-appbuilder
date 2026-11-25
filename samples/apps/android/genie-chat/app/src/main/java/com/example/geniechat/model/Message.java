@@ -71,6 +71,15 @@ public class Message {
         }
     }
 
+    /** Used when restoring persisted messages. */
+    public Message(String text, boolean isSentByUser, Status status, long timestamp) {
+        this.text = text;
+        this.isSentByUser = isSentByUser;
+        this.status = status;
+        this.timestamp = timestamp;
+        this.attachments = new ArrayList<>();
+    }
+
     public long getTimestamp() {
         return timestamp;
     }
