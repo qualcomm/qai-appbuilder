@@ -59,7 +59,8 @@ DEFAULT_OFF = {"code-assist", "ppt-gen"}
 DEFAULT_BOTH = {"model-builder", "model-hub"}
 # Skills that must always ship; guards against a skill being deleted by mistake (the full list is discovered from disk below).
 CORE_SKILLS = {"app-builder", "model-builder", "model-hub", "weather"}
-SKILL_KEYS = {"skill_id", "name", "description", "icon", "tags", "use_for", "skill_path", "npu_optimized", "mode", "enabled", "pinned", "display_name"}
+# ``source``: "" for the app's own skills, "extension:<name>" for a user-extension skill.
+SKILL_KEYS = {"skill_id", "name", "description", "icon", "tags", "use_for", "skill_path", "npu_optimized", "mode", "enabled", "pinned", "display_name", "source"}
 SKILL_DIRS = (REPO_ROOT / "skills", REPO_ROOT / "factory" / "chat_features")
 
 

@@ -33,7 +33,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from qai.platform.skills import SkillDiscovery, parse_skill_metadata
+from qai.platform.skills import ContributedSkillRoot, SkillDiscovery, parse_skill_metadata
 from qai.security.application.security_runtime_state import (
     SecurityRuntimeStateService,
 )
@@ -445,10 +445,16 @@ class SkillDiscoveryUseCase:
         runtime_state: SecurityRuntimeStateService,
         repo_root: Path,
         skill_mode_provider: SkillModeProvider | None = None,
+        extra_skill_roots: Callable[[], Sequence[ContributedSkillRoot]] | None = None,
     ) -> None:
         self._registry = registry
         self._state = runtime_state
         self._repo_root = repo_root
+        # Injected: skill roots contributed at runtime (user extensions),
+        # scanned AFTER the app's own roots so an app skill keeps its entry.
+        # A provider, not a list: the contributors are wired after this use
+        # case is built. The security context never imports who provides them.
+        self._extra_skill_roots = extra_skill_roots
         # Injected: returns the WHOLE ``skill_id -> mode`` mapping in one
         # call. The value lives in the ``forge.config`` document's
         # ``skills.overrides`` (a ``user_prefs`` concern), so the security
@@ -545,6 +551,18 @@ class SkillDiscoveryUseCase:
             skills_list,
             by_name,
         )
+        # Runtime-contributed roots (user extensions): agent skills, so they
+        # land in the skills bucket the panel already renders. Only ADD
+        # entries: an id the app already lists keeps its own entry.
+        for root in self._contributed_roots():
+            self._scan_fs_dir(
+                root.path,
+                "skills",
+                skills_list,
+                by_name,
+                excluded=root.excluded,
+                add_only=True,
+            )
 
         # Backfill the run mode once the full skill set is known. Resolving it
         # up front would only cover the skills that HAVE a persisted override;
@@ -611,17 +629,42 @@ class SkillDiscoveryUseCase:
         skills_list.append(entry)
         by_name[skill_name] = entry
 
+    def _contributed_roots(self) -> tuple[ContributedSkillRoot, ...]:
+        if self._extra_skill_roots is None:
+            return ()
+        try:
+            return tuple(self._extra_skill_roots())
+        except Exception:  # noqa: BLE001 - never break the panel
+            return ()
+
     def _scan_fs_dir(
         self,
         root: Path,
         source_label: str,
         skills_list: list[dict[str, object]],
         by_name: dict[str, dict[str, object]],
+        *,
+        excluded: tuple[Path, ...] = (),
+        add_only: bool = False,
     ) -> None:
-        """Add filesystem-discovered skills not already in ``by_name``."""
-        disc = SkillDiscovery(root)
+        """Add filesystem-discovered skills not already in ``by_name``.
+
+        ``add_only``: never touch an entry that already exists (used for
+        contributed roots, whose same-id copies are refused upstream).
+        """
+        if excluded:
+            disc = SkillDiscovery(
+                [],
+                contributed_roots=lambda: [
+                    ContributedSkillRoot(path=root, source="", excluded=excluded)
+                ],
+            )
+        else:
+            disc = SkillDiscovery(root)
         for skill_info in disc.scan():
             sname = skill_info.skill_id
+            if sname in by_name and add_only:
+                continue
             if sname in by_name:
                 # Already present from registry or overrides; update the
                 # source label if it was classified differently. Backfill

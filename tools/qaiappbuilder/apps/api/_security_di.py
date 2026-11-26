@@ -170,6 +170,7 @@ from qai.security.infrastructure.skill_injection_scanner import (
 )
 
 from ._reboot_scheduler import SecurityRebootSignalAdapter
+from ._user_extensions_di import extension_skill_roots
 
 if TYPE_CHECKING:  # pragma: no cover
     from .di import Container
@@ -1039,6 +1040,9 @@ def build_security_services(container: Container) -> SecurityServices:
         runtime_state=security_runtime_state,
         repo_root=container.repo_root,
         skill_mode_provider=_skill_mode_provider,
+        # User-extension skills also appear on the Security > Skill panel, so
+        # it lists the same skills as the Skills page (read per request).
+        extra_skill_roots=lambda: extension_skill_roots(container),
     )
     get_skill_policy = GetSkillPolicyUseCase(
         registry=skill_capability_registry,

@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
@@ -95,7 +96,38 @@ def resolve_skill_mode(
         enabled = override.get("enabled")
         if isinstance(enabled, bool):
             return "cloud" if enabled else "off"
-    return DEFAULT_SKILL_MODES.get(skill_id, "cloud")
+    if skill_id in DEFAULT_SKILL_MODES:
+        return DEFAULT_SKILL_MODES[skill_id]
+    return _contributed_default_modes().get(skill_id, "cloud")
+
+
+#: Default modes CONTRIBUTED at runtime (user extensions' ``skills[].default_mode``),
+#: consulted after :data:`DEFAULT_SKILL_MODES` so a built-in default always wins.
+#: A provider (not a dict) so the composition root can bind a live view that
+#: follows extension loads without this module knowing about extensions.
+_contributed_default_modes: Callable[[], Mapping[str, str]] = dict
+
+
+def set_contributed_default_modes(provider: Callable[[], Mapping[str, str]] | None) -> None:
+    """Bind (or with ``None`` clear) the provider of runtime default modes.
+
+    Only valid modes are honoured; anything else falls through to ``cloud``.
+    """
+    global _contributed_default_modes  # noqa: PLW0603 - single process-wide binding
+
+    if provider is None:
+        _contributed_default_modes = dict
+        return
+
+    def _valid() -> Mapping[str, str]:
+        try:
+            raw = provider()
+        except Exception:  # a broken provider must not break mode resolution
+            logger.warning("skills.contributed_default_modes_failed", exc_info=True)
+            return {}
+        return {k: v for k, v in raw.items() if v in VALID_MODES}
+
+    _contributed_default_modes = _valid
 
 
 # ── YAML front-matter parser (no external dep; v1 parity) ──────────────────
@@ -214,6 +246,10 @@ class SkillInfo:
     mode: str = "cloud"
     pinned: bool = False
     display_name: str = ""
+    #: Who provides the skill: ``""`` for the app's own roots (user-installed
+    #: or built-in, unchanged behaviour), ``"extension:<name>"`` for a skill a
+    #: user extension ships. Set by :class:`SkillDiscovery` from its source.
+    source: str = ""
 
     @property
     def enabled(self) -> bool:
@@ -235,7 +271,26 @@ class SkillInfo:
             "enabled": self.enabled,  # backward-compat
             "pinned": self.pinned,
             "display_name": self.display_name,
+            "source": self.source,
         }
+
+
+@dataclass(frozen=True, slots=True)
+class ContributedSkillRoot:
+    """A skills root contributed at runtime (e.g. by a user extension).
+
+    ``source`` is copied onto every :class:`SkillInfo` found under it.
+    ``excluded`` are absolute sub-paths to skip: a skill directory equal to
+    or inside one of them is not discovered.
+    """
+
+    path: Path
+    source: str
+    excluded: tuple[Path, ...] = ()
+
+
+def _is_excluded(path: Path, excluded: tuple[Path, ...]) -> bool:
+    return any(path == ex or ex in path.parents for ex in excluded)
 
 
 class SkillDiscovery:
@@ -250,13 +305,26 @@ class SkillDiscovery:
     ``scan()`` merges results in order: the first directory that defines a
     given ``skill_id`` wins (earlier directories take precedence).
     ``icon_path()`` searches directories in the same order.
+
+    ``contributed_roots`` (optional) is a zero-arg provider of
+    :class:`ContributedSkillRoot`, evaluated on EVERY call (so roots added
+    after construction are seen). Its roots come AFTER ``skills_dir``, so the
+    app's own skills always win an id collision. ``skills_dir`` /
+    ``skills_dirs`` keep reporting only the app's own roots: index 0 stays the
+    user-installed root that installers write to.
     """
 
-    def __init__(self, skills_dir: Path | list[Path]) -> None:
+    def __init__(
+        self,
+        skills_dir: Path | list[Path],
+        *,
+        contributed_roots: Callable[[], Sequence[ContributedSkillRoot]] | None = None,
+    ) -> None:
         if isinstance(skills_dir, list):
             self._dirs: list[Path] = [Path(d) for d in skills_dir]
         else:
             self._dirs = [Path(skills_dir)]
+        self._contributed = contributed_roots
 
     @property
     def skills_dir(self) -> Path:
@@ -265,8 +333,22 @@ class SkillDiscovery:
 
     @property
     def skills_dirs(self) -> list[Path]:
-        """All configured skills directories."""
+        """All configured skills directories (the app's own, not contributed)."""
         return list(self._dirs)
+
+    def contributed_roots(self) -> tuple[ContributedSkillRoot, ...]:
+        """The current contributed roots (empty when none / provider fails)."""
+        if self._contributed is None:
+            return ()
+        try:
+            return tuple(self._contributed())
+        except Exception:  # a broken provider must not hide app skills
+            logger.warning("skills.contributed_roots_failed", exc_info=True)
+            return ()
+
+    def _roots(self) -> list[ContributedSkillRoot]:
+        own = [ContributedSkillRoot(path=d, source="") for d in self._dirs]
+        return own + list(self.contributed_roots())
 
     def scan(self) -> list[SkillInfo]:
         """Discover all skills across all configured directories.
@@ -276,16 +358,18 @@ class SkillDiscovery:
         A missing directory yields an empty contribution (logged at WARNING).
         """
         seen: dict[str, SkillInfo] = {}
-        for skills_dir in self._dirs:
+        for root in self._roots():
+            skills_dir = root.path
             if not skills_dir.exists():
                 logger.warning("skills directory not found: %s", skills_dir)
                 continue
             count = 0
             for entry in sorted(skills_dir.iterdir()):
-                if not entry.is_dir():
+                if not entry.is_dir() or _is_excluded(entry, root.excluded):
                     continue
                 skill = self._parse_skill_dir(entry)
                 if skill is not None and skill.skill_id not in seen:
+                    skill.source = root.source
                     seen[skill.skill_id] = skill
                     count += 1
             logger.info("discovered %d skills from %s", count, skills_dir)
@@ -309,13 +393,14 @@ class SkillDiscovery:
             return None
         if "\x00" in skill_id:
             return None
-        for skills_dir in self._dirs:
+        for root in self._roots():
+            skills_dir = root.path
             skill_dir = skills_dir / skill_id
             try:
                 skill_dir.resolve().relative_to(skills_dir.resolve())
             except (ValueError, OSError):
                 continue
-            if not skill_dir.is_dir():
+            if not skill_dir.is_dir() or _is_excluded(skill_dir, root.excluded):
                 continue
             for ext in _ICON_EXTS:
                 candidate = skill_dir / f"icon{ext}"

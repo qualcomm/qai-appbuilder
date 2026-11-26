@@ -38,10 +38,17 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Final, Literal, Protocol
 
-from .manifest import ExtensionManifest, ManifestError, ToolDeclaration, load_manifest
+from .manifest import (
+    DEFAULT_SKILLS_DIR,
+    ExtensionManifest,
+    ManifestError,
+    ToolDeclaration,
+    load_manifest,
+)
 
 __all__ = [
     "ExtensionContractError",
+    "ExtensionSkillRoot",
     "ExtensionStatus",
     "RegisteredTool",
     "ToolSink",
@@ -108,6 +115,22 @@ class RegisteredTool:
     advertised: bool
 
 
+@dataclass(frozen=True, slots=True)
+class ExtensionSkillRoot:
+    """One loaded extension's ``skills/`` root, as the skill scanner needs it.
+
+    ``excluded`` are absolute sub-paths the scanner must skip: edition
+    exclusions, skill directories that escape the root through a link, and
+    skills refused because their id was already taken.
+    """
+
+    extension: str
+    path: Path
+    excluded: tuple[Path, ...]
+    skill_ids: tuple[str, ...]
+    default_modes: tuple[tuple[str, str], ...] = ()
+
+
 @dataclass(slots=True)
 class ExtensionStatus:
     """Operator-facing outcome of loading one extension directory."""
@@ -118,6 +141,7 @@ class ExtensionStatus:
     version: str = ""
     error: str = ""
     tools: tuple[str, ...] = ()
+    skills: tuple[str, ...] = ()
     warnings: list[str] = field(default_factory=list)
 
 
@@ -264,11 +288,21 @@ class UserExtensionContext:
 class UserExtensionHost:
     """Loads every extension under ``scan_root`` into a :class:`ToolSink`."""
 
-    def __init__(self, scan_root: Path, sink: ToolSink) -> None:
+    def __init__(
+        self,
+        scan_root: Path,
+        sink: ToolSink,
+        *,
+        taken_skill_ids: Callable[[], frozenset[str]] | None = None,
+    ) -> None:
+        """``taken_skill_ids`` returns the ids of the user / built-in skills; an
+        extension skill with one of those ids is refused (same rule as tools)."""
         self._scan_root = scan_root
         self._sink = sink
+        self._taken_skill_ids = taken_skill_ids or frozenset
         self._statuses: dict[str, ExtensionStatus] = {}
         self._tools: dict[str, RegisteredTool] = {}
+        self._skill_roots: dict[str, ExtensionSkillRoot] = {}
         self._modules: dict[str, list[str]] = {}
 
     @property
@@ -285,6 +319,19 @@ class UserExtensionHost:
 
     def tools_of_group(self, group: str) -> frozenset[str]:
         return frozenset(t.name for t in self._tools.values() if t.declaration.group == group)
+
+    def skill_roots(self) -> tuple[ExtensionSkillRoot, ...]:
+        """Skill roots of loaded extensions, sorted by extension name."""
+        return tuple(self._skill_roots[k] for k in sorted(self._skill_roots))
+
+    def skill_default_modes(self) -> dict[str, str]:
+        """``skill id -> skills[].default_mode`` across loaded extensions."""
+        out: dict[str, str] = {}
+        for root in self.skill_roots():
+            for skill_id, mode in root.default_modes:
+                if skill_id in root.skill_ids:
+                    out.setdefault(skill_id, mode)
+        return out
 
     def load_all(self) -> tuple[ExtensionStatus, ...]:
         for ext_dir in discover_extension_dirs(self._scan_root):
@@ -311,6 +358,7 @@ class UserExtensionHost:
             return status
         if manifest.python_package is None:
             status.state = "loaded"
+            self._commit_skills(manifest, status)
             return status
 
         ctx = UserExtensionContext(manifest, taken_names=self._sink.tool_names)
@@ -353,13 +401,28 @@ class UserExtensionHost:
         status.state = "loaded"
         status.tools = tuple(committed)
         status.warnings.extend(ctx.warnings)
+        self._commit_skills(manifest, status)
         return status
+
+    def _commit_skills(self, manifest: ExtensionManifest, status: ExtensionStatus) -> None:
+        """Record the extension's skill root (only for a LOADED extension)."""
+        claimed = {sid for r in self._skill_roots.values() for sid in r.skill_ids}
+        root = _collect_skills(
+            manifest,
+            taken=self._taken_skill_ids(),
+            claimed=frozenset(claimed),
+            warnings=status.warnings,
+        )
+        if root is not None:
+            self._skill_roots[manifest.name] = root
+            status.skills = root.skill_ids
 
     def unload_all(self) -> None:
         """Unregister every committed tool and forget imported modules."""
         for name in list(self._tools):
             self._sink.unregister(name)
         self._tools.clear()
+        self._skill_roots.clear()
         for modules in self._modules.values():
             _forget_modules(modules)
         self._modules.clear()
@@ -381,6 +444,80 @@ def discover_extension_dirs(scan_root: Path) -> list[Path]:
             continue
         out.append(entry)
     return out
+
+
+def _collect_skills(
+    manifest: ExtensionManifest,
+    *,
+    taken: frozenset[str],
+    claimed: frozenset[str],
+    warnings: list[str],
+) -> ExtensionSkillRoot | None:
+    """Resolve ``<ext>/<skills_dir>`` into an :class:`ExtensionSkillRoot`.
+
+    Mirrors ModelBuilder ``catalog._load_skills``: the root must resolve inside
+    the extension; a skill directory whose real path escapes the root (link /
+    junction) is excluded. Additionally (appbuilder naming rule, design doc
+    §4.2): a skill id already used by a user / built-in skill or by an earlier
+    extension is refused and excluded. ``None`` when there is no skills root.
+    """
+    decl = manifest.skills
+    ext_root = manifest.root.resolve()
+    skills_root = manifest.root / decl.skills_dir
+    if not skills_root.is_dir():
+        if decl.skills_dir != DEFAULT_SKILLS_DIR:  # an explicit dir that is missing
+            warnings.append(f"skills_dir {decl.skills_dir!r} does not exist")
+        return None
+    try:
+        confined = skills_root.resolve(strict=True)
+    except OSError:
+        return None
+    if not confined.is_relative_to(ext_root):
+        warnings.append(f"skills_dir {decl.skills_dir!r} resolves outside the extension; ignored")
+        return None
+
+    excluded = [manifest.root / rel for rel in decl.excluded]
+    ids: list[str] = []
+    try:
+        children = sorted(skills_root.iterdir())
+    except OSError as exc:
+        warnings.append(f"could not list skills_dir {decl.skills_dir!r}: {exc}")
+        return None
+    for child in children:
+        if not child.is_dir() or _under_any(child, excluded):
+            continue
+        if not ((child / "SKILL.md").is_file() or (child / "skill.json").is_file()):
+            continue
+        try:
+            inside = child.resolve(strict=True).is_relative_to(confined)
+        except OSError:
+            inside = False
+        if not inside:
+            warnings.append(f"skill {child.name!r} resolves outside skills_dir; ignored")
+            excluded.append(child)
+            continue
+        if child.name in taken or child.name in claimed:
+            warnings.append(
+                f"skill {child.name!r} refused: the id is already used by another skill"
+            )
+            excluded.append(child)
+            continue
+        if (child / "skill.policy.json").is_file():
+            warnings.append(
+                f"skill {child.name!r}: skill.policy.json is not supported yet and is ignored"
+            )
+        ids.append(child.name)
+    return ExtensionSkillRoot(
+        extension=manifest.name,
+        path=skills_root,
+        excluded=tuple(excluded),
+        skill_ids=tuple(ids),
+        default_modes=decl.default_modes,
+    )
+
+
+def _under_any(path: Path, roots: Iterable[Path]) -> bool:
+    return any(path == root or root in path.parents for root in roots)
 
 
 def _import_package(manifest: ExtensionManifest) -> ModuleType:

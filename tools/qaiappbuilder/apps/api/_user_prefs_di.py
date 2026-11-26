@@ -43,6 +43,8 @@ from qai.user_prefs.application.use_cases import (
     ToggleSkillUseCase,
 )
 
+from ._user_extensions_di import extension_skill_roots
+
 if TYPE_CHECKING:  # pragma: no cover
     from qai.platform.persistence.secrets import SecretStore
 
@@ -139,7 +141,13 @@ def build_user_prefs_services(container: Container) -> UserPrefsServices:
     repo = KvUserPrefsRepository(db=container.database)
     load_uc = LoadDocumentUseCase(repository=repo)
     save_uc = SaveDocumentUseCase(repository=repo)
-    skill_discovery = SkillDiscovery(_resolve_skills_dirs(container))
+    skill_discovery = SkillDiscovery(
+        _resolve_skills_dirs(container),
+        # User-extension skill roots: resolved per scan because the extension
+        # host is wired AFTER user_prefs (end of phase 2); appended after the
+        # app's own roots, so a user / built-in skill always wins an id clash.
+        contributed_roots=lambda: extension_skill_roots(container),
+    )
     # ``security.bind_host`` is the loopback bind default for an INTERNAL
     # forge-config service — it must stay a secure loopback (V1 parity:
     # always ``127.0.0.1``) and must NOT follow the public ``server.host``,

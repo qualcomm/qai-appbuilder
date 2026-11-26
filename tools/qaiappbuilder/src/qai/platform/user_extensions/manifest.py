@@ -34,10 +34,13 @@ from pathlib import Path
 from typing import Any, Final
 
 __all__ = [
+    "DEFAULT_SKILLS_DIR",
+    "HOST_EDITION",
     "MANIFEST_FILENAME",
     "SUPPORTED_API_VERSION",
     "ExtensionManifest",
     "ManifestError",
+    "SkillsDeclaration",
     "ToolDeclaration",
     "load_manifest",
     "parse_manifest",
@@ -56,6 +59,19 @@ _RESULT_CATEGORIES: Final[frozenset[str]] = frozenset(
     {"read", "query", "command", "subagent", "receipt", "exempt"}
 )
 _OUTPUT_KINDS: Final[frozenset[str]] = frozenset({"text", "dict", "envelope", "streaming"})
+
+#: ModelBuilder ``$defs.rel_path``: forward-slash relative path, no ``..``,
+#: no leading ``/`` or ``.`` segment.
+_REL_PATH_RE: Final[re.Pattern[str]] = re.compile(
+    r"^[A-Za-z0-9_-][A-Za-z0-9_.-]*(/[A-Za-z0-9_-][A-Za-z0-9_.-]*)*/?$"
+)
+_EDITIONS: Final[frozenset[str]] = frozenset({"internal", "external"})
+_SKILL_MODES: Final[frozenset[str]] = frozenset({"off", "cloud", "local", "both"})
+#: ModelBuilder ``skills_dir`` default.
+DEFAULT_SKILLS_DIR: Final[str] = "skills"
+#: The edition this host runs as: the extension framework targets the external
+#: build (design doc §1 / no ``IS_INTERNAL`` switch).
+HOST_EDITION: Final[str] = "external"
 
 #: Tool-declaration attributes stage 1 honours. Every other declared attribute
 #: is kept on :attr:`ToolDeclaration.unsupported` so it can be reported.
@@ -79,8 +95,6 @@ _UNSUPPORTED_CONTRIBUTES: Final[tuple[str, ...]] = (
 #: Top-level keys whose content stage 1 does not act on (accepted, warned).
 _UNSUPPORTED_TOP_LEVEL: Final[tuple[str, ...]] = (
     "frontend",
-    "skills_dir",
-    "skills",
     "agents_dir",
     "bootstrap",
     "secrets",
@@ -113,6 +127,21 @@ class ToolDeclaration:
 
 
 @dataclass(frozen=True, slots=True)
+class SkillsDeclaration:
+    """Where the extension's skills live and which are visible to this host.
+
+    Paths are relative to the extension root (forward slashes, validated).
+    ``excluded`` are sub-paths the running edition must not expose (from
+    ``skills[].editions`` and ``edition_paths``); ``default_modes`` maps a
+    skill id to its ``skills[].default_mode``.
+    """
+
+    skills_dir: str = DEFAULT_SKILLS_DIR
+    excluded: tuple[str, ...] = ()
+    default_modes: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class ExtensionManifest:
     """The parts of ``extension.json`` stage 1 acts on."""
 
@@ -123,6 +152,7 @@ class ExtensionManifest:
     root: Path
     python_package: str | None
     tools: tuple[ToolDeclaration, ...] = ()
+    skills: SkillsDeclaration = field(default_factory=SkillsDeclaration)
     #: Non-fatal notes (unsupported fields, ...), operator-facing.
     warnings: tuple[str, ...] = field(default_factory=tuple)
 
@@ -196,8 +226,73 @@ def parse_manifest(raw: Any, *, root: Path) -> ExtensionManifest:
         root=root,
         python_package=python_package,
         tools=tools,
+        skills=_parse_skills(raw),
         warnings=tuple(warnings),
     )
+
+
+def _parse_skills(raw: dict[str, Any]) -> SkillsDeclaration:
+    """``skills_dir`` + ``skills[]`` + ``edition_paths`` (ModelBuilder semantics).
+
+    ``skills[].dir`` must sit inside ``skills_dir``. An entry whose
+    ``editions`` omit :data:`HOST_EDITION` -- and every ``edition_paths`` key
+    whose editions omit it -- becomes an exclusion. ``default_mode`` is kept
+    only for entries visible to this edition.
+    """
+    skills_dir = _rel_path(raw.get("skills_dir", DEFAULT_SKILLS_DIR), label="skills_dir")
+    excluded: list[str] = []
+    default_modes: list[tuple[str, str]] = []
+
+    items = raw.get("skills") or []
+    if not isinstance(items, list):
+        raise ManifestError("skills must be an array")
+    for index, item in enumerate(items):
+        where = f"skills[{index}]"
+        if not isinstance(item, dict):
+            raise ManifestError(f"{where} must be an object")
+        _require(item, ("dir", "editions"), where=where)
+        rel = _rel_path(item["dir"], label=f"{where}.dir")
+        if rel != skills_dir and not rel.startswith(skills_dir + "/"):
+            raise ManifestError(f"{where}.dir {rel!r} must be inside skills_dir {skills_dir!r}")
+        editions = _editions(item["editions"], label=f"{where}.editions")
+        mode = item.get("default_mode")
+        if mode is not None:
+            _one_of(mode, _SKILL_MODES, f"{where}.default_mode")
+        if HOST_EDITION not in editions:
+            excluded.append(rel)
+        elif mode is not None:
+            default_modes.append((rel.rsplit("/", 1)[-1], mode))
+
+    edition_paths = raw.get("edition_paths") or {}
+    if not isinstance(edition_paths, dict):
+        raise ManifestError("edition_paths must be an object")
+    for key, value in edition_paths.items():
+        rel = _rel_path(key, label=f"edition_paths key {key!r}")
+        if HOST_EDITION not in _editions(value, label=f"edition_paths[{key!r}]"):
+            excluded.append(rel)
+
+    return SkillsDeclaration(
+        skills_dir=skills_dir,
+        excluded=tuple(dict.fromkeys(excluded)),
+        default_modes=tuple(default_modes),
+    )
+
+
+def _rel_path(value: Any, *, label: str) -> str:
+    if not isinstance(value, str) or not _REL_PATH_RE.match(value) or ".." in value.split("/"):
+        raise ManifestError(f"{label} {value!r} must be a relative path like 'skills/x'")
+    return value.rstrip("/")
+
+
+def _editions(value: Any, *, label: str) -> frozenset[str]:
+    if (
+        not isinstance(value, list)
+        or not value
+        or len(set(value)) != len(value)
+        or any(v not in _EDITIONS for v in value)
+    ):
+        raise ManifestError(f"{label} must be a non-empty list of 'internal' / 'external'")
+    return frozenset(value)
 
 
 def _require(entry: dict[str, Any], keys: tuple[str, ...], *, where: str) -> None:

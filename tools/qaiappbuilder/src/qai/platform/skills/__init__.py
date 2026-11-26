@@ -27,10 +27,12 @@ from qai.platform.skills.discovery import (
     DEFAULT_SKILL_MODES,
     LOCAL_VISIBLE_MODES,
     VALID_MODES,
+    ContributedSkillRoot,
     SkillDiscovery,
     SkillInfo,
     parse_skill_metadata,
     resolve_skill_mode,
+    set_contributed_default_modes,
 )
 from qai.platform.skills.placeholders import (
     expand_skill_placeholders,
@@ -44,6 +46,7 @@ __all__ = [
     "DEFAULT_SKILL_MODES",
     "LOCAL_VISIBLE_MODES",
     "VALID_MODES",
+    "ContributedSkillRoot",
     "SkillDiscovery",
     "SkillInfo",
     "expand_skill_placeholders",
@@ -52,4 +55,5 @@ __all__ = [
     "resolve_skill_mode",
     "reset_app_root",
     "set_app_root",
+    "set_contributed_default_modes",
 ]
