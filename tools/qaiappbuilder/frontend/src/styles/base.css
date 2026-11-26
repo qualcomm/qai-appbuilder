@@ -38,6 +38,7 @@
 /* --- 4. Layout / common / utility (PR-802c) ---------------------------- */
 @import "./layout/layout.css";
 @import "./components/components.css";
+@import "./components/extensions.css";
 @import "./common/utilities.css";
 @import "./common/service.css";
 @import "./common/settings.css";

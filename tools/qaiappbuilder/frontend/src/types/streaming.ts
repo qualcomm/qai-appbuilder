@@ -576,6 +576,8 @@ export interface ChatWsSend {
    *  backend applies them per-turn (never mutates global config). */
   readonly disabled_tools?: string[];
   readonly disabled_skills?: string[];
+  /** User extensions whose mode is selected in this tab (their "active" prompts). */
+  readonly active_extensions?: string[];
   /** UI language (en / zh-CN / zh-TW) so the backend localizes its
    *  feature-mode system-prompt framing to the user's selected language
    *  (additive — `_ws.py` / `_sse.py` read the same `locale` field). */

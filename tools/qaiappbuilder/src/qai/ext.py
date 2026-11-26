@@ -26,6 +26,8 @@ chat or application layers.
 from __future__ import annotations
 
 from qai.platform.user_extensions.host import (
+    ActionCall,
+    ActionResult,
     ExtensionContext,
     ExtensionError,
     ExtensionSecrets,
@@ -33,6 +35,8 @@ from qai.platform.user_extensions.host import (
 )
 
 __all__ = [
+    "ActionCall",
+    "ActionResult",
     "ExtensionContext",
     "ExtensionError",
     "ExtensionSecrets",

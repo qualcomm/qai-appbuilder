@@ -87,6 +87,14 @@ const extensions = {
     installed: "{name} 已安装",
     settingsSaved: "{name} 的配置已保存",
   },
+  mode: {
+    button: "扩展",
+    exit: "退出该扩展模式",
+    none: "还没有扩展在这里提供入口。",
+    settings: "扩展设置…",
+    run: "执行",
+    actionFailed: "操作失败",
+  },
 };
 
 export default extensions;

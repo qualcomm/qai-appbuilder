@@ -87,6 +87,14 @@ const extensions = {
     installed: "{name} 已安裝",
     settingsSaved: "{name} 的設定已儲存",
   },
+  mode: {
+    button: "擴充",
+    exit: "離開此擴充模式",
+    none: "尚無擴充在這裡提供入口。",
+    settings: "擴充設定…",
+    run: "執行",
+    actionFailed: "操作失敗",
+  },
 };
 
 export default extensions;

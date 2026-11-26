@@ -58,6 +58,9 @@ from .manifest import (
 __all__ = [
     "CONFIG_FILENAME",
     "DATA_DIRNAME",
+    "ActionCall",
+    "ActionResult",
+    "ActionValidationError",
     "ExtensionContext",
     "ExtensionError",
     "ExtensionSecrets",
@@ -73,6 +76,7 @@ __all__ = [
     "UserExtensionHost",
     "discover_extension_dirs",
     "module_name_for",
+    "run_action",
 ]
 
 logger = logging.getLogger("qai.platform.user_extensions")
@@ -143,6 +147,37 @@ class ToolCall:
     tool_name: str
     conversation_id: str
     tab_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class ActionCall:
+    """What an action handler receives (a button in the extension's mode was
+    submitted). Public (``qai.ext``).
+
+    ``values``: the dialog's fields, validated against the manifest (secret
+    fields included -- they are never stored by the host). ``conversation_id``
+    / ``tab_id``: where the user clicked (may be empty).
+    """
+
+    action_id: str
+    values: dict[str, Any]
+    conversation_id: str
+    tab_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class ActionResult:
+    """What an action handler may return (or return a plain ``str`` = message).
+    Public (``qai.ext``).
+
+    ``message``: shown to the user. ``prompt``: if set, sent as the user's
+    next chat message in the current conversation ("do X with what I just
+    entered"). ``ok=False`` shows ``message`` as an error.
+    """
+
+    message: str = ""
+    prompt: str = ""
+    ok: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,6 +340,7 @@ class ExtensionContext:
         self._proxy_url = proxy_url or (lambda: None)
         self._ssl_verify = ssl_verify or (lambda: True)
         self._pending: dict[str, _PendingTool] = {}
+        self._actions: dict[str, Callable[[ActionCall], Any]] = {}
         self._unload: list[Callable[[], None]] = []
         self._config: Mapping[str, Any] | None = None
         self._active = True
@@ -432,6 +468,25 @@ class ExtensionContext:
             declaration=decl,
         )
 
+    def register_action(self, action_id: str, handler: Callable[[ActionCall], Any]) -> None:
+        """Handle action ``action_id`` (declared in the manifest's ``ui.actions``).
+
+        ``handler(call: ActionCall)`` may be sync (runs in a worker thread) or
+        async; it returns an :class:`ActionResult`, a ``str`` (a message) or
+        ``None``. Raising shows the error to the user.
+        """
+        self._require_active("register_action")
+        ui = self._manifest.ui
+        if ui is None or ui.action(action_id) is None:
+            raise ExtensionError(
+                f"register_action({action_id!r}): not declared in the manifest's ui.actions"
+            )
+        if action_id in self._actions:
+            raise ExtensionError(f"register_action({action_id!r}): registered twice")
+        if not callable(handler):
+            raise ExtensionError(f"register_action({action_id!r}): handler is not callable")
+        self._actions[action_id] = handler
+
     def on_unload(self, callback: Callable[[], None]) -> None:
         """Run ``callback`` when the extension is unloaded or fails to load (newest first)."""
         self._require_active("on_unload")
@@ -452,6 +507,7 @@ class ExtensionContext:
     def _run_unload(self) -> None:
         self._active = False
         self._pending.clear()
+        self._actions.clear()
         callbacks, self._unload = self._unload, []
         for callback in reversed(callbacks):
             try:
@@ -740,7 +796,7 @@ class UserExtensionHost:
                 error=f"host error: {type(exc).__name__}: {exc}",
             )
 
-    def _load(self, ext_dir: Path) -> ExtensionStatus:  # noqa: PLR0911 - one exit per outcome
+    def _load(self, ext_dir: Path) -> ExtensionStatus:  # noqa: PLR0911, PLR0912 - one exit per outcome
         if not ext_dir.is_dir():
             return ExtensionStatus(
                 name=ext_dir.name,
@@ -814,6 +870,11 @@ class UserExtensionHost:
         for name in sorted(manifest.tool_names - set(committed)):
             if not any(repr(name) in w for w in ctx._warnings):
                 ctx._warnings.append(f"tool {name!r} is declared but was never registered")
+        for action in manifest.ui.actions if manifest.ui is not None else ():
+            if action.id not in ctx._actions:
+                ctx._warnings.append(
+                    f"action {action.id!r} is declared but has no handler (its button is hidden)"
+                )
         status.state = "loaded"
         status.tools = tuple(committed)
         status.warnings.extend(ctx._warnings)
@@ -821,6 +882,61 @@ class UserExtensionHost:
         self._commit_prompts(manifest.name, fragments, status)
         self._commit_mcp(manifest, status)
         return status
+
+    # -- UI (modes, action buttons) -----------------------------------------
+
+    def ui_entries(self) -> list[dict[str, Any]]:
+        """The Extension menu: loaded extensions that declare ``ui`` (by name).
+
+        Only actions with a registered handler are listed. Field values are
+        never included (a dialog always starts from the declared defaults).
+        """
+        out: list[dict[str, Any]] = []
+        for status in self.statuses:
+            if status.state != "loaded":
+                continue
+            try:
+                manifest = load_manifest(status.root)
+            except ManifestError:
+                continue
+            if manifest.ui is None:
+                continue
+            ctx = self._contexts.get(status.name)
+            handled = set(ctx._actions) if ctx is not None else set()
+            out.append(
+                {
+                    "name": status.name,
+                    "label": manifest.ui.label,
+                    "icon": manifest.ui.icon,
+                    "description": manifest.description,
+                    "actions": [
+                        {
+                            "id": a.id,
+                            "label": a.label,
+                            "description": a.description,
+                            "fields": [_field_wire(f) for f in a.fields],
+                        }
+                        for a in manifest.ui.actions
+                        if a.id in handled
+                    ],
+                }
+            )
+        return out
+
+    def action_handler(
+        self, name: str, action_id: str
+    ) -> tuple[Any, Callable[[ActionCall], Any]] | None:
+        """``(declaration, handler)`` of a loaded extension's action, else ``None``."""
+        status = self._statuses.get(name)
+        ctx = self._contexts.get(name)
+        if status is None or status.state != "loaded" or ctx is None:
+            return None
+        handler = ctx._actions.get(action_id)
+        ui = ctx._manifest.ui
+        decl = ui.action(action_id) if ui is not None else None
+        if handler is None or decl is None:
+            return None
+        return decl, handler
 
     # -- MCP servers --------------------------------------------------------
 
@@ -1194,6 +1310,80 @@ def _forget_modules(names: Iterable[str]) -> None:
     for name in names:
         sys.modules.pop(name, None)
         _ACTIVE_ROOTS.pop(name, None)
+
+
+def _field_wire(f: Any) -> dict[str, Any]:
+    item: dict[str, Any] = {
+        "key": f.key,
+        "type": f.type,
+        "label": f.label,
+        "description": f.description,
+        "required": f.required,
+    }
+    if f.type == "select":
+        item["options"] = list(f.options)
+    if f.type == "number":
+        item["min"], item["max"] = f.min, f.max
+    if f.type != "secret":
+        item["default"] = f.default
+    return item
+
+
+async def run_action(
+    decl: Any,
+    handler: Callable[[ActionCall], Any],
+    values: Mapping[str, Any],
+    *,
+    conversation_id: str = "",
+    tab_id: str = "",
+) -> ActionResult:
+    """Validate ``values`` against the action's fields, then call ``handler``.
+
+    Raises :class:`ActionValidationError` (bad fields, before any extension
+    code runs). The handler's own exception propagates to the caller.
+    """
+    fields = {f.key: f for f in decl.fields}
+    errors: dict[str, str] = {k: "is not a field of this action" for k in values if k not in fields}
+    clean: dict[str, Any] = {}
+    for key, f in fields.items():
+        value = values.get(key)
+        if value is None or value == "":
+            if f.required:
+                errors[key] = "is required"
+            clean[key] = f.default if f.type != "secret" else None
+            continue
+        try:
+            clean[key] = f.check(value)
+        except ValueError as exc:
+            errors[key] = str(exc)
+    if errors:
+        raise ActionValidationError(errors)
+    call = ActionCall(
+        action_id=decl.id, values=clean, conversation_id=conversation_id, tab_id=tab_id
+    )
+    is_async = inspect.iscoroutinefunction(handler) or inspect.iscoroutinefunction(
+        getattr(handler, "__call__", None)  # noqa: B004
+    )
+    result = handler(call) if is_async else await asyncio.to_thread(handler, call)
+    if inspect.isawaitable(result):
+        result = await result
+    if result is None:
+        return ActionResult()
+    if isinstance(result, str):
+        return ActionResult(message=result)
+    if isinstance(result, ActionResult):
+        return result
+    raise ExtensionError(
+        f"action {decl.id!r} returned {type(result).__name__}; return ActionResult, str or None"
+    )
+
+
+class ActionValidationError(ValueError):
+    """``errors`` maps a field key to a user-facing reason."""
+
+    def __init__(self, errors: Mapping[str, str]) -> None:
+        self.errors = dict(errors)
+        super().__init__("; ".join(f"{k}: {v}" for k, v in self.errors.items()))
 
 
 def _adapt_handler(handler: Callable[[ToolCall], Any]) -> Callable[[Any], Awaitable[Any]]:

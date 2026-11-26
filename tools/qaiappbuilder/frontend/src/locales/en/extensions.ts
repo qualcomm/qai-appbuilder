@@ -87,6 +87,14 @@ const extensions = {
     installed: "{name} installed",
     settingsSaved: "Settings of {name} saved",
   },
+  mode: {
+    button: "Extension",
+    exit: "Leave this extension mode",
+    none: "No extension adds an entry here yet.",
+    settings: "Extension settings…",
+    run: "Run",
+    actionFailed: "The action failed",
+  },
 };
 
 export default extensions;

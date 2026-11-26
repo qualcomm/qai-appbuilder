@@ -379,3 +379,43 @@ def test_install_from_a_folder_and_bad_uploads(be: tuple, tmp_path: Path) -> Non
     bad = cl.post("/api/extensions/install/upload", files={"file": ("x.zip", b"not a zip")})
     assert bad.status_code == 400 and bad.json()["code"] == "extensions.bad_archive"
     assert cl.post("/api/extensions/install/0123456789abcdef", json={}).status_code == 404
+
+
+# -- UI: modes + action buttons (route B) -----------------------------------------------
+
+
+def test_ui_menu_and_action_route(be: tuple) -> None:
+    ob, cl = be
+    ext = ob.data_dir / "extensions" / "ui-ext"
+    ext.mkdir(parents=True)
+    (ext / "extension.json").write_text(json.dumps({
+        "manifest_version": 1, "name": "ui-ext", "version": "1", "description": "ui", "entry": "main.py",
+        "ui": {"label": "UI Ext", "icon": "*", "actions": [
+            {"id": "greet", "label": "Greet", "fields": [{"key": "who", "type": "text", "label": "Who", "required": True}]},
+            {"id": "boom", "label": "Boom"}]},
+    }), encoding="utf-8")
+    (ext / "main.py").write_text(textwrap.dedent("""
+        from qai.ext import ActionResult
+
+        def activate(ctx):
+            ctx.register_action("greet", lambda c: ActionResult(message="hi " + c.values["who"], prompt="p"))
+            def boom(c):
+                raise RuntimeError("kaput")
+            ctx.register_action("boom", boom)
+    """), encoding="utf-8")
+    assert cl.post("/api/extensions/ui-ext/reload").json()["state"] == "loaded"
+
+    entries = {e["name"]: e for e in cl.get("/api/extensions/ui").json()["extensions"]}
+    assert [a["id"] for a in entries["ui-ext"]["actions"]] == ["greet", "boom"]
+
+    ok = cl.post("/api/extensions/ui-ext/actions/greet", json={"values": {"who": "bob"}}).json()
+    assert ok == {"ok": True, "message": "hi bob", "prompt": "p"}
+    bad = cl.post("/api/extensions/ui-ext/actions/greet", json={"values": {}})
+    assert bad.status_code == 400 and "who" in bad.json()["details"]["field_errors"]
+    err = cl.post("/api/extensions/ui-ext/actions/boom", json={}).json()
+    assert err["ok"] is False and "kaput" in err["message"]
+    assert cl.post("/api/extensions/ui-ext/actions/nope", json={}).status_code == 404
+
+    cl.post("/api/extensions/ui-ext/disable")
+    assert "ui-ext" not in {e["name"] for e in cl.get("/api/extensions/ui").json()["extensions"]}
+    assert cl.post("/api/extensions/ui-ext/actions/greet", json={"values": {"who": "x"}}).status_code == 404

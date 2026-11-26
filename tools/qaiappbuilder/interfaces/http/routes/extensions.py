@@ -23,6 +23,13 @@
   the staged extension and load it; ``409 extensions.exists`` when one with
   that name is installed and ``replace`` is false.
 * ``DELETE /api/extensions/install/{token}`` -- discard a staged install
+* ``GET  /api/extensions/ui`` -- the composer's Extension menu: loaded
+  extensions with ``ui``, their action buttons and dialog fields
+* ``POST /api/extensions/{name}/actions/{action_id}`` -- ``{"values",
+  "conversation_id", "tab_id"}``: run a dialog's action; returns
+  ``{"ok", "message", "prompt"}``. Bad fields -> ``400
+  extensions.invalid_action_values``; an exception in the handler -> 200
+  with ``ok: false`` (it is the extension's error, not the request's).
 * ``PUT  /api/extensions/{name}/settings`` -- ``{"values": {key: value|null}}``;
   ``400 extensions.invalid_settings`` with ``details.field_errors``
 
@@ -51,13 +58,18 @@ from qai.platform.errors import (
     NotFoundError,
     ValidationError,
 )
+from qai.platform.logging import get_logger
 from qai.platform.user_extensions import (
+    ActionValidationError,
     ExtensionStatus,
     InstallError,
     ManifestError,
     SettingsValidationError,
     UnknownExtensionError,
+    run_action,
 )
+
+_LOG = get_logger("interfaces.http.extensions")
 
 if TYPE_CHECKING:  # pragma: no cover
     from apps.api._user_extensions_di import UserExtensionManager
@@ -76,6 +88,12 @@ class FolderInstall(BaseModel):
 
 class InstallCommit(BaseModel):
     replace: bool = False
+
+
+class ActionRun(BaseModel):
+    values: dict[str, Any] = Field(default_factory=dict)
+    conversation_id: str = Field(default="", max_length=128)
+    tab_id: str = Field(default="", max_length=128)
 
 
 #: Upload cap; the archive is also capped unpacked (installer.MAX_TOTAL_BYTES).
@@ -150,6 +168,37 @@ def build_router(*, container: Container) -> APIRouter:  # noqa: PLR0915 - one c
             raise ValidationError(exc.code, str(exc)) from None
         await _manager().sync_runtime()
         return result
+
+    # -- UI: modes + action buttons (design doc §3.5 route B) ----------------
+
+    @router.get("/ui")
+    async def ui_entries() -> dict[str, Any]:
+        return {"extensions": _manager().host.ui_entries()}
+
+    @router.post("/{name}/actions/{action_id}")
+    async def run_action_route(name: str, action_id: str, body: ActionRun) -> dict[str, Any]:
+        found = _manager().host.action_handler(name, action_id)
+        if found is None:
+            raise NotFoundError("extensions.action_not_found", "action", f"{name}/{action_id}")
+        decl, handler = found
+        try:
+            result = await run_action(
+                decl,
+                handler,
+                body.values,
+                conversation_id=body.conversation_id,
+                tab_id=body.tab_id,
+            )
+        except ActionValidationError as exc:
+            raise ValidationError(
+                "extensions.invalid_action_values",
+                "some fields are invalid",
+                field_errors={k: [v] for k, v in exc.errors.items()},
+            ) from None
+        except Exception as exc:  # noqa: BLE001 - the extension's error, shown to the user
+            _LOG.warning("user_extensions.action_failed", exc_info=True)
+            return {"ok": False, "message": f"{type(exc).__name__}: {exc}", "prompt": ""}
+        return {"ok": result.ok, "message": result.message, "prompt": result.prompt}
 
     # -- install ------------------------------------------------------------
 

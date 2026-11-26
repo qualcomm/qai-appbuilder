@@ -50,6 +50,7 @@ import { attachActiveChatRun } from "./useActiveChatRunAttach";
 import { useConversationsStore } from "@/stores/conversations";
 import { useUiStore } from "@/stores/ui";
 import { gomasterMode } from "@/composables/useForgeConfig";
+import { activeExtensionsFor } from "@/composables/useExtensionModes";
 
 export type TransportKind = "ws" | "sse";
 
@@ -1072,6 +1073,9 @@ export function useChatTransport(
         maxTokens: sampling.maxTokens,
         disabledTools: sessionOverride.disabledTools,
         disabledSkills: sessionOverride.disabledSkills,
+        // The extension whose mode is selected in this tab (its "active"
+        // prompt fragments join the turn's context).
+        activeExtensions: activeExtensionsFor(tab?.id),
         // UI language so the backend localizes its feature-mode system-prompt
         // framing to the language the user selected (additive; §3.1).
         locale: uiStore.locale,
@@ -1478,6 +1482,10 @@ export function useChatTransport(
       qs.push(
         `disabled_skills=${encodeURIComponent(JSON.stringify(sessionOverride.disabledSkills))}`,
       );
+    }
+    const activeExtensions = activeExtensionsFor(tabId);
+    if (activeExtensions.length > 0) {
+      qs.push(`active_extensions=${encodeURIComponent(JSON.stringify(activeExtensions))}`);
     }
     const url = `${path}?${qs.join("&")}`;
 

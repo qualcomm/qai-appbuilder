@@ -558,18 +558,5 @@ onMounted(refresh);
 .ext-badge { font-size: var(--text-xs); padding: 0 var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); color: var(--text-secondary); }
 .ext-badge--failed { color: var(--error); border-color: var(--error); }
 .ext-chip { display: inline-block; margin: 0 var(--space-1) var(--space-1) 0; padding: 0 var(--space-2); border-radius: var(--radius-sm, 4px); background: var(--bg-tertiary, var(--bg-primary)); font-size: var(--text-xs); }
-.ext-modal-overlay { position: fixed; inset: 0; z-index: 9000; display: flex; align-items: center; justify-content: center; background: var(--overlay-bg, rgba(0, 0, 0, 0.45)); }
-.ext-modal { width: min(560px, 92vw); max-height: 86vh; overflow: auto; padding: var(--space-5); border-radius: var(--radius-lg, 12px); background: var(--bg-secondary); color: var(--text-primary); display: flex; flex-direction: column; gap: var(--space-3); }
-.ext-modal__title { margin: 0; font-size: var(--text-lg); }
-.ext-modal__name { margin: 0; }
-.ext-modal__warn { margin: 0; color: var(--warning, #b7791f); font-size: var(--text-sm); }
-.ext-modal__caps { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-1) var(--space-3); margin: 0; font-size: var(--text-sm); }
-.ext-modal__caps dt { color: var(--text-secondary); }
-.ext-modal__caps dd { margin: 0; }
-.ext-modal__buttons { display: flex; justify-content: flex-end; gap: var(--space-2); }
-.ext-field { display: flex; flex-direction: column; gap: var(--space-1); }
-.ext-field__label { font-size: var(--text-sm); font-weight: 500; }
-.ext-field__req { color: var(--error); margin-left: 2px; }
-.ext-field__hint { font-size: var(--text-xs); color: var(--text-secondary); }
 .ext-check { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
 </style>

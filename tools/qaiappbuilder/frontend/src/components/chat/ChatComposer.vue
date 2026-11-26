@@ -101,6 +101,7 @@ const ModeFrameGomaster = IS_INTERNAL
   ? defineAsyncComponent(() => import("@/components/chat/toolbar-modes/ModeFrameGomaster.vue"))
   : null;
 import ComposerModeButtons from "./composer/ComposerModeButtons.vue";
+import ComposerExtensionMenu from "./composer/ComposerExtensionMenu.vue";
 import ActiveRunsButton from "./composer/ActiveRunsButton.vue";
 import ComposerPendingImages from "./composer/ComposerPendingImages.vue";
 import ComposerLightbox from "./composer/ComposerLightbox.vue";
@@ -435,6 +436,14 @@ async function onBudgetContinue(): Promise<void> {
   // model keeps working. The backend now sees a higher cap and won't re-stop
   // immediately. Enqueue-while-streaming safe: the tab is idle at END time.
   text.value = t("chat.budgetDecision.continuePrompt");
+  autoResize();
+  onSubmit();
+}
+
+/** An extension action asked to send a prompt: send it as the user's next
+ *  message (same path as typing it; enqueued while the tab is streaming). */
+function sendExtensionPrompt(prompt: string): void {
+  text.value = prompt;
   autoResize();
   onSubmit();
 }
@@ -1953,6 +1962,14 @@ const {
             @attach="openFilePicker"
             @pick-mode="setToolModeFromKey"
             @ssh="showSshPanel = true"
+          />
+          <!-- User extensions: "Extension ▾" menu / active extension mode tag
+               + its action buttons (independent of the built-in tool modes). -->
+          <ComposerExtensionMenu
+            v-if="effectiveMode === null"
+            :tab-id="store.activeTab?.id ?? null"
+            :conversation-id="store.activeTab?.conversationId ?? null"
+            @send-prompt="sendExtensionPrompt"
           />
 
           <!-- Active-mode sub-toolbars — only one renders at a time. -->

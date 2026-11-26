@@ -13,6 +13,9 @@ register from ``activate(ctx)`` and the skills they ship. Design:
 from .host import (
     CONFIG_FILENAME,
     DATA_DIRNAME,
+    ActionCall,
+    ActionResult,
+    ActionValidationError,
     ExtensionContext,
     ExtensionError,
     ExtensionSecrets,
@@ -27,6 +30,7 @@ from .host import (
     UserExtensionHost,
     discover_extension_dirs,
     module_name_for,
+    run_action,
 )
 from .installer import ExtensionInstaller, InstallError, StagedExtension
 from .manifest import (
@@ -56,6 +60,9 @@ __all__ = [
     "PROMPT_MAX_CHARS",
     "PROMPT_WHEN",
     "STATE_FILENAME",
+    "ActionCall",
+    "ActionResult",
+    "ActionValidationError",
     "ExtensionContext",
     "ExtensionError",
     "ExtensionInstaller",
@@ -83,6 +90,7 @@ __all__ = [
     "load_manifest",
     "module_name_for",
     "parse_manifest",
+    "run_action",
     "settings_view",
     "update_settings",
 ]

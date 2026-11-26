@@ -59,6 +59,7 @@ __all__ = [
     "PROMPT_MAX_CHARS",
     "PROMPT_WHEN",
     "SETTING_TYPES",
+    "ActionDeclaration",
     "ExtensionManifest",
     "ManifestError",
     "McpServerDeclaration",
@@ -66,6 +67,7 @@ __all__ = [
     "SettingDeclaration",
     "SkillsDeclaration",
     "ToolDeclaration",
+    "UiDeclaration",
     "load_manifest",
     "parse_manifest",
     "placeholders_in",
@@ -99,8 +101,14 @@ _TOP_KEYS: Final[frozenset[str]] = frozenset(
         "prompts",
         "settings",
         "mcp_servers",
+        "ui",
     }
 )
+_UI_KEYS: Final[frozenset[str]] = frozenset({"label", "icon", "actions"})
+_ACTION_KEYS: Final[frozenset[str]] = frozenset({"id", "label", "description", "fields"})
+_ACTION_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_ICON_MAX: Final[int] = 8
+_MAX_ACTIONS: Final[int] = 8
 _MCP_KEYS: Final[frozenset[str]] = frozenset(
     {"name", "transport", "command", "args", "env", "cwd", "url", "headers", "timeout_s"}
 )
@@ -191,6 +199,29 @@ class SettingDeclaration:
 
 
 @dataclass(frozen=True, slots=True)
+class ActionDeclaration:
+    """One ``ui.actions[]`` entry: a button in the extension's mode; clicking
+    it opens a dialog with ``fields`` (same types as ``settings[]``)."""
+
+    id: str
+    label: str
+    description: str = ""
+    fields: tuple[SettingDeclaration, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class UiDeclaration:
+    """``ui``: the extension's entry in the composer's Extension menu."""
+
+    label: str
+    icon: str = ""
+    actions: tuple[ActionDeclaration, ...] = ()
+
+    def action(self, action_id: str) -> ActionDeclaration | None:
+        return next((a for a in self.actions if a.id == action_id), None)
+
+
+@dataclass(frozen=True, slots=True)
 class McpServerDeclaration:
     """One ``mcp_servers[]`` entry. String values may hold placeholders
     (resolved by the host at load; see :func:`placeholders_in`)."""
@@ -229,6 +260,7 @@ class ExtensionManifest:
     prompts: tuple[PromptDeclaration, ...] = ()
     settings: tuple[SettingDeclaration, ...] = ()
     mcp_servers: tuple[McpServerDeclaration, ...] = ()
+    ui: UiDeclaration | None = None
 
     @property
     def tool_names(self) -> frozenset[str]:
@@ -274,7 +306,11 @@ def parse_manifest(raw: Any, *, root: Path) -> ExtensionManifest:
     tools = _parse_tools(obj.get("tools"))
     if tools and entry is None:
         raise ManifestError("tools requires entry (the code that registers them)")
+    ui = _parse_ui(obj.get("ui"))
+    if ui is not None and ui.actions and entry is None:
+        raise ManifestError("ui.actions requires entry (the code that handles them)")
     return ExtensionManifest(
+        ui=ui,
         name=name,
         version=version,
         description=_text(obj["description"], label="description"),
@@ -285,6 +321,55 @@ def parse_manifest(raw: Any, *, root: Path) -> ExtensionManifest:
         prompts=_parse_prompts(obj.get("prompts")),
         settings=(settings := _parse_settings(obj.get("settings"))),
         mcp_servers=_parse_mcp_servers(obj.get("mcp_servers"), settings),
+    )
+
+
+def _parse_ui(raw: Any) -> UiDeclaration | None:
+    if raw is None:
+        return None
+    obj = _object(raw, "ui")
+    _known_keys(obj, _UI_KEYS, where="ui")
+    _require(obj, ("label",), where="ui")
+    icon = obj.get("icon", "")
+    if not isinstance(icon, str) or len(icon) > _ICON_MAX:
+        raise ManifestError(f"ui.icon must be a short string (an emoji, <= {_ICON_MAX} chars)")
+    raw_actions = obj.get("actions", [])
+    if not isinstance(raw_actions, list):
+        raise ManifestError("ui.actions must be an array")
+    if len(raw_actions) > _MAX_ACTIONS:
+        raise ManifestError(f"ui.actions: at most {_MAX_ACTIONS} actions")
+    actions: list[ActionDeclaration] = []
+    for index, item in enumerate(raw_actions):
+        where = f"ui.actions[{index}]"
+        entry = _object(item, where)
+        _known_keys(entry, _ACTION_KEYS, where=where)
+        _require(entry, ("id", "label"), where=where)
+        action_id = entry["id"]
+        if not isinstance(action_id, str) or not _ACTION_ID_RE.match(action_id):
+            raise ManifestError(f"{where}.id {action_id!r} must match ^[a-z][a-z0-9_]{{0,63}}$")
+        if any(a.id == action_id for a in actions):
+            raise ManifestError(f"{where}.id {action_id!r} is declared twice")
+        raw_fields = entry.get("fields", [])
+        if not isinstance(raw_fields, list):
+            raise ManifestError(f"{where}.fields must be an array")
+        fields: list[SettingDeclaration] = []
+        for fi, field_raw in enumerate(raw_fields):
+            f = _parse_setting(field_raw, where=f"{where}.fields[{fi}]")
+            if any(x.key == f.key for x in fields):
+                raise ManifestError(f"{where}.fields[{fi}].key {f.key!r} is declared twice")
+            fields.append(f)
+        actions.append(
+            ActionDeclaration(
+                id=action_id,
+                label=_text(entry["label"], label=f"{where}.label"),
+                description=_text(entry["description"], label=f"{where}.description")
+                if "description" in entry
+                else "",
+                fields=tuple(fields),
+            )
+        )
+    return UiDeclaration(
+        label=_text(obj["label"], label="ui.label"), icon=icon, actions=tuple(actions)
     )
 
 

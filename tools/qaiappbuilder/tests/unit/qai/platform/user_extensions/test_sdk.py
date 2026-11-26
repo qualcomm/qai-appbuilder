@@ -38,12 +38,15 @@ CTX_MEMBERS = {
     "proxy_url",
     "ssl_verify",
     "register_tool",
+    "register_action",
     "on_unload",
 }
 
 
 def test_exports_are_exactly_the_documented_ones() -> None:
     assert sorted(sdk.__all__) == [
+        "ActionCall",
+        "ActionResult",
         "ExtensionContext",
         "ExtensionError",
         "ExtensionSecrets",

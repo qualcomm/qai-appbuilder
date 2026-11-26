@@ -166,6 +166,8 @@ export interface ChatWebSocketClient {
        *  arrays of names switched OFF for this session. Omitted when empty. */
       disabledTools?: string[];
       disabledSkills?: string[];
+      /** Extensions whose mode is selected (`active_extensions`). Omitted when empty. */
+      activeExtensions?: string[];
       /** UI language (en / zh-CN / zh-TW) for system-prompt framing
        *  localization (forwarded as `locale`). Omitted when absent. */
       locale?: string | null;
@@ -633,6 +635,7 @@ export function useChatWebSocket(
       maxTokens?: number | null;
       disabledTools?: string[];
       disabledSkills?: string[];
+      activeExtensions?: string[];
       locale?: string | null;
     },
   ): void {
@@ -686,6 +689,12 @@ export function useChatWebSocket(
       tool.disabledSkills.length > 0
         ? tool.disabledSkills
         : null;
+    const activeExtensions =
+      tool !== undefined &&
+      Array.isArray(tool.activeExtensions) &&
+      tool.activeExtensions.length > 0
+        ? tool.activeExtensions
+        : null;
     const locale =
       tool !== undefined &&
       typeof tool.locale === "string" &&
@@ -706,6 +715,7 @@ export function useChatWebSocket(
         maxTokens !== null ||
         disabledTools !== null ||
         disabledSkills !== null ||
+        activeExtensions !== null ||
         locale !== null);
     const envelope: ChatWsClientMessage = hasAdvanced
       ? {
@@ -725,6 +735,9 @@ export function useChatWebSocket(
           ...(disabledTools !== null ? { disabled_tools: disabledTools } : {}),
           ...(disabledSkills !== null
             ? { disabled_skills: disabledSkills }
+            : {}),
+          ...(activeExtensions !== null
+            ? { active_extensions: activeExtensions }
             : {}),
           ...(locale !== null ? { locale } : {}),
         }
