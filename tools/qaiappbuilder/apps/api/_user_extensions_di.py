@@ -61,6 +61,7 @@ from qai.platform.skills import (
 )
 from qai.platform.user_extensions import (
     STATE_FILENAME,
+    ExtensionInstaller,
     ExtensionStateStore,
     ExtensionStatus,
     UnknownExtensionError,
@@ -233,6 +234,41 @@ class UserExtensionManager:
         def op() -> ExtensionStatus:
             self._host.reload(name)  # validates the name before anything is written
             self._require_state().set_disabled(name, not enabled)
+            return self._host.reload(name)
+
+        return self._change(op)
+
+    # -- install (design doc §7.2) ----------------------------------------------
+
+    @property
+    def installer(self) -> ExtensionInstaller:
+        return ExtensionInstaller(self._host.scan_root)
+
+    def stage_zip(self, archive: Any) -> dict[str, Any]:
+        """Unpack + validate an archive; returns the capability summary. Runs no code."""
+        return self.installer.stage_zip(archive).summary()
+
+    def stage_folder(self, folder: Path) -> dict[str, Any]:
+        """Copy + validate a local folder; returns the capability summary. Runs no code."""
+        return self.installer.stage_folder(folder).summary()
+
+    def discard_staged(self, token: str) -> bool:
+        return self.installer.discard(token)
+
+    def install(self, token: str, *, replace: bool = False) -> ExtensionStatus:
+        """Move a staged extension into place and load it (takes effect at once).
+
+        An installed extension of the same name is unloaded first and replaced
+        only with ``replace``; its data directory, secrets, settings and
+        on/off switch are kept (an update, not a reinstall).
+        """
+
+        def op() -> ExtensionStatus:
+            installer = self.installer
+            name = installer.staged(token).manifest.name
+            if replace:
+                self._host.unload(name)
+            installer.commit(token, replace=replace)
             return self._host.reload(name)
 
         return self._change(op)

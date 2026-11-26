@@ -28,6 +28,7 @@ from .host import (
     discover_extension_dirs,
     module_name_for,
 )
+from .installer import ExtensionInstaller, InstallError, StagedExtension
 from .manifest import (
     DEFAULT_SKILLS_DIR,
     MANIFEST_FILENAME,
@@ -57,11 +58,13 @@ __all__ = [
     "STATE_FILENAME",
     "ExtensionContext",
     "ExtensionError",
+    "ExtensionInstaller",
     "ExtensionManifest",
     "ExtensionSecrets",
     "ExtensionSkillRoot",
     "ExtensionStateStore",
     "ExtensionStatus",
+    "InstallError",
     "ManifestError",
     "PromptDeclaration",
     "PromptFragment",
@@ -70,6 +73,7 @@ __all__ = [
     "SettingDeclaration",
     "SettingsValidationError",
     "SkillsDeclaration",
+    "StagedExtension",
     "ToolCall",
     "ToolDeclaration",
     "ToolSink",

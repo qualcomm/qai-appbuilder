@@ -14,6 +14,15 @@
   directory; ``purge_data`` also deletes its data directory, secrets, settings
 * ``GET  /api/extensions/{name}/settings`` -- the settings card (secret values
   are never returned, only ``is_set``)
+* ``POST /api/extensions/install/upload`` -- multipart ``file`` (a .zip):
+  unpack + validate, return the capability summary with a ``token``. Runs
+  no extension code.
+* ``POST /api/extensions/install/folder`` -- ``{"path": "..."}``: the same
+  for a local folder (the backend runs on the user's machine).
+* ``POST /api/extensions/install/{token}`` -- ``{"replace": bool}``: install
+  the staged extension and load it; ``409 extensions.exists`` when one with
+  that name is installed and ``replace`` is false.
+* ``DELETE /api/extensions/install/{token}`` -- discard a staged install
 * ``PUT  /api/extensions/{name}/settings`` -- ``{"values": {key: value|null}}``;
   ``400 extensions.invalid_settings`` with ``details.field_errors``
 
@@ -28,15 +37,23 @@ containers); ``404 extensions.not_found`` for an unknown extension name.
 
 from __future__ import annotations
 
+import io
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, File, Response, UploadFile
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
 
-from qai.platform.errors import ExternalServiceError, NotFoundError, ValidationError
+from qai.platform.errors import (
+    ConflictError,
+    ExternalServiceError,
+    NotFoundError,
+    ValidationError,
+)
 from qai.platform.user_extensions import (
     ExtensionStatus,
+    InstallError,
     ManifestError,
     SettingsValidationError,
     UnknownExtensionError,
@@ -51,6 +68,18 @@ __all__ = ["build_router", "status_to_wire"]
 
 class SettingsUpdate(BaseModel):
     values: dict[str, Any] = Field(default_factory=dict)
+
+
+class FolderInstall(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+
+
+class InstallCommit(BaseModel):
+    replace: bool = False
+
+
+#: Upload cap; the archive is also capped unpacked (installer.MAX_TOTAL_BYTES).
+_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
 
 def status_to_wire(status: ExtensionStatus) -> dict[str, Any]:
@@ -68,7 +97,7 @@ def status_to_wire(status: ExtensionStatus) -> dict[str, Any]:
     }
 
 
-def build_router(*, container: Container) -> APIRouter:
+def build_router(*, container: Container) -> APIRouter:  # noqa: PLR0915 - one closure per route
     router = APIRouter(prefix="/api/extensions", tags=["extensions"])
 
     def _manager() -> UserExtensionManager:
@@ -113,8 +142,48 @@ def build_router(*, container: Container) -> APIRouter:
                 "some settings are invalid",
                 field_errors={k: [v] for k, v in exc.errors.items()},
             ) from None
+        except InstallError as exc:
+            if exc.code == "extensions.exists":
+                raise ConflictError(exc.code, str(exc)) from None
+            if exc.code == "extensions.unknown_token":
+                raise NotFoundError(exc.code, "staged install", name) from None
+            raise ValidationError(exc.code, str(exc)) from None
         await _manager().sync_runtime()
         return result
+
+    # -- install ------------------------------------------------------------
+
+    @router.post("/install/upload")
+    async def install_upload(file: UploadFile = File(...)) -> dict[str, Any]:  # noqa: B008 - FastAPI idiom
+        manager = _manager()
+        data = await file.read(_MAX_UPLOAD_BYTES + 1)
+        if len(data) > _MAX_UPLOAD_BYTES:
+            raise ValidationError(
+                "extensions.too_large", f"the archive is larger than {_MAX_UPLOAD_BYTES} bytes"
+            )
+        summary: dict[str, Any] = await _run("upload", manager.stage_zip, io.BytesIO(data))
+        return summary
+
+    @router.post("/install/folder")
+    async def install_folder(body: FolderInstall) -> dict[str, Any]:
+        manager = _manager()
+        summary: dict[str, Any] = await _run(
+            "folder", manager.stage_folder, Path(body.path).expanduser()
+        )
+        return summary
+
+    @router.post("/install/{token}")
+    async def install_commit(token: str, body: InstallCommit) -> dict[str, Any]:
+        manager = _manager()
+        status = await _run(token, manager.install, token, replace=body.replace)
+        return status_to_wire(status)
+
+    @router.delete("/install/{token}", status_code=204)
+    async def install_discard(token: str) -> Response:
+        manager = _manager()
+        if not await _run(token, manager.discard_staged, token):
+            raise NotFoundError("extensions.unknown_token", "staged install", token)
+        return Response(status_code=204)
 
     @router.get("/{name}/settings")
     async def get_settings(name: str) -> dict[str, Any]:

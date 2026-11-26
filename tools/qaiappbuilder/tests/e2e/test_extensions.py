@@ -15,9 +15,11 @@ a broken reload is reported in the status and the tool disappears; an extension 
 
 from __future__ import annotations
 
+import io
 import json
 import textwrap
 import time
+import zipfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -320,3 +322,56 @@ def test_an_extension_mcp_server_is_usable_read_only_and_never_persisted(
     # Uninstall with purge: also removes the keyring secret.
     assert cl.delete("/api/extensions/mcp-ext", params={"purge_data": "true"}).status_code == 204
     assert not ext.exists()
+
+
+# -- install ---------------------------------------------------------------------------
+
+
+def _ext_zip(name: str, *, reply: str, tool: str, version: str = "1.0.0") -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(f"{name}-{version}/extension.json", json.dumps({
+            "manifest_version": 1, "name": name, "version": version, "description": "zip",
+            "entry": "main.py", "tools": [{"name": tool, "group": "read"}],
+        }))
+        zf.writestr(f"{name}-{version}/main.py", textwrap.dedent(f"""
+            def activate(ctx):
+                ctx.register_tool({tool!r}, lambda call: {reply!r}, description="zip tool")
+        """))
+    return buf.getvalue()
+
+
+def test_install_from_a_zip_upload_then_update_it(be: tuple, llm: StandInLLM) -> None:
+    _ob, cl = be
+    r = cl.post("/api/extensions/install/upload",
+                files={"file": ("zip-ext.zip", _ext_zip("zip-ext", reply="z1", tool="zip_ext_hi"), "application/zip")})
+    assert r.status_code == 200, r.text
+    summary = r.json()
+    assert summary["name"] == "zip-ext" and summary["runs_code"] is True and summary["replaces"] is False
+    assert summary["tools"] == [{"name": "zip_ext_hi", "group": "read"}]
+    assert "zip-ext" not in {e["name"] for e in cl.get("/api/extensions").json()["extensions"]}  # not yet
+
+    status = cl.post(f"/api/extensions/install/{summary['token']}", json={}).json()
+    assert status["state"] == "loaded" and status["tools"] == ["zip_ext_hi"], status
+    assert _result(_call(cl, llm, "t-zip-1", "zip_ext_hi"))["result"] == "z1"
+
+    # Same name again: 409 unless replace; replacing takes effect at once.
+    again = cl.post("/api/extensions/install/upload",
+                    files={"file": ("u.zip", _ext_zip("zip-ext", reply="z2", tool="zip_ext_hi", version="2.0.0"))}).json()
+    assert again["installed_version"] == "1.0.0" and again["replaces"] is True
+    assert cl.post(f"/api/extensions/install/{again['token']}", json={}).status_code == 409
+    status = cl.post(f"/api/extensions/install/{again['token']}", json={"replace": True}).json()
+    assert status["version"] == "2.0.0" and status["state"] == "loaded"
+    assert _result(_call(cl, llm, "t-zip-2", "zip_ext_hi"))["result"] == "z2"
+
+
+def test_install_from_a_folder_and_bad_uploads(be: tuple, tmp_path: Path) -> None:
+    _ob, cl = be
+    src = _write(tmp_path, "folder-ext", reply="f1", tool="folder_ext_hi")
+    summary = cl.post("/api/extensions/install/folder", json={"path": str(src)}).json()
+    assert summary["name"] == "folder-ext", summary
+    assert cl.post(f"/api/extensions/install/{summary['token']}", json={}).json()["state"] == "loaded"
+
+    bad = cl.post("/api/extensions/install/upload", files={"file": ("x.zip", b"not a zip")})
+    assert bad.status_code == 400 and bad.json()["code"] == "extensions.bad_archive"
+    assert cl.post("/api/extensions/install/0123456789abcdef", json={}).status_code == 404

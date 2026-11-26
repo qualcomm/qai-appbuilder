@@ -111,6 +111,7 @@ def test_importing_the_sdk_loads_no_app_layer() -> None:
         "qai.platform",
         "qai.platform.user_extensions",
         "qai.platform.user_extensions.host",
+        "qai.platform.user_extensions.installer",
         "qai.platform.user_extensions.manifest",
         "qai.platform.user_extensions.settings",
         "qai.platform.user_extensions.state",
