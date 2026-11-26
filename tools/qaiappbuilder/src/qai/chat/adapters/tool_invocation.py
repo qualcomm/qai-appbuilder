@@ -120,6 +120,15 @@ class RegistryBackedToolInvocation:
         self._handlers.pop(name, None)
         self._schemas.pop(name, None)
 
+    def handler_for(self, name: str) -> ToolHandler | None:
+        """The handler currently registered under ``name`` (``None`` if none).
+
+        Lets a runtime registrant (user extensions) check it still owns a
+        name before unregistering it, so it never removes a tool someone else
+        registered over it.
+        """
+        return self._handlers.get(name)
+
     @property
     def registered_tools(self) -> tuple[str, ...]:
         return tuple(sorted(self._handlers))
@@ -142,10 +151,12 @@ class RegistryBackedToolInvocation:
         stored schemas.  The nested ``function`` / ``parameters`` blocks
         are NOT deep-copied (schemas can be large; copying is reserved
         for the caller that actually intends to mutate them).
+
+        Works on a snapshot, so a concurrent register / unregister (user
+        extensions reloading in a worker thread) can never raise mid-way.
         """
-        return tuple(
-            dict(self._schemas[name]) for name in order_tool_names(self._schemas)
-        )
+        snapshot = dict(self._schemas)
+        return tuple(dict(snapshot[name]) for name in order_tool_names(snapshot))
 
     def set_cloud_description_overrides(
         self, overrides: Mapping[str, Mapping[str, Any]] | None

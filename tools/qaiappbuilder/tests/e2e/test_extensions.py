@@ -1,0 +1,173 @@
+# ---------------------------------------------------------------------
+# Copyright (c) 2026 Qualcomm Technologies, Inc. and/or its subsidiaries.
+# SPDX-License-Identifier: BSD-3-Clause
+# ---------------------------------------------------------------------
+
+"""L1 - user extensions in a real backend process: load at start, call from a chat turn, edit, reload, call again.
+
+The extension lives in the throw-away backend's own ``<data>/extensions``; nothing in the repo is touched. Tool calls come from the
+scripted stand-in LLM (``_fake_llm.py``, ``[tool name {...}]``); no real model is used.
+
+Covered: ``GET /api/extensions``; a model-issued call to the extension tool returns its result; ``POST /api/extensions/{name}/reload``
+makes an edited extension take effect without a restart; a new extension added at runtime appears after ``POST /api/extensions/reload``;
+a broken reload is reported in the status and the tool disappears; an extension skill appears in ``GET /api/skills`` after reload.
+"""
+
+from __future__ import annotations
+
+import json
+import textwrap
+from collections.abc import Iterator
+from pathlib import Path
+
+import httpx
+import pytest
+from tests.e2e import _fake_llm
+from tests.e2e._fake_llm import StandInLLM
+from tests.e2e._owned_backend import OwnedBackend, owned_backend
+from tests.e2e.test_chat_stream import Turn, _set_env, run_turn
+
+pytestmark = pytest.mark.e2e
+
+
+def _write(data_dir: Path, name: str, *, reply: str, tool: str) -> Path:
+    ext = data_dir / "extensions" / name
+    ext.mkdir(parents=True, exist_ok=True)
+    (ext / "extension.json").write_text(
+        json.dumps(
+            {
+                "manifest_version": 1,
+                "name": name,
+                "version": "1.0.0",
+                "description": "e2e",
+                "entry": "main.py",
+                "tools": [{"name": tool, "group": "read"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (ext / "main.py").write_text(
+        textwrap.dedent(
+            f"""
+            from qai.ext import ExtensionContext, ToolCall
+
+            def activate(ctx: ExtensionContext) -> None:
+                def run(call: ToolCall) -> str:
+                    return {reply!r} + ":" + str(call.arguments.get("who", ""))
+
+                ctx.register_tool({tool!r}, run, description="e2e tool",
+                                  parameters={{"type": "object", "properties": {{"who": {{"type": "string"}}}}}})
+            """
+        ),
+        encoding="utf-8",
+    )
+    return ext
+
+
+@pytest.fixture(scope="module")
+def llm() -> Iterator[StandInLLM]:
+    s = _fake_llm.start()
+    yield s
+    s.stop()
+
+
+@pytest.fixture(scope="module")
+def be(llm: StandInLLM) -> Iterator[tuple[OwnedBackend, httpx.Client]]:
+    old = _set_env(
+        {
+            "QAI_CHAT__LLM_BASE_URL": llm.base_url,
+            "QAI_CHAT__LLM_DEFAULT_MODEL": "e2e-model",
+            "QAI_CHAT__LLM_API_KEY": None,
+        }
+    )
+    try:
+        with owned_backend() as ob:
+            _write(ob.data_dir, "e2e-ext", reply="v1", tool="e2e_ext_hello")
+            yield ob, ob.start()
+    finally:
+        _set_env(old)
+
+
+def _call(cl: httpx.Client, llm: StandInLLM, tab: str, tool: str) -> Turn:
+    llm.clear()
+    cid = cl.post("/api/chat/conversations", json={"title": "e2e"}).json()["id"]
+    return run_turn(cl, cid, tab, f"[tool {tool} " + json.dumps({"who": "e2e"}) + "]", seconds=60)
+
+
+def _result(turn: Turn) -> dict:
+    (frame,) = turn.frames("tool_result")
+    return frame["payload"]
+
+
+def test_the_extension_is_loaded_at_start(be: tuple) -> None:
+    ob, cl = be
+    body = cl.get("/api/extensions").json()
+    assert body["directory"] == str(ob.data_dir / "extensions")
+    (ext,) = body["extensions"]
+    assert (ext["name"], ext["state"], ext["tools"], ext["error"]) == (
+        "e2e-ext",
+        "loaded",
+        ["e2e_ext_hello"],
+        "",
+    )
+
+
+def test_the_model_can_call_the_extension_tool(be: tuple, llm: StandInLLM) -> None:
+    _ob, cl = be
+    res = _result(_call(cl, llm, "t-call", "e2e_ext_hello"))
+    assert res.get("error_code") is None, res
+    assert res["result"] == "v1:e2e"
+    # the tool was advertised to the model with the schema the host built
+    tools = {t["function"]["name"]: t for t in llm.chat_requests()[0].body.get("tools", [])}
+    assert tools["e2e_ext_hello"]["function"]["parameters"]["properties"] == {
+        "who": {"type": "string"}
+    }
+
+
+def test_an_edit_takes_effect_after_reloading_that_extension(be: tuple, llm: StandInLLM) -> None:
+    ob, cl = be
+    _write(ob.data_dir, "e2e-ext", reply="v2", tool="e2e_ext_hello")
+    r = cl.post("/api/extensions/e2e-ext/reload")
+    assert r.status_code == 200 and r.json()["state"] == "loaded", r.text
+    assert _result(_call(cl, llm, "t-after-edit", "e2e_ext_hello"))["result"] == "v2:e2e"
+
+
+def test_a_new_extension_appears_after_reloading_all(be: tuple, llm: StandInLLM) -> None:
+    ob, cl = be
+    _write(ob.data_dir, "late-ext", reply="late", tool="late_ext_hello")
+    names = [e["name"] for e in cl.post("/api/extensions/reload").json()["extensions"]]
+    assert names == ["e2e-ext", "late-ext"]
+    assert _result(_call(cl, llm, "t-late", "late_ext_hello"))["result"] == "late:e2e"
+
+
+def test_an_extension_skill_appears_after_reload(be: tuple) -> None:
+    ob, cl = be
+    skill = ob.data_dir / "extensions" / "late-ext" / "skills" / "late-helper"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "---\nname: late-helper\ndescription: e2e skill\n---\n# late-helper\n", encoding="utf-8"
+    )
+    assert "late-helper" not in {s["skill_id"] for s in cl.get("/api/skills").json()["skills"]}
+
+    status = cl.post("/api/extensions/late-ext/reload").json()
+
+    assert status["skills"] == ["late-helper"]
+    listed = {s["skill_id"]: s for s in cl.get("/api/skills").json()["skills"]}
+    assert listed["late-helper"]["source"] == "extension:late-ext"
+
+
+def test_a_broken_reload_is_reported_and_the_tool_goes_away(be: tuple, llm: StandInLLM) -> None:
+    ob, cl = be
+    (ob.data_dir / "extensions" / "e2e-ext" / "main.py").write_text(
+        "raise RuntimeError('broken on purpose')\n", encoding="utf-8"
+    )
+    status = cl.post("/api/extensions/e2e-ext/reload").json()
+    assert status["state"] == "failed" and "broken on purpose" in status["error"]
+    res = _result(_call(cl, llm, "t-broken", "e2e_ext_hello"))
+    assert res.get("error_code"), res  # the model's call no longer reaches a handler
+
+
+def test_unknown_extension_is_404(be: tuple) -> None:
+    _ob, cl = be
+    r = cl.post("/api/extensions/no-such-ext/reload")
+    assert r.status_code == 404 and r.json()["code"] == "extensions.not_found"

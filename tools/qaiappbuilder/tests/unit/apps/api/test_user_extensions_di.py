@@ -228,21 +228,22 @@ async def test_app_services_reach_the_context(data_root: Path) -> None:
     assert Path(data_dir) == data_root / "extensions-data" / "demo-ext"
 
 
-def test_failure_after_registration_leaves_nothing(data_root: Path, monkeypatch) -> None:
-    """If wiring fails after tools are registered, they must not stay without a group."""
+def test_a_policy_failure_fails_that_extension_and_leaves_no_tool(
+    data_root: Path, monkeypatch
+) -> None:
+    """If the permission group cannot be joined, the tool must not be registered at all."""
 
-    def _boom(_host):
+    def _boom(*_args):
         raise RuntimeError("policy failed")
 
-    monkeypatch.setattr(di, "_apply_tool_policy", _boom)
+    monkeypatch.setattr(di, "add_group_members", _boom)
     tools = RegistryBackedToolInvocation()
     container = SimpleNamespace(data_paths=SimpleNamespace(root=data_root), user_extensions=None)
-    assert (
-        wire_user_extensions_into_chat(chat=SimpleNamespace(tools=tools), container=container)
-        is None
-    )
+    manager = wire_user_extensions_into_chat(chat=SimpleNamespace(tools=tools), container=container)
+    assert manager is not None
+    (status,) = manager.statuses
+    assert status.state == "failed" and "policy failed" in status.error
     assert tools.registered_tools == ()
-    assert container.user_extensions is None
 
 
 def test_skill_added_after_load_is_not_discovered(data_root: Path) -> None:

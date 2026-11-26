@@ -88,6 +88,7 @@ from interfaces.http.routes.search_engines import build_router as build_search_e
 from interfaces.http.routes.remote_deploy import build_router as build_remote_deploy_router
 from interfaces.http.routes.qairt_switch import build_router as build_qairt_switch_router
 from interfaces.http.routes.builder_env import build_router as build_builder_env_router
+from interfaces.http.routes.extensions import build_router as build_extensions_router
 from qai.platform.config import Settings, load_settings
 from qai.platform.logging import get_logger
 
@@ -371,6 +372,7 @@ def create_app(
     # one to survive a refactor unnoticed.
     app.include_router(build_gallery_submit_router(container=container))
     app.include_router(build_remote_deploy_router(container=container))
+    app.include_router(build_extensions_router(container=container))
 
     # Chat image files + SPA static bundle (PR-074). Both must register
     # AFTER all API/WS routers so FastAPI matches /api/*, /openapi.json,

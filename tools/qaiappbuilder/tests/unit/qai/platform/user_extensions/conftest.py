@@ -104,6 +104,9 @@ class FakeSink:
         self.handlers.pop(name, None)
         self.schemas.pop(name, None)
 
+    def handler_for(self, name: str) -> Any:
+        return self.handlers.get(name)
+
 
 class FakeSecretStore:
     def __init__(self) -> None:

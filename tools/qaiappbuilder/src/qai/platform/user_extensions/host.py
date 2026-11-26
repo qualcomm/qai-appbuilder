@@ -28,6 +28,8 @@ services the context exposes (secret store, proxy, TLS setting).
 from __future__ import annotations
 
 import asyncio
+import importlib.abc
+import importlib.machinery
 import importlib.util
 import inspect
 import json
@@ -60,6 +62,7 @@ __all__ = [
     "SecretStoreLike",
     "ToolCall",
     "ToolSink",
+    "UnknownExtensionError",
     "UserExtensionHost",
     "discover_extension_dirs",
     "module_name_for",
@@ -104,6 +107,10 @@ class ToolSink(Protocol):
 
     def unregister(self, name: str) -> None: ...
 
+    def handler_for(self, name: str) -> Any:
+        """The handler currently registered under ``name``, or ``None``."""
+        ...
+
 
 class SecretStoreLike(Protocol):
     """The subset of ``qai.platform.persistence.secrets.SecretStore`` used here."""
@@ -135,6 +142,9 @@ class RegisteredTool:
     name: str
     extension: str
     declaration: ToolDeclaration
+    #: The exact handler object put into the sink: unregistering checks the
+    #: sink still holds it, so a tool registered over ours is never removed.
+    handler: Any = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -381,14 +391,35 @@ class ExtensionContext:
         for callback in reversed(callbacks):
             try:
                 callback()
-            except Exception:
+            except KeyboardInterrupt:
+                raise
+            except BaseException:
                 logger.warning(
                     "user_extensions.unload_callback_failed extension=%s", self.name, exc_info=True
                 )
 
 
+class UnknownExtensionError(LookupError):
+    """No extension directory (and no loaded extension) has this name."""
+
+
+#: ``on_tool_added(name, group)`` / ``on_tool_removed(name)``: let the
+#: composition root keep per-tool policy (permission groups) in step with the
+#: registry. ``on_tool_added`` runs BEFORE the tool is registered and
+#: ``on_tool_removed`` AFTER it is unregistered, so the tool is never callable
+#: without its policy.
+ToolAddedHook = Callable[[str, "str | None"], None]
+ToolRemovedHook = Callable[[str], None]
+
+
 class UserExtensionHost:
-    """Loads every extension under ``scan_root`` into a :class:`ToolSink`."""
+    """Loads the extensions under ``scan_root`` into a :class:`ToolSink`.
+
+    Mutations (load / reload / unload) are not thread-safe: the composition
+    root serialises them with one lock. The read accessors (``statuses``,
+    ``skill_roots``, ``tools``, ``skill_default_modes``) may run concurrently
+    with a mutation on another thread: they work on snapshots.
+    """
 
     def __init__(
         self,
@@ -397,16 +428,27 @@ class UserExtensionHost:
         *,
         data_root: Path,
         taken_skill_ids: Callable[[], frozenset[str]] | None = None,
+        reserved_tool_names: frozenset[str] = frozenset(),
+        on_tool_added: ToolAddedHook | None = None,
+        on_tool_removed: ToolRemovedHook | None = None,
         secret_store: SecretStoreLike | None = None,
         proxy_url: Callable[[], str | None] | None = None,
         ssl_verify: Callable[[], bool] | None = None,
     ) -> None:
         """``taken_skill_ids`` returns the ids of the app's own skills; an
-        extension skill with one of those ids is refused (same rule as tools)."""
+        extension skill with one of those ids is refused (same rule as tools).
+
+        ``reserved_tool_names``: built-in tool names an extension may never
+        take, even when that built-in is not registered right now (disabled by
+        configuration, or registered later than the extensions).
+        """
         self._scan_root = scan_root
         self._sink = sink
         self._data_root = data_root
         self._taken_skill_ids = taken_skill_ids or frozenset
+        self._reserved = frozenset(reserved_tool_names)
+        self._on_tool_added = on_tool_added or (lambda _n, _g: None)
+        self._on_tool_removed = on_tool_removed or (lambda _n: None)
         self._services = {
             "secret_store": secret_store,
             "proxy_url": proxy_url,
@@ -424,18 +466,21 @@ class UserExtensionHost:
 
     @property
     def statuses(self) -> tuple[ExtensionStatus, ...]:
-        return tuple(self._statuses[k] for k in sorted(self._statuses))
+        snap = dict(self._statuses)
+        return tuple(snap[k] for k in sorted(snap))
 
     @property
     def tools(self) -> Mapping[str, RegisteredTool]:
         return dict(self._tools)
 
     def tools_of_group(self, group: str) -> frozenset[str]:
-        return frozenset(t.name for t in self._tools.values() if t.declaration.group == group)
+        tools = list(dict(self._tools).values())
+        return frozenset(t.name for t in tools if t.declaration.group == group)
 
     def skill_roots(self) -> tuple[ExtensionSkillRoot, ...]:
         """Skill roots of loaded extensions, sorted by extension name."""
-        return tuple(self._skill_roots[k] for k in sorted(self._skill_roots))
+        snap = dict(self._skill_roots)
+        return tuple(snap[k] for k in sorted(snap))
 
     def skill_default_modes(self) -> dict[str, str]:
         """``skill id -> default mode`` across loaded extensions (visible skills only)."""
@@ -446,15 +491,120 @@ class UserExtensionHost:
                     out.setdefault(skill_id, mode)
         return out
 
+    def status(self, name: str) -> ExtensionStatus | None:
+        return self._statuses.get(name)
+
     def load_all(self) -> tuple[ExtensionStatus, ...]:
+        """Load every extension directory not loaded yet (sorted by name).
+
+        A directory whose previous attempt failed is tried again.
+        """
         for ext_dir in discover_extension_dirs(self._scan_root):
-            status = self.load(ext_dir)
-            self._statuses[status.name] = status
-            _log_status(status)
+            if self._loaded_from(ext_dir):
+                continue
+            self._statuses.pop(ext_dir.name, None)  # a previous failure
+            self._record(self.load(ext_dir))
         return self.statuses
 
+    def reload_all(self) -> tuple[ExtensionStatus, ...]:
+        """Unload everything, then load the scan root again (picks up new,
+        changed and removed extension directories)."""
+        self.unload_all()
+        return self.load_all()
+
+    def reload(self, name: str) -> ExtensionStatus:
+        """Unload extension ``name`` (if loaded) and load its directory again.
+
+        ``name`` is the extension's directory name (the manifest requires the
+        two to be equal). Raises :class:`UnknownExtensionError` when there is
+        neither such a directory nor such a loaded extension. A failed reload
+        leaves the extension unloaded, with the failure in its status.
+        """
+        ext_dir = self._ext_dir(name)
+        self.unload(name)
+        status = self.load(ext_dir)
+        self._record(status)
+        return status
+
+    def unload(self, name: str) -> bool:
+        """Unload one extension: tools first, then ``on_unload``, then modules.
+
+        Returns ``False`` when nothing was known under ``name``. Its status is
+        dropped; its skills disappear from the next scan.
+        """
+        known = name in self._statuses
+        for tool in [t for t in list(self._tools.values()) if t.extension == name]:
+            self._unregister_tool(tool)
+        ctx = self._contexts.pop(name, None)
+        if ctx is not None:
+            ctx._run_unload()
+        self._skill_roots.pop(name, None)
+        self._modules.pop(name, None)
+        # Every module under the extension's private name, including submodules
+        # first imported later (from a tool handler), so a reload never reuses one.
+        _forget_modules(_own_modules(module_name_for(name)))
+        self._statuses.pop(name, None)
+        return known or ctx is not None
+
+    def _record(self, status: ExtensionStatus) -> None:
+        self._statuses[status.name] = status
+        _log_status(status)
+
+    def _loaded_from(self, ext_dir: Path) -> bool:
+        return any(s.root == ext_dir and s.state == "loaded" for s in list(self._statuses.values()))
+
+    def _ext_dir(self, name: str) -> Path:
+        for ext_dir in discover_extension_dirs(self._scan_root):
+            if ext_dir.name == name:
+                return ext_dir
+        # Not on disk any more, but still loaded: reload == unload.
+        known = self._statuses.get(name)
+        if known is not None:
+            return known.root
+        raise UnknownExtensionError(name)
+
+    def _unregister_tool(self, tool: RegisteredTool) -> None:
+        """Remove ``tool`` from the sink only if the sink still holds OUR handler."""
+        self._tools.pop(tool.name, None)
+        if tool.handler is None or self._sink.handler_for(tool.name) is tool.handler:
+            self._sink.unregister(tool.name)
+            self._on_tool_removed(tool.name)
+        else:
+            logger.warning(
+                "user_extensions.tool_replaced extension=%s tool=%s "
+                "(another registrant owns the name now; left in place)",
+                tool.extension,
+                tool.name,
+            )
+
     def load(self, ext_dir: Path) -> ExtensionStatus:
-        """Load one extension directory. Never raises."""
+        """Load one extension directory. Never raises.
+
+        A host-side failure after tools were committed (e.g. the skill scan)
+        unloads the extension again and is reported in its status.
+        """
+        try:
+            return self._load(ext_dir)
+        except KeyboardInterrupt:
+            raise
+        except BaseException as exc:
+            logger.warning("user_extensions.load_failed dir=%s", ext_dir, exc_info=True)
+            self.unload(ext_dir.name)
+            return ExtensionStatus(
+                name=ext_dir.name,
+                root=ext_dir,
+                state="failed",
+                error=f"host error: {type(exc).__name__}: {exc}",
+            )
+
+    def _load(self, ext_dir: Path) -> ExtensionStatus:
+        if not ext_dir.is_dir():
+            return ExtensionStatus(
+                name=ext_dir.name,
+                root=ext_dir,
+                state="failed",
+                error="the extension directory no longer exists",
+            )
         try:
             manifest = load_manifest(ext_dir)
         except ManifestError as exc:
@@ -473,7 +623,7 @@ class UserExtensionHost:
         ctx = ExtensionContext(
             manifest,
             data_root=self._data_root,
-            taken_names=self._sink.tool_names,
+            taken_names=self._taken_tool_names,
             **self._services,  # type: ignore[arg-type]
         )
         module_name = module_name_for(manifest.name)
@@ -493,14 +643,19 @@ class UserExtensionHost:
         committed: list[str] = []
         for pending in ctx._finish():
             # Re-check: another tool may have taken the name meanwhile.
-            if pending.name in self._sink.tool_names():
+            if pending.name in self._taken_tool_names():
                 ctx._warnings.append(
                     f"tool {pending.name!r} refused: the name is already used by another tool"
                 )
                 continue
+            # Policy first: the tool must never be callable without its group.
+            self._on_tool_added(pending.name, pending.declaration.group)
             self._sink.register(pending.name, pending.handler, schema=pending.schema)
             self._tools[pending.name] = RegisteredTool(
-                name=pending.name, extension=manifest.name, declaration=pending.declaration
+                name=pending.name,
+                extension=manifest.name,
+                declaration=pending.declaration,
+                handler=pending.handler,
             )
             committed.append(pending.name)
         for name in sorted(manifest.tool_names - set(committed)):
@@ -511,6 +666,10 @@ class UserExtensionHost:
         status.warnings.extend(ctx._warnings)
         self._commit_skills(manifest, status)
         return status
+
+    def _taken_tool_names(self) -> frozenset[str]:
+        """Names an extension may not take: registered now, or reserved."""
+        return self._sink.tool_names() | self._reserved
 
     def _commit_skills(self, manifest: ExtensionManifest, status: ExtensionStatus) -> None:
         """Record the extension's skill root (only for a LOADED extension)."""
@@ -526,22 +685,13 @@ class UserExtensionHost:
             status.skills = root.skill_ids
 
     def unload_all(self) -> None:
-        """Unregister tools, then run ``on_unload`` callbacks, then forget modules.
+        """Unload every extension (reverse load order).
 
-        Tools go first so no new call reaches an extension whose resources its
-        callbacks are tearing down.
+        Per extension: tools first, so no new call reaches an extension whose
+        resources its ``on_unload`` callbacks are tearing down.
         """
-        for name in list(self._tools):
-            self._sink.unregister(name)
-        self._tools.clear()
-        for name in sorted(self._contexts, reverse=True):
-            self._contexts[name]._run_unload()
-        self._contexts.clear()
-        self._skill_roots.clear()
-        for modules in self._modules.values():
-            _forget_modules(modules)
-        self._modules.clear()
-        self._statuses.clear()
+        for name in sorted(set(self._statuses) | set(self._contexts), reverse=True):
+            self.unload(name)
 
 
 def module_name_for(extension: str) -> str:
@@ -666,17 +816,58 @@ def _import_entry(manifest: ExtensionManifest, module_name: str) -> ModuleType:
     ext_root = manifest.root.resolve()
     if not all(p.resolve().is_relative_to(ext_root) for p in (target, file)):
         raise ExtensionError(f"entry {manifest.entry!r} resolves outside the extension")
-    spec = importlib.util.spec_from_file_location(
-        module_name, file, submodule_search_locations=[str(target)] if is_package else None
-    )
     if module_name in sys.modules:
         raise ExtensionError(f"module {module_name!r} is already imported")
+    spec = importlib.util.spec_from_file_location(
+        module_name,
+        file,
+        loader=_SourceOnlyLoader(module_name, str(file)),
+        submodule_search_locations=[str(target)] if is_package else None,
+    )
     if spec is None or spec.loader is None:
         raise ExtensionError(f"cannot import {target}")
+    _ACTIVE_ROOTS[module_name] = manifest.root.resolve()
+    importlib.invalidate_caches()  # directory listings cached by path finders
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
+
+
+class _SourceOnlyLoader(importlib.machinery.SourceFileLoader):
+    """Compile from source every time; never read or write cached bytecode.
+
+    A cached ``.pyc`` is trusted when the source's mtime (whole seconds) and
+    size match, so an edit that keeps the size and lands in the same second --
+    normal when editing and reloading quickly -- would otherwise run the OLD
+    code. The cache may also live outside the extension (``sys.pycache_prefix``,
+    which appbuilder sets), so deleting ``__pycache__`` is not enough.
+    """
+
+    def get_code(self, fullname: str) -> Any:
+        path = self.get_filename(fullname)
+        return compile(self.get_data(path), path, "exec", dont_inherit=True)
+
+
+class _ExtensionSubmoduleFinder(importlib.abc.MetaPathFinder):
+    """Load an extension package's own submodules with :class:`_SourceOnlyLoader`."""
+
+    def find_spec(self, fullname: str, path: Any, target: Any = None) -> Any:
+        top = fullname.split(".", 1)[0]
+        if top not in _ACTIVE_ROOTS or fullname == top:
+            return None
+        spec = importlib.machinery.PathFinder.find_spec(fullname, path)
+        if spec is None or not isinstance(spec.loader, importlib.machinery.SourceFileLoader):
+            return spec
+        spec.loader = _SourceOnlyLoader(fullname, spec.loader.path)
+        return spec
+
+
+#: Module name -> extension root, for the submodule finder.
+_ACTIVE_ROOTS: dict[str, Path] = {}
+_SUBMODULE_FINDER = _ExtensionSubmoduleFinder()
+if not any(isinstance(f, _ExtensionSubmoduleFinder) for f in sys.meta_path):
+    sys.meta_path.insert(0, _SUBMODULE_FINDER)
 
 
 def _own_modules(module_name: str) -> list[str]:
@@ -688,6 +879,7 @@ def _own_modules(module_name: str) -> list[str]:
 def _forget_modules(names: Iterable[str]) -> None:
     for name in names:
         sys.modules.pop(name, None)
+        _ACTIVE_ROOTS.pop(name, None)
 
 
 def _adapt_handler(handler: Callable[[ToolCall], Any]) -> Callable[[Any], Awaitable[Any]]:

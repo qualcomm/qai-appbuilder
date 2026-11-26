@@ -43,36 +43,46 @@ Skills -- ``<ext>/<skills.dir>/<id>/SKILL.md`` (design doc §5.2, §9.3):
 from __future__ import annotations
 
 import contextlib
+import threading
 from collections.abc import Awaitable, Callable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from qai.chat.adapters import RegistryBackedToolInvocation
-from qai.chat.domain.tool_groups import ALL_TOOL_GROUPS, add_group_members
+from qai.chat.application.use_cases.tool_advertise import TOOL_ORDER
+from qai.chat.domain.tool_groups import add_group_members, remove_group_members
 from qai.platform.logging import get_logger
 from qai.platform.skills import (
     ContributedSkillRoot,
     SkillDiscovery,
     set_contributed_default_modes,
 )
-from qai.platform.user_extensions import UserExtensionHost
+from qai.platform.user_extensions import ExtensionStatus, UserExtensionHost
 
 from ._global_proxy import build_global_proxy_provider, build_ssl_verify_provider
 
 __all__ = [
     "EXTENSIONS_DIRNAME",
+    "RESERVED_TOOL_NAMES",
     "RegistryToolSink",
+    "UserExtensionManager",
     "build_user_extension_host",
     "extension_skill_roots",
     "wire_user_extensions_into_chat",
 ]
 
 _LOG = get_logger("apps.api.user_extensions")
+_T = TypeVar("_T")
 
 #: ``<data>/extensions``.
 EXTENSIONS_DIRNAME = "extensions"
 #: ``SkillInfo.source`` prefix for extension-provided skills.
 SKILL_SOURCE_PREFIX = "extension:"
+
+#: Built-in tool names an extension may never take, even when the built-in
+#: is not registered right now (``computer`` / ``browser`` disabled, ``agent``
+#: failed to build, ...). ``TOOL_ORDER`` lists every built-in tool name.
+RESERVED_TOOL_NAMES: frozenset[str] = frozenset(TOOL_ORDER)
 
 
 class RegistryToolSink:
@@ -95,6 +105,9 @@ class RegistryToolSink:
 
     def unregister(self, name: str) -> None:
         self._tools.unregister(name)
+
+    def handler_for(self, name: str) -> Any:
+        return self._tools.handler_for(name)
 
 
 def build_user_extension_host(
@@ -119,17 +132,91 @@ def build_user_extension_host(
         RegistryToolSink(tools),
         data_root=data_root,
         taken_skill_ids=_taken_skill_ids,
+        reserved_tool_names=RESERVED_TOOL_NAMES,
+        on_tool_added=_join_group,
+        on_tool_removed=_leave_groups,
         secret_store=secret_store,
         proxy_url=proxy_url,
         ssl_verify=ssl_verify,
     )
 
 
-def wire_user_extensions_into_chat(*, chat: Any, container: Any) -> UserExtensionHost | None:
+def _join_group(name: str, group: str | None) -> None:
+    """Host hook, BEFORE a tool is registered: join its permission group."""
+    if group is not None:
+        add_group_members(group, frozenset({name}))
+
+
+def _leave_groups(name: str) -> None:
+    """Host hook, AFTER a tool is unregistered: leave every group (built-ins stay)."""
+    remove_group_members(frozenset({name}))
+
+
+class UserExtensionManager:
+    """Runtime management of the loaded extensions (list / reload / unload).
+
+    Owns the one lock that serialises every host mutation. Permission groups
+    follow each tool through the host's hooks (joined before it is registered,
+    left after it is unregistered), so a tool is never callable outside its
+    group. After each operation the skills' default-mode provider is re-bound;
+    skills themselves need no re-sync (the scan reads the host's roots).
+
+    Operations are synchronous (extension ``activate`` / ``on_unload`` code is
+    plain Python); HTTP handlers and shutdown run them in a worker thread.
+    Reads (``statuses``) never take the lock, so they never wait for a reload.
+    """
+
+    def __init__(self, host: UserExtensionHost) -> None:
+        self._host = host
+        self._lock = threading.Lock()
+
+    @property
+    def host(self) -> UserExtensionHost:
+        return self._host
+
+    @property
+    def statuses(self) -> tuple[ExtensionStatus, ...]:
+        return self._host.statuses
+
+    def load_all(self) -> tuple[ExtensionStatus, ...]:
+        return self._change(self._host.load_all)
+
+    def reload_all(self) -> tuple[ExtensionStatus, ...]:
+        """Unload every extension and scan the directory again."""
+        return self._change(self._host.reload_all)
+
+    def reload(self, name: str) -> ExtensionStatus:
+        """Reload one extension. :class:`UnknownExtensionError` for an unknown name."""
+        return self._change(lambda: self._host.reload(name))
+
+    def unload_all(self, *, timeout: float | None = None) -> bool:
+        """Unload everything. With ``timeout``, give up waiting for a running
+        reload after that many seconds and return ``False`` (shutdown)."""
+        if not self._lock.acquire(timeout=-1 if timeout is None else timeout):
+            return False
+        try:
+            self._host.unload_all()
+        finally:
+            self._after_change()
+            self._lock.release()
+        return True
+
+    def _change(self, op: Callable[[], _T]) -> _T:
+        with self._lock:
+            try:
+                return op()
+            finally:
+                self._after_change()
+
+    def _after_change(self) -> None:
+        set_contributed_default_modes(self._host.skill_default_modes)
+
+
+def wire_user_extensions_into_chat(*, chat: Any, container: Any) -> UserExtensionManager | None:
     """Load ``<data>/extensions/*`` into the chat tool registry + skill scan.
 
     Best-effort: never raises, so a broken extension can never stop startup.
-    Returns the host (also stashed on ``container.user_extensions``) or
+    Returns the manager (also stashed on ``container.user_extensions``) or
     ``None`` when the chat registry is not the registry-backed adapter
     (stripped-down test containers).
     """
@@ -145,23 +232,22 @@ def wire_user_extensions_into_chat(*, chat: Any, container: Any) -> UserExtensio
             proxy_url=_live_provider(container, build_global_proxy_provider),
             ssl_verify=_live_provider(container, build_ssl_verify_provider),
         )
+        manager = UserExtensionManager(host)
     except Exception:  # noqa: BLE001 - extensions must never break startup
         _LOG.warning("user_extensions.wire_failed", exc_info=True)
         return None
     try:
-        host.load_all()
-        _apply_tool_policy(host)
-        set_contributed_default_modes(host.skill_default_modes)
+        manager.load_all()
     except Exception:  # noqa: BLE001 - extensions must never break startup
         # Never leave tools registered without their permission group.
         _LOG.warning("user_extensions.wire_failed", exc_info=True)
         with contextlib.suppress(Exception):
-            host.unload_all()
+            manager.unload_all()
         return None
     # Stripped-down test containers may refuse the attribute.
     with contextlib.suppress(Exception):
-        container.user_extensions = host
-    return host
+        container.user_extensions = manager
+    return manager
 
 
 def extension_skill_roots(container: Any) -> list[ContributedSkillRoot]:
@@ -170,7 +256,8 @@ def extension_skill_roots(container: Any) -> list[ContributedSkillRoot]:
     Read on every scan; empty until the host is wired (``user_prefs`` is built
     earlier in phase 2) and for containers without one.
     """
-    host = getattr(container, "user_extensions", None)
+    manager = getattr(container, "user_extensions", None)
+    host = getattr(manager, "host", None)
     if host is None:
         return []
     return [
@@ -198,13 +285,3 @@ def _app_skill_dirs(container: Any) -> list[Path]:
     discovery = getattr(user_prefs, "skill_discovery", None)
     dirs = getattr(discovery, "skills_dirs", None)
     return list(dirs) if isinstance(dirs, list) else []
-
-
-def _apply_tool_policy(host: UserExtensionHost) -> None:
-    """Join extension tools to the persona permission groups they declare."""
-    if not host.tools:
-        return
-    for group in ALL_TOOL_GROUPS:
-        names = host.tools_of_group(group)
-        if names:
-            add_group_members(group, names)

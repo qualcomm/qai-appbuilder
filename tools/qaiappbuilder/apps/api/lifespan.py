@@ -1251,6 +1251,23 @@ def make_lifespan(
                         "lifespan.conversation_write_queue_close_failed",
                         exc_info=True,
                     )
+            # User extensions -- unregister their tools and run their
+            # ``on_unload`` callbacks (close connections, flush files).
+            # Synchronous extension code, so off the event loop. Best-effort.
+            # Bounded: a reload still running holds the lock for up to 5s, and a
+            # hanging ``on_unload`` callback is abandoned after 10s overall.
+            _extensions = getattr(container, "user_extensions", None)
+            if _extensions is not None:
+                try:
+                    _done = await asyncio.wait_for(
+                        asyncio.to_thread(_extensions.unload_all, timeout=5.0), timeout=10.0
+                    )
+                    if _done:
+                        _log.info("lifespan.user_extensions_unloaded")
+                    else:
+                        _log.warning("lifespan.user_extensions_unload_skipped_busy")
+                except Exception:  # noqa: BLE001 - incl. TimeoutError
+                    _log.warning("lifespan.user_extensions_unload_failed", exc_info=True)
             # MCP integration — close all MCP server sessions / drop registered
             # MCP tool handlers so a re-wire does not double-register (mirrors
             # the broadcaster aclose above). Best-effort; never blocks teardown.
