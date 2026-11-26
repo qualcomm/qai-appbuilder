@@ -218,6 +218,9 @@ function turnStampFields(
   if (requestId !== null && requestId !== undefined) {
     meta["request_id"] = requestId;
   }
+  if (tab.streamingTaskSummary) {
+    meta["task_summary"] = tab.streamingTaskSummary;
+  }
   // Model id for the turn's final/trailing message. In a multi-Agent
   // discussion the active SPEAKER's own model takes precedence over the
   // tab's selected model — otherwise this stamp (spread AFTER the sender
@@ -345,7 +348,13 @@ function assembleSettled(
   if (!addTrailing) {
     // No trailing message. Stamp usage/perf/request_id/model onto the LAST
     // finalized streaming message so the metrics line / 📄 button still show.
-    if (hadStreamingMessages && (usage !== null || perf !== null || requestId !== null)) {
+    if (
+      hadStreamingMessages &&
+      (usage !== null ||
+        perf !== null ||
+        requestId !== null ||
+        tab.streamingTaskSummary !== null)
+    ) {
       const lastIdx = lastStreamingIndex(tab.messages);
       if (lastIdx >= 0) {
         const target = finalized[lastIdx]!;

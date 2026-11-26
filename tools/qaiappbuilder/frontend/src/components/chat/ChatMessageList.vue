@@ -60,6 +60,7 @@ import {
 } from "@/composables/chat/useChatScrollMemory";
 import { useToast } from "@/composables/useToast";
 import ToolCallList from "@/components/chat/ToolCallList.vue";
+import TaskSummaryCard from "@/components/chat/TaskSummaryCard.vue";
 import type { ToolCallView } from "@/stores/_chatTabsTypes";
 import type { TabId } from "@/stores/_chatTabsTypes";
 import SubAgentBlock from "@/components/chat/SubAgentBlock.vue";
@@ -462,6 +463,21 @@ const failedTurnHasLaterActivity = computed<boolean>(() => {
   if (tab === null || failed === null) return false;
   const idx = tab.messages.findIndex((m) => m.id === failed.id);
   return idx >= 0 && idx < tab.messages.length - 1;
+});
+
+// Task summary card: one user task may produce several assistant messages
+// carrying `meta.task_summary` (the original turn + headless follow-ups that
+// integrate background sub-agents). Each later snapshot supersedes the earlier
+// ones, so only the LAST message per `task_id` renders the card.
+const taskSummaryOwnerIds = computed<Set<string>>(() => {
+  const lastByTask = new Map<string, string>();
+  for (const m of activeMessages.value) {
+    const ts = m.meta?.["task_summary"] as { task_id?: string } | undefined;
+    if (ts && typeof ts === "object") {
+      lastByTask.set(ts.task_id ?? m.id, m.id);
+    }
+  }
+  return new Set(lastByTask.values());
 });
 
 const showWelcome = computed(() => {
@@ -2760,6 +2776,10 @@ onBeforeUnmount(() => {
                  `.message-row:hover .token-badge { opacity: 1 }` in chat.css,
                  reusing the same mechanism as `.message-actions` — no new
                  pattern, one source of truth for hover-reveal. -->
+            <TaskSummaryCard
+              v-if="msg.role === 'assistant' && msg.meta && msg.meta['task_summary'] && taskSummaryOwnerIds.has(msg.id)"
+              :summary="msg.meta['task_summary'] as any"
+            />
             <div
               v-if="hasMetrics(msg.usage, msg.perf)"
               class="token-badge"

@@ -33,6 +33,7 @@ import type {
   ChatTab,
   ChatToolCall,
   ChatMessageUsage,
+  TaskSummary,
   ImplementationItemVM,
   SubAgentBlock,
   SubAgentErrorKind,
@@ -1711,6 +1712,12 @@ const handleEnd: FrameHandler = (_tab, frame, ctx) => {
   const rid = payload.request_id;
   if (typeof rid === "string" && rid !== "") {
     ctx.patchTab({ streamingRequestId: rid });
+  }
+  // Per-user-task totals (main + every sub-agent round, wall-clock) on the
+  // supplementary end frame; stamped onto `meta.task_summary` in confirmDone.
+  const ts = payload.task_summary;
+  if (ts !== null && typeof ts === "object") {
+    ctx.patchTab({ streamingTaskSummary: ts as TaskSummary });
   }
   // §3.1 tail-append: the persisted assistant Message id for this turn (same
   // supplementary end frame that carries `request_id`). Capture it so

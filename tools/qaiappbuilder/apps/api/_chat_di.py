@@ -1751,6 +1751,12 @@ def build_chat_services(container: Container) -> ChatServices:
     # immutable after construction — no half-initialised window where the
     # bridge exists but its handler slot is still ``None``.
     _agent_handler_holder: dict[str, "AgentToolHandler"] = {}
+    # Per-user-task token ledger (main agent + every sub-agent round), shared
+    # by the main use case and the sub-agent handler so a task's card sums
+    # exactly the rounds run for THAT task.
+    from qai.chat.application.task_usage_ledger import TaskUsageLedger
+
+    task_usage_ledger = TaskUsageLedger()
 
     def _resolve_agent_handler() -> "AgentToolHandler":
         handler = _agent_handler_holder.get("handler")
@@ -1848,6 +1854,7 @@ def build_chat_services(container: Container) -> ChatServices:
             # when ``chat_budget_enabled`` is off) shared with the main use case
             # so a sub-agent draws from the PARENT conversation's pool.
             budget_tracker=enforcement_tracker,
+            task_usage_ledger=task_usage_ledger,
             # P2 tech-debt fix (sub-agent journal wiring): the SAME journal
             # instance the main use case receives, so sub-agent compaction
             # emits one-line-per-event JSONL alongside the main agent's
@@ -2613,6 +2620,7 @@ def build_chat_services(container: Container) -> ChatServices:
         hook_engine=hook_engine,
         local_skill_catalog_provider=_local_skill_catalog_provider,
         sub_agent_sessions=subagent_sessions,
+        task_usage_ledger=task_usage_ledger,
         runtime_debug_config=_build_runtime_debug_config_reader(container),
         computer_enabled_provider=_computer_enabled_reader,
         cloud_image_config_provider=_build_cloud_image_reader(container),
