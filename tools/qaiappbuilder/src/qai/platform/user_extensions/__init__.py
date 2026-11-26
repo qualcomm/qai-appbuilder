@@ -38,6 +38,7 @@ from .manifest import (
     load_manifest,
     parse_manifest,
 )
+from .state import STATE_FILENAME, ExtensionStateStore
 
 __all__ = [
     "CONFIG_FILENAME",
@@ -45,11 +46,13 @@ __all__ = [
     "DEFAULT_SKILLS_DIR",
     "MANIFEST_FILENAME",
     "MANIFEST_VERSION",
+    "STATE_FILENAME",
     "ExtensionContext",
     "ExtensionError",
     "ExtensionManifest",
     "ExtensionSecrets",
     "ExtensionSkillRoot",
+    "ExtensionStateStore",
     "ExtensionStatus",
     "ManifestError",
     "RegisteredTool",

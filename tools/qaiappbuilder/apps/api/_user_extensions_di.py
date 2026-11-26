@@ -57,7 +57,12 @@ from qai.platform.skills import (
     SkillDiscovery,
     set_contributed_default_modes,
 )
-from qai.platform.user_extensions import ExtensionStatus, UserExtensionHost
+from qai.platform.user_extensions import (
+    STATE_FILENAME,
+    ExtensionStateStore,
+    ExtensionStatus,
+    UserExtensionHost,
+)
 
 from ._global_proxy import build_global_proxy_provider, build_ssl_verify_provider
 
@@ -115,6 +120,7 @@ def build_user_extension_host(
     tools: Any,
     data_root: Path,
     app_skill_dirs: list[Path] | None = None,
+    state: ExtensionStateStore | None = None,
     secret_store: Any = None,
     proxy_url: Callable[[], str | None] | None = None,
     ssl_verify: Callable[[], bool] | None = None,
@@ -135,6 +141,7 @@ def build_user_extension_host(
         reserved_tool_names=RESERVED_TOOL_NAMES,
         on_tool_added=_join_group,
         on_tool_removed=_leave_groups,
+        is_disabled=state.is_disabled if state is not None else None,
         secret_store=secret_store,
         proxy_url=proxy_url,
         ssl_verify=ssl_verify,
@@ -166,13 +173,18 @@ class UserExtensionManager:
     Reads (``statuses``) never take the lock, so they never wait for a reload.
     """
 
-    def __init__(self, host: UserExtensionHost) -> None:
+    def __init__(self, host: UserExtensionHost, state: ExtensionStateStore | None = None) -> None:
         self._host = host
+        self._state = state
         self._lock = threading.Lock()
 
     @property
     def host(self) -> UserExtensionHost:
         return self._host
+
+    @property
+    def state(self) -> ExtensionStateStore | None:
+        return self._state
 
     @property
     def statuses(self) -> tuple[ExtensionStatus, ...]:
@@ -188,6 +200,32 @@ class UserExtensionManager:
     def reload(self, name: str) -> ExtensionStatus:
         """Reload one extension. :class:`UnknownExtensionError` for an unknown name."""
         return self._change(lambda: self._host.reload(name))
+
+    def set_enabled(self, name: str, enabled: bool) -> ExtensionStatus:
+        """Persist the switch, then reload: disabling unloads it, enabling loads it."""
+
+        def op() -> ExtensionStatus:
+            self._host.reload(name)  # validates the name before anything is written
+            self._require_state().set_disabled(name, not enabled)
+            return self._host.reload(name)
+
+        return self._change(op)
+
+    def remove(self, name: str, *, purge_data: bool = False) -> None:
+        """Uninstall: unload, delete the directory; with ``purge_data`` also its
+        data directory, secrets and stored settings / switch."""
+
+        def op() -> None:
+            self._host.remove(name, purge_data=purge_data)
+            if purge_data and self._state is not None:
+                self._state.forget(name)
+
+        self._change(op)
+
+    def _require_state(self) -> ExtensionStateStore:
+        if self._state is None:
+            raise RuntimeError("extension switches are not persisted in this host")
+        return self._state
 
     def unload_all(self, *, timeout: float | None = None) -> bool:
         """Unload everything. With ``timeout``, give up waiting for a running
@@ -224,15 +262,18 @@ def wire_user_extensions_into_chat(*, chat: Any, container: Any) -> UserExtensio
     if not isinstance(tools, RegistryBackedToolInvocation):
         return None
     try:
+        data_root = container.data_paths.root
+        state = ExtensionStateStore(data_root / "config" / STATE_FILENAME)
         host = build_user_extension_host(
             tools=tools,
-            data_root=container.data_paths.root,
+            data_root=data_root,
             app_skill_dirs=_app_skill_dirs(container),
+            state=state,
             secret_store=getattr(container, "secret_store", None),
             proxy_url=_live_provider(container, build_global_proxy_provider),
             ssl_verify=_live_provider(container, build_ssl_verify_provider),
         )
-        manager = UserExtensionManager(host)
+        manager = UserExtensionManager(host, state)
     except Exception:  # noqa: BLE001 - extensions must never break startup
         _LOG.warning("user_extensions.wire_failed", exc_info=True)
         return None

@@ -246,3 +246,61 @@ def test_unload_all_gives_up_when_busy(env) -> None:
         env.manager._lock.release()
     assert env.manager.unload_all(timeout=1.0) is True
     assert "demo_ext_tool" not in env.tools.registered_tools
+
+
+# -- enable / disable / remove ------------------------------------------------------
+
+
+async def test_disable_then_enable_is_persisted(env) -> None:
+    r = env.client.post("/api/extensions/demo-ext/disable")
+    assert r.status_code == 200 and r.json()["state"] == "disabled"
+    assert "demo_ext_tool" not in env.tools.registered_tools
+    assert all("demo_ext_tool" not in m for m in tool_groups.TOOL_GROUP_MEMBERS.values())
+    saved = json.loads((env.root / "config" / "extensions.json").read_text("utf-8"))
+    assert saved["disabled"] == ["demo-ext"]
+
+    # A restart (fresh manager over the same data dir) keeps it disabled.
+    env.manager.unload_all()
+    tools2 = RegistryBackedToolInvocation()
+    c2 = SimpleNamespace(data_paths=SimpleNamespace(root=env.root), user_extensions=None)
+    m2 = wire_user_extensions_into_chat(chat=SimpleNamespace(tools=tools2), container=c2)
+    assert m2 is not None and m2.statuses[0].state == "disabled"
+    assert "demo_ext_tool" not in tools2.registered_tools
+    m2.unload_all()
+
+    env.manager.load_all()
+    r = env.client.post("/api/extensions/demo-ext/enable")
+    assert r.json()["state"] == "loaded"
+    assert (await _call(env.tools, "demo_ext_tool")).result == "v1"
+    saved = json.loads((env.root / "config" / "extensions.json").read_text("utf-8"))
+    assert saved["disabled"] == []
+
+
+def test_enable_unknown_is_404_and_writes_nothing(env) -> None:
+    r = env.client.post("/api/extensions/no-such-ext/disable")
+    assert r.status_code == 404
+    assert not (env.root / "config" / "extensions.json").exists()
+
+
+def test_delete_removes_directory_and_optionally_data(env) -> None:
+    data = env.root / "extensions-data" / "demo-ext"
+    data.mkdir(parents=True)
+    env.client.post("/api/extensions/demo-ext/disable")  # leaves a stored switch
+
+    r = env.client.delete("/api/extensions/demo-ext")
+    assert r.status_code == 204
+    assert not (env.root / "extensions" / "demo-ext").exists()
+    assert data.is_dir()  # kept by default
+    assert env.client.get("/api/extensions").json()["extensions"] == []
+
+    _write_ext(env.root, "demo-ext", reply="v3")
+    env.client.post("/api/extensions/reload")
+    r = env.client.delete("/api/extensions/demo-ext", params={"purge_data": "true"})
+    assert r.status_code == 204
+    assert not data.exists()
+    saved = json.loads((env.root / "config" / "extensions.json").read_text("utf-8"))
+    assert "demo-ext" not in saved["disabled"]
+
+
+def test_delete_unknown_is_404(env) -> None:
+    assert env.client.delete("/api/extensions/no-such-ext").status_code == 404

@@ -34,6 +34,8 @@ import importlib.util
 import inspect
 import json
 import logging
+import os
+import shutil
 import sys
 import tomllib
 from collections.abc import Awaitable, Callable, Iterable, Mapping
@@ -77,7 +79,8 @@ CONFIG_FILENAME: Final[str] = "config.toml"
 DATA_DIRNAME: Final[str] = "extensions-data"
 _MODULE_PREFIX: Final[str] = "qai_user_ext_"
 
-State = Literal["loaded", "failed"]
+#: ``disabled``: the user switched the extension off; nothing of it is loaded.
+State = Literal["loaded", "failed", "disabled"]
 
 
 class ExtensionError(Exception):
@@ -431,6 +434,7 @@ class UserExtensionHost:
         reserved_tool_names: frozenset[str] = frozenset(),
         on_tool_added: ToolAddedHook | None = None,
         on_tool_removed: ToolRemovedHook | None = None,
+        is_disabled: Callable[[str], bool] | None = None,
         secret_store: SecretStoreLike | None = None,
         proxy_url: Callable[[], str | None] | None = None,
         ssl_verify: Callable[[], bool] | None = None,
@@ -441,6 +445,10 @@ class UserExtensionHost:
         ``reserved_tool_names``: built-in tool names an extension may never
         take, even when that built-in is not registered right now (disabled by
         configuration, or registered later than the extensions).
+
+        ``is_disabled(name)``: the user's switch, read on every load; a
+        disabled extension is recorded with state ``disabled`` and nothing of
+        it (code, tools, skills) is loaded.
         """
         self._scan_root = scan_root
         self._sink = sink
@@ -449,6 +457,7 @@ class UserExtensionHost:
         self._reserved = frozenset(reserved_tool_names)
         self._on_tool_added = on_tool_added or (lambda _n, _g: None)
         self._on_tool_removed = on_tool_removed or (lambda _n: None)
+        self._is_disabled = is_disabled or (lambda _n: False)
         self._services = {
             "secret_store": secret_store,
             "proxy_url": proxy_url,
@@ -526,6 +535,35 @@ class UserExtensionHost:
         self._record(status)
         return status
 
+    def remove(self, name: str, *, purge_data: bool = False) -> None:
+        """Uninstall: unload ``name`` and delete its directory under the scan root.
+
+        ``purge_data`` also deletes ``<data>/extensions-data/<name>`` and every
+        secret in its namespace. Raises :class:`UnknownExtensionError` when
+        there is no such directory. The directory must sit directly in the
+        scan root (a link pointing elsewhere is unlinked, not followed).
+        """
+        ext_dir = self._scan_root / name
+        if not ext_dir.exists() and not ext_dir.is_symlink() and name not in self._statuses:
+            raise UnknownExtensionError(name)
+        if (
+            ext_dir.parent != self._scan_root
+            or name in {"", ".", ".."}
+            or "/" in name
+            or "\\" in name
+        ):
+            raise UnknownExtensionError(name)
+        self.unload(name)
+        _remove_tree(ext_dir)
+        if purge_data:
+            _remove_tree(self._data_root / DATA_DIRNAME / name)
+            secrets = ExtensionSecrets(self._services["secret_store"], name)  # type: ignore[arg-type]
+            try:
+                for key in secrets.keys():  # noqa: SIM118 - ExtensionSecrets, not a dict
+                    secrets.delete(key)
+            except ExtensionError:
+                pass  # no secret store in this host
+
     def unload(self, name: str) -> bool:
         """Unload one extension: tools first, then ``on_unload``, then modules.
 
@@ -551,7 +589,7 @@ class UserExtensionHost:
         _log_status(status)
 
     def _loaded_from(self, ext_dir: Path) -> bool:
-        return any(s.root == ext_dir and s.state == "loaded" for s in list(self._statuses.values()))
+        return any(s.root == ext_dir and s.state != "failed" for s in list(self._statuses.values()))
 
     def _ext_dir(self, name: str) -> Path:
         for ext_dir in discover_extension_dirs(self._scan_root):
@@ -597,7 +635,7 @@ class UserExtensionHost:
                 error=f"host error: {type(exc).__name__}: {exc}",
             )
 
-    def _load(self, ext_dir: Path) -> ExtensionStatus:
+    def _load(self, ext_dir: Path) -> ExtensionStatus:  # noqa: PLR0911 - one exit per outcome
         if not ext_dir.is_dir():
             return ExtensionStatus(
                 name=ext_dir.name,
@@ -614,6 +652,9 @@ class UserExtensionHost:
         )
         if manifest.name in self._statuses and self._statuses[manifest.name].state == "loaded":
             status.error = "an extension with this name is already loaded"
+            return status
+        if self._is_disabled(manifest.name):
+            status.state = "disabled"
             return status
         if manifest.entry is None:
             status.state = "loaded"
@@ -697,6 +738,21 @@ class UserExtensionHost:
 def module_name_for(extension: str) -> str:
     """The private :data:`sys.modules` name of an extension's entry."""
     return _MODULE_PREFIX + extension.replace("-", "_")
+
+
+def _remove_tree(path: Path) -> None:
+    """Delete ``path``: a link is unlinked (its target is left alone)."""
+    if path.is_symlink() or _is_junction(path):
+        os.unlink(path) if path.is_symlink() else os.rmdir(path)
+    elif path.is_dir():
+        shutil.rmtree(path)
+    elif path.exists():
+        path.unlink()
+
+
+def _is_junction(path: Path) -> bool:
+    is_junction = getattr(os.path, "isjunction", None)  # Python 3.12+
+    return bool(is_junction and is_junction(path))
 
 
 def discover_extension_dirs(scan_root: Path) -> list[Path]:
