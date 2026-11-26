@@ -613,6 +613,8 @@ export interface TaskSummary {
   output_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  /** Portion of output_tokens spent on hidden reasoning (absent on old rows). */
+  reasoning_tokens?: number;
   main_tokens: number;
   duration_ms: number;
   model?: string;

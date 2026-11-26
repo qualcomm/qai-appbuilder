@@ -49,7 +49,10 @@ const subTotal = computed(() => subs.value.reduce((a, b) => a + b.tokens, 0));
     <div class="ts-detail">
       Input {{ fmt(summary.input_tokens) }}<template v-if="cacheParts.length > 0">
         (incl. {{ cacheParts.join(", ") }})</template>
-      · Output {{ fmt(summary.output_tokens) }}
+      · Output {{ fmt(summary.output_tokens) }}<template
+        v-if="(summary.reasoning_tokens ?? 0) > 0"
+      >
+        (incl. reasoning {{ fmt(summary.reasoning_tokens ?? 0) }})</template>
     </div>
     <details v-if="subs.length > 0" class="ts-subs">
       <summary>

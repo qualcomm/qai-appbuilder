@@ -21,6 +21,7 @@ def test_claude_uncorrected_adds_cache_split_back() -> None:
     u = {"prompt_tokens": 10, "completion_tokens": 5, "cache_read_tokens": 900}
     assert billed_round_usage(u, CLAUDE) == {
         "input": 910, "output": 5, "cache_read": 900, "cache_write": 0,
+        "reasoning": 0,
     }
 
 
@@ -33,6 +34,7 @@ def test_claude_uncorrected_cache_write_in_details() -> None:
     }
     assert billed_round_usage(u, CLAUDE) == {
         "input": 502, "output": 3, "cache_read": 0, "cache_write": 500,
+        "reasoning": 0,
     }
 
 
@@ -48,6 +50,7 @@ def test_corrected_prompt_already_includes_cache() -> None:
     }
     assert billed_round_usage(u, CLAUDE) == {
         "input": 416853, "output": 1740, "cache_read": 0, "cache_write": 416849,
+        "reasoning": 0,
     }
 
 
@@ -62,6 +65,7 @@ def test_native_anthropic_top_level_cache_creation() -> None:
     }
     assert billed_round_usage(u, CLAUDE) == {
         "input": 1304, "output": 9, "cache_read": 1000, "cache_write": 300,
+        "reasoning": 0,
     }
 
 
@@ -69,7 +73,25 @@ def test_openai_cached_tokens_inside_prompt() -> None:
     u = {"prompt_tokens": 1000, "completion_tokens": 50, "cache_read_tokens": 800}
     assert billed_round_usage(u, GPT) == {
         "input": 1000, "output": 50, "cache_read": 800, "cache_write": 0,
+        "reasoning": 0,
     }
+
+
+def test_reasoning_is_portion_of_output_and_summed_per_task() -> None:
+    # Real route-1 round: reasoning counted INSIDE completion_tokens.
+    u = {"prompt_tokens": 39299, "completion_tokens": 50,
+         "cache_read_tokens": 39168, "reasoning_tokens": 13}
+    assert billed_round_usage(u, GPT)["reasoning"] == 13
+    led = TaskUsageLedger()
+    led.open_task("t", conversation_id="c", started_ms=0, model=GPT)
+    led.add_round("t", u, model_id=GPT)
+    led.begin_subagent("t", "sa", "x")
+    led.add_round("t", {"prompt_tokens": 10, "completion_tokens": 40,
+                        "reasoning_tokens": 41}, model_id=GPT, subagent_id="sa")
+    s = led.snapshot("t", now_ms=1)
+    assert s["output_tokens"] == 90
+    assert s["reasoning_tokens"] == 13 + 40  # clamped to its round's output
+    assert s["total_tokens"] == 39299 + 10 + 90  # reasoning not re-added
 
 
 def test_no_usage() -> None:

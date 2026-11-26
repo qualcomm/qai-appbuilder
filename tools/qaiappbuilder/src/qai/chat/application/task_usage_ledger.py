@@ -28,6 +28,8 @@ Per-round billed口径 (input from :func:`_extract_usage`'s normalised dict):
 * ``cache_read`` / ``cache_write`` — portions of ``input`` served from /
   written to the prompt cache (display breakdown, already inside ``input``).
 * ``output`` — ``completion_tokens`` (reasoning tokens are inside it).
+* ``reasoning`` — portion of ``output`` spent on hidden reasoning
+  (``_extract_usage``'s ``reasoning_tokens``; display breakdown only).
 
 In-memory and process-scoped: a restart forgets running tasks (the summaries
 already stamped onto persisted messages survive). Pure bookkeeping — every
@@ -77,6 +79,9 @@ def billed_round_usage(
     # Anthropic reports cache read + cache write OUTSIDE prompt_tokens.
     split = is_anthropic and not bool(usage.get("prompt_includes_cache"))
     inp = pt + (cr_split + cache_write if split else 0)
+    # Reasoning (hidden chain-of-thought) tokens: OpenAI-style gateways count
+    # them INSIDE ``completion_tokens`` (display breakdown only).
+    reasoning = _int(usage.get("reasoning_tokens"))
     if inp == 0 and out == 0:
         return None
     return {
@@ -84,11 +89,15 @@ def billed_round_usage(
         "output": out,
         "cache_read": min(cache_read, inp),
         "cache_write": min(cache_write, inp),
+        "reasoning": min(reasoning, out),
     }
 
 
 def _zero() -> dict[str, int]:
-    return {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "rounds": 0}
+    return {
+        "input": 0, "output": 0, "cache_read": 0, "cache_write": 0,
+        "reasoning": 0, "rounds": 0,
+    }
 
 
 @dataclass
@@ -193,7 +202,10 @@ class TaskUsageLedger:
         task = self._tasks.get(task_id) if task_id else None
         if task is None:
             return None
-        total = {k: task.main[k] for k in ("input", "output", "cache_read", "cache_write")}
+        total = {
+            k: int(task.main.get(k, 0))
+            for k in ("input", "output", "cache_read", "cache_write", "reasoning")
+        }
         subs_out: list[dict[str, Any]] = []
         for sid, s in task.subs.items():
             for k in total:
@@ -218,6 +230,7 @@ class TaskUsageLedger:
             "output_tokens": total["output"],
             "cache_read_tokens": total["cache_read"],
             "cache_write_tokens": total["cache_write"],
+            "reasoning_tokens": total["reasoning"],
             "main_tokens": task.main["input"] + task.main["output"],
             "main_rounds": task.main["rounds"],
             "duration_ms": max(0, int(now_ms) - task.started_ms),
