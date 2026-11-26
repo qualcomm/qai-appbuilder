@@ -251,8 +251,9 @@ class ExtensionContext:
 
     Created by the host only; an extension never constructs one. Its public
     members are the whole runtime API (design doc §4.4): ``name``,
-    ``version``, ``root``, ``data_dir``, ``config``, ``logger``, ``secrets``,
-    ``proxy_url()``, ``ssl_verify``, ``register_tool()``, ``on_unload()``.
+    ``version``, ``root``, ``data_dir``, ``config``, ``settings``, ``logger``,
+    ``secrets``, ``proxy_url()``, ``ssl_verify``, ``register_tool()``,
+    ``on_unload()``.
 
     ``register_tool`` / ``on_unload`` are valid only while ``activate`` runs;
     everything else may also be used later, from tool handlers.
@@ -267,8 +268,10 @@ class ExtensionContext:
         secret_store: SecretStoreLike | None = None,
         proxy_url: Callable[[], str | None] | None = None,
         ssl_verify: Callable[[], bool] | None = None,
+        stored_settings: Callable[[str], Mapping[str, Any]] | None = None,
     ) -> None:
         self._manifest = manifest
+        self._stored_settings = stored_settings or (lambda _n: {})
         self._data_dir = data_root / DATA_DIRNAME / manifest.name
         self._taken_names = taken_names
         self._proxy_url = proxy_url or (lambda: None)
@@ -318,6 +321,24 @@ class ExtensionContext:
                 raise ExtensionError(f"{CONFIG_FILENAME} is invalid: {exc}") from exc
             self._config = _freeze(data)
         return self._config
+
+    @property
+    def settings(self) -> Mapping[str, Any]:
+        """The user's values for the manifest's ``settings[]`` (read-only).
+
+        Every declared non-secret key is present: the user's value, else the
+        declared ``default``, else ``None``. Read live on every access, so a
+        change on the settings card takes effect without a reload. Secret
+        settings are not here -- read them with ``ctx.secrets.get(key)``.
+        """
+        stored = self._stored_settings(self._manifest.name)
+        return MappingProxyType(
+            {
+                s.key: stored.get(s.key, s.default)
+                for s in self._manifest.settings
+                if s.type != "secret"
+            }
+        )
 
     def proxy_url(self) -> str | None:
         """The app's current proxy URL (may embed credentials -- never log it)."""
@@ -448,11 +469,15 @@ class UserExtensionHost:
         on_tool_added: ToolAddedHook | None = None,
         on_tool_removed: ToolRemovedHook | None = None,
         is_disabled: Callable[[str], bool] | None = None,
+        stored_settings: Callable[[str], Mapping[str, Any]] | None = None,
         secret_store: SecretStoreLike | None = None,
         proxy_url: Callable[[], str | None] | None = None,
         ssl_verify: Callable[[], bool] | None = None,
     ) -> None:
-        """``taken_skill_ids`` returns the ids of the app's own skills; an
+        """``stored_settings(name)``: the user's saved values for an
+        extension's ``settings[]`` (read live by ``ctx.settings``).
+
+        ``taken_skill_ids`` returns the ids of the app's own skills; an
         extension skill with one of those ids is refused (same rule as tools).
 
         ``reserved_tool_names``: built-in tool names an extension may never
@@ -475,6 +500,7 @@ class UserExtensionHost:
             "secret_store": secret_store,
             "proxy_url": proxy_url,
             "ssl_verify": ssl_verify,
+            "stored_settings": stored_settings,
         }
         self._statuses: dict[str, ExtensionStatus] = {}
         self._tools: dict[str, RegisteredTool] = {}
@@ -516,6 +542,22 @@ class UserExtensionHost:
 
     def status(self, name: str) -> ExtensionStatus | None:
         return self._statuses.get(name)
+
+    def manifest(self, name: str) -> ExtensionManifest:
+        """Read ``name``'s manifest from disk (works for a disabled or failed
+        extension too, as long as its ``extension.json`` is valid).
+
+        :class:`UnknownExtensionError` when there is no such directory;
+        :class:`ManifestError` when its manifest is invalid.
+        """
+        for ext_dir in discover_extension_dirs(self._scan_root):
+            if ext_dir.name == name:
+                return load_manifest(ext_dir)
+        raise UnknownExtensionError(name)
+
+    def secrets_of(self, name: str) -> ExtensionSecrets:
+        """``name``'s secret space (the same one its ``ctx.secrets`` uses)."""
+        return ExtensionSecrets(self._services["secret_store"], name)  # type: ignore[arg-type]
 
     def prompt_fragments(
         self, when: str, *, extensions: frozenset[str] | None = None
@@ -586,7 +628,7 @@ class UserExtensionHost:
         _remove_tree(ext_dir)
         if purge_data:
             _remove_tree(self._data_root / DATA_DIRNAME / name)
-            secrets = ExtensionSecrets(self._services["secret_store"], name)  # type: ignore[arg-type]
+            secrets = self.secrets_of(name)
             try:
                 for key in secrets.keys():  # noqa: SIM118 - ExtensionSecrets, not a dict
                     secrets.delete(key)

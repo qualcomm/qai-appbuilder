@@ -63,6 +63,8 @@ from qai.platform.user_extensions import (
     ExtensionStateStore,
     ExtensionStatus,
     UserExtensionHost,
+    settings_view,
+    update_settings,
 )
 
 from ._global_proxy import build_global_proxy_provider, build_ssl_verify_provider
@@ -144,6 +146,7 @@ def build_user_extension_host(
         on_tool_added=_join_group,
         on_tool_removed=_leave_groups,
         is_disabled=state.is_disabled if state is not None else None,
+        stored_settings=state.settings if state is not None else None,
         secret_store=secret_store,
         proxy_url=proxy_url,
         ssl_verify=ssl_verify,
@@ -223,6 +226,22 @@ class UserExtensionManager:
                 self._state.forget(name)
 
         self._change(op)
+
+    def settings(self, name: str) -> list[dict[str, Any]]:
+        """The settings card: every declared setting with its value (secrets:
+        only whether they are set). Works for a disabled extension too."""
+        manifest = self._host.manifest(name)
+        return settings_view(manifest, self._require_state(), self._host.secrets_of(name))
+
+    def update_settings(self, name: str, values: Mapping[str, Any]) -> list[dict[str, Any]]:
+        """Validate and save (all or nothing). Takes effect at once: ``ctx.settings``
+        and ``ctx.secrets`` read live, so no reload is needed.
+        :class:`SettingsValidationError` lists every bad field."""
+        with self._lock:
+            manifest = self._host.manifest(name)
+            state, secrets = self._require_state(), self._host.secrets_of(name)
+            update_settings(manifest, state, secrets, values)
+            return settings_view(manifest, state, secrets)
 
     def _require_state(self) -> ExtensionStateStore:
         if self._state is None:

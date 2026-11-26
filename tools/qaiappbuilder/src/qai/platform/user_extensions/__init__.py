@@ -37,11 +37,13 @@ from .manifest import (
     ExtensionManifest,
     ManifestError,
     PromptDeclaration,
+    SettingDeclaration,
     SkillsDeclaration,
     ToolDeclaration,
     load_manifest,
     parse_manifest,
 )
+from .settings import SettingsValidationError, settings_view, update_settings
 from .state import STATE_FILENAME, ExtensionStateStore
 
 __all__ = [
@@ -65,6 +67,8 @@ __all__ = [
     "PromptFragment",
     "RegisteredTool",
     "SecretStoreLike",
+    "SettingDeclaration",
+    "SettingsValidationError",
     "SkillsDeclaration",
     "ToolCall",
     "ToolDeclaration",
@@ -75,4 +79,6 @@ __all__ = [
     "load_manifest",
     "module_name_for",
     "parse_manifest",
+    "settings_view",
+    "update_settings",
 ]

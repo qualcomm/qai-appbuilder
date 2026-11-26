@@ -33,12 +33,17 @@ Rules:
   whether persona permission groups can switch the tool off.
 * ``skills.dir`` (default ``skills``) and ``skills.default_modes``
   (``skill id -> off/cloud/local/both``).
+* ``prompts[]``: ``{when: always|active, text | file}`` (design doc §5.1.3).
+* ``settings[]``: fields of the user-editable settings card,
+  ``{key, type: text|secret|bool|number|select, label, ...}``; ``secret``
+  values are write-only and stored in the extension's secret space.
 
 Pure stdlib so the platform package stays dependency-free.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import re
 from collections.abc import Mapping
@@ -52,9 +57,11 @@ __all__ = [
     "MANIFEST_VERSION",
     "PROMPT_MAX_CHARS",
     "PROMPT_WHEN",
+    "SETTING_TYPES",
     "ExtensionManifest",
     "ManifestError",
     "PromptDeclaration",
+    "SettingDeclaration",
     "SkillsDeclaration",
     "ToolDeclaration",
     "load_manifest",
@@ -87,8 +94,16 @@ _TOP_KEYS: Final[frozenset[str]] = frozenset(
         "tools",
         "skills",
         "prompts",
+        "settings",
     }
 )
+_SETTING_KEYS: Final[frozenset[str]] = frozenset(
+    {"key", "type", "label", "description", "default", "required", "options", "min", "max"}
+)
+#: ``secret`` values go to the extension's secret space and are write-only.
+SETTING_TYPES: Final[frozenset[str]] = frozenset({"text", "secret", "bool", "number", "select"})
+_SETTING_KEY_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_SETTING_TEXT_MAX: Final[int] = 4000
 _PROMPT_KEYS: Final[frozenset[str]] = frozenset({"text", "file", "when"})
 #: ``always``: end of the system prompt on every turn (changes only when the
 #: extension is installed / reloaded, so the prompt cache stays valid).
@@ -124,6 +139,45 @@ class SkillsDeclaration:
 
 
 @dataclass(frozen=True, slots=True)
+class SettingDeclaration:
+    """One ``settings[]`` entry: a field the user fills in on the settings card."""
+
+    key: str
+    type: str
+    label: str
+    description: str = ""
+    default: Any = None
+    required: bool = False
+    options: tuple[str, ...] = ()
+    min: float | None = None
+    max: float | None = None
+
+    def check(self, value: Any) -> Any:
+        """The value normalised, or :class:`ValueError` with a user-facing reason."""
+        if self.type in ("text", "secret"):
+            if not isinstance(value, str):
+                raise ValueError("must be text")
+            if len(value) > _SETTING_TEXT_MAX:
+                raise ValueError(f"is longer than {_SETTING_TEXT_MAX} characters")
+            return value
+        if self.type == "bool":
+            if not isinstance(value, bool):
+                raise ValueError("must be true or false")
+            return value
+        if self.type == "number":
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError("must be a number")
+            if self.min is not None and value < self.min:
+                raise ValueError(f"must be >= {self.min:g}")
+            if self.max is not None and value > self.max:
+                raise ValueError(f"must be <= {self.max:g}")
+            return value
+        if value not in self.options:  # select
+            raise ValueError(f"must be one of {', '.join(self.options)}")
+        return value
+
+
+@dataclass(frozen=True, slots=True)
 class PromptDeclaration:
     """One ``prompts[]`` entry: exactly one of ``text`` / ``file`` is set."""
 
@@ -144,6 +198,7 @@ class ExtensionManifest:
     tools: tuple[ToolDeclaration, ...] = ()
     skills: SkillsDeclaration = field(default_factory=SkillsDeclaration)
     prompts: tuple[PromptDeclaration, ...] = ()
+    settings: tuple[SettingDeclaration, ...] = ()
 
     @property
     def tool_names(self) -> frozenset[str]:
@@ -198,7 +253,81 @@ def parse_manifest(raw: Any, *, root: Path) -> ExtensionManifest:
         tools=tools,
         skills=_parse_skills(obj.get("skills")),
         prompts=_parse_prompts(obj.get("prompts")),
+        settings=_parse_settings(obj.get("settings")),
     )
+
+
+def _parse_settings(raw: Any) -> tuple[SettingDeclaration, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ManifestError("settings must be an array")
+    out: list[SettingDeclaration] = []
+    for index, item in enumerate(raw):
+        decl = _parse_setting(item, where=f"settings[{index}]")
+        if any(s.key == decl.key for s in out):
+            raise ManifestError(f"settings[{index}].key {decl.key!r} is declared twice")
+        out.append(decl)
+    return tuple(out)
+
+
+def _parse_setting(item: Any, *, where: str) -> SettingDeclaration:  # noqa: PLR0912 - one check per field
+    entry = _object(item, where)
+    _known_keys(entry, _SETTING_KEYS, where=where)
+    _require(entry, ("key", "type", "label"), where=where)
+    key, kind = entry["key"], entry["type"]
+    if not isinstance(key, str) or not _SETTING_KEY_RE.match(key):
+        raise ManifestError(f"{where}.key {key!r} must match ^[a-z][a-z0-9_]{{0,63}}$")
+    if kind not in SETTING_TYPES:
+        raise ManifestError(
+            f"{where}.type {kind!r} must be one of {', '.join(sorted(SETTING_TYPES))}"
+        )
+    options: tuple[str, ...] = ()
+    if kind == "select":
+        raw_opts = entry.get("options")
+        if (
+            not isinstance(raw_opts, list)
+            or not raw_opts
+            or not all(isinstance(o, str) and o for o in raw_opts)
+            or len(set(raw_opts)) != len(raw_opts)
+        ):
+            raise ManifestError(f"{where}.options must be a non-empty list of distinct strings")
+        options = tuple(raw_opts)
+    elif "options" in entry:
+        raise ManifestError(f"{where}.options is only valid for type 'select'")
+    bounds: dict[str, float] = {}
+    for b in ("min", "max"):
+        if b in entry:
+            if kind != "number":
+                raise ManifestError(f"{where}.{b} is only valid for type 'number'")
+            v = entry[b]
+            if isinstance(v, bool) or not isinstance(v, (int, float)):
+                raise ManifestError(f"{where}.{b} must be a number")
+            bounds[b] = float(v)
+    required = entry.get("required", False)
+    if not isinstance(required, bool):
+        raise ManifestError(f"{where}.required must be true or false")
+    decl = SettingDeclaration(
+        key=key,
+        type=kind,
+        label=_text(entry["label"], label=f"{where}.label"),
+        description=_text(entry["description"], label=f"{where}.description")
+        if "description" in entry
+        else "",
+        required=required,
+        options=options,
+        min=bounds.get("min"),
+        max=bounds.get("max"),
+    )
+    if "default" not in entry:
+        return decl
+    if kind == "secret":
+        raise ManifestError(f"{where}.default is not allowed for a secret")
+    try:
+        default = decl.check(entry["default"])
+    except ValueError as exc:
+        raise ManifestError(f"{where}.default {exc}") from None
+    return dataclasses.replace(decl, default=default)
 
 
 def _parse_prompts(raw: Any) -> tuple[PromptDeclaration, ...]:

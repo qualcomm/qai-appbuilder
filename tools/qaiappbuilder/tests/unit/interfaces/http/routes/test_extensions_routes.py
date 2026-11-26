@@ -27,6 +27,7 @@ from qai.chat.adapters import RegistryBackedToolInvocation
 from qai.chat.application.ports import ToolInvocationRequest
 from qai.chat.domain import tool_groups
 from qai.chat.domain.ids import ConversationId, TabId
+from qai.platform.persistence.secrets import NullSecretStore
 from qai.platform.skills import resolve_skill_mode, set_contributed_default_modes
 from qai.platform.user_extensions import module_name_for
 
@@ -305,3 +306,64 @@ def test_delete_removes_directory_and_optionally_data(env) -> None:
 
 def test_delete_unknown_is_404(env) -> None:
     assert env.client.delete("/api/extensions/no-such-ext").status_code == 404
+
+
+# -- settings --------------------------------------------------------------------------
+
+
+def _with_settings(env) -> None:
+    ext = env.root / "extensions" / "demo-ext"
+    data = json.loads((ext / "extension.json").read_text("utf-8"))
+    data["settings"] = [
+        {"key": "endpoint", "type": "text", "label": "Endpoint", "default": "https://a"},
+        {"key": "token", "type": "secret", "label": "Token"},
+        {"key": "limit", "type": "number", "label": "Limit", "min": 1},
+    ]
+    (ext / "extension.json").write_text(json.dumps(data), encoding="utf-8")
+    (ext / "main.py").write_text(
+        textwrap.dedent(
+            """
+            def activate(ctx):
+                def run(call):
+                    s = ctx.settings
+                    return f"{s['endpoint']}|{s['limit']}|{ctx.secrets.get('token')}"
+                ctx.register_tool("demo_ext_tool", run, description="d")
+            """
+        ),
+        encoding="utf-8",
+    )
+    env.client.post("/api/extensions/demo-ext/reload")
+
+
+async def test_settings_card_roundtrip_takes_effect_without_reload(env) -> None:
+    env.manager.host._services["secret_store"] = NullSecretStore()  # bare test container has none
+    _with_settings(env)
+    card = env.client.get("/api/extensions/demo-ext/settings").json()["settings"]
+    assert [(s["key"], s.get("value"), s.get("is_set")) for s in card] == [
+        ("endpoint", "https://a", None),
+        ("token", None, False),
+        ("limit", None, None),
+    ]
+    assert (await _call(env.tools, "demo_ext_tool")).result == "https://a|None|None"
+
+    r = env.client.put(
+        "/api/extensions/demo-ext/settings", json={"values": {"token": "S3CR3T-xyz", "limit": 4}}
+    )
+    assert r.status_code == 200, r.text
+    card = {s["key"]: s for s in r.json()["settings"]}
+    assert card["token"]["is_set"] is True and "value" not in card["token"]
+    assert "S3CR3T-xyz" not in r.text
+    assert (await _call(env.tools, "demo_ext_tool")).result == "https://a|4|S3CR3T-xyz"
+
+
+def test_invalid_settings_are_400_with_field_errors(env) -> None:
+    _with_settings(env)
+    r = env.client.put("/api/extensions/demo-ext/settings", json={"values": {"limit": 0, "x": 1}})
+    assert r.status_code == 400
+    body = r.json()
+    assert body["code"] == "extensions.invalid_settings"
+    assert set(body["details"]["field_errors"]) == {"limit", "x"}
+
+
+def test_settings_of_unknown_extension_is_404(env) -> None:
+    assert env.client.get("/api/extensions/nope/settings").status_code == 404
