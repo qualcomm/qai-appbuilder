@@ -11,6 +11,18 @@ const duration = computed(() => {
   const m = Math.floor(s / 60);
   return `${m}m ${Math.round(s - m * 60)}s`;
 });
+// Cache read / write are PORTIONS of Input (already counted in it), so they
+// are shown inside Input's parentheses — never as separate addends.
+const cacheParts = computed(() => {
+  const parts: string[] = [];
+  if (props.summary.cache_read_tokens > 0) {
+    parts.push(`cache read ${fmt(props.summary.cache_read_tokens)}`);
+  }
+  if (props.summary.cache_write_tokens > 0) {
+    parts.push(`cache write ${fmt(props.summary.cache_write_tokens)}`);
+  }
+  return parts;
+});
 const subs = computed(() => props.summary.sub_agents ?? []);
 const subTotal = computed(() => subs.value.reduce((a, b) => a + b.tokens, 0));
 </script>
@@ -35,12 +47,9 @@ const subTotal = computed(() => subs.value.reduce((a, b) => a + b.tokens, 0));
       </div>
     </div>
     <div class="ts-detail">
-      Input {{ fmt(summary.input_tokens) }}
-      <template v-if="summary.cache_write_tokens > 0">
-        (cache write {{ fmt(summary.cache_write_tokens) }})
-      </template>
-      · Cache read {{ fmt(summary.cache_read_tokens) }} · Output
-      {{ fmt(summary.output_tokens) }}
+      Input {{ fmt(summary.input_tokens) }}<template v-if="cacheParts.length > 0">
+        (incl. {{ cacheParts.join(", ") }})</template>
+      · Output {{ fmt(summary.output_tokens) }}
     </div>
     <details v-if="subs.length > 0" class="ts-subs">
       <summary>
