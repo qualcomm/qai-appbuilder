@@ -24,8 +24,10 @@ from typing import Any, Final
 __all__ = [
     "ALL_TOOL_GROUPS",
     "TOOL_GROUP_MEMBERS",
-    "groups_to_disabled_tools",
+    "add_group_members",
     "groups_file_restrictions",
+    "groups_to_disabled_tools",
+    "remove_group_members",
 ]
 
 #: Canonical tool group identifiers.
@@ -40,6 +42,28 @@ TOOL_GROUP_MEMBERS: Final[dict[str, frozenset[str]]] = {
     "edit": frozenset({"edit", "write", "apply_patch"}),
     "command": frozenset({"exec", "background_process"}),
 }
+
+#: The built-in membership, kept so runtime additions can be undone without
+#: ever removing a built-in member.
+_BUILTIN_GROUP_MEMBERS: Final[dict[str, frozenset[str]]] = dict(TOOL_GROUP_MEMBERS)
+
+
+def add_group_members(group: str, names: frozenset[str]) -> None:
+    """Add runtime-registered tools (user extensions) to a permission group.
+
+    Mutates :data:`TOOL_GROUP_MEMBERS` in place (the dict object is shared by
+    every reader). Unknown ``group`` -> :class:`ValueError`.
+    """
+    if group not in TOOL_GROUP_MEMBERS:
+        raise ValueError(f"unknown tool group {group!r}")
+    TOOL_GROUP_MEMBERS[group] = TOOL_GROUP_MEMBERS[group] | frozenset(names)
+
+
+def remove_group_members(names: frozenset[str]) -> None:
+    """Undo :func:`add_group_members` for ``names``; built-in members stay."""
+    for group, members in TOOL_GROUP_MEMBERS.items():
+        keep = _BUILTIN_GROUP_MEMBERS.get(group, frozenset())
+        TOOL_GROUP_MEMBERS[group] = members - (frozenset(names) - keep)
 
 
 def groups_to_disabled_tools(groups: list[Any]) -> frozenset[str]:

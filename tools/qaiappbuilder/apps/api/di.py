@@ -115,6 +115,7 @@ from ._service_release_di import (
     build_service_release_services,
 )
 from ._user_prefs_di import UserPrefsServices, build_user_prefs_services
+from ._user_extensions_di import wire_user_extensions_into_chat
 from .system_ports import RebootSignalPort
 
 # ---------------------------------------------------------------------------
@@ -145,6 +146,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from qai.platform.package_mutation import PackageMutationLock
     from qai.platform.qairt_switch.service import QairtSwitchService
     from qai.platform.builder_env import BuilderEnvService
+    from qai.platform.user_extensions import UserExtensionHost
 
 
 @dataclass(slots=True)
@@ -282,6 +284,11 @@ class Container:
     # ``qairt_env.json`` (that file is what the install creates). ``None`` only in
     # stripped-down test containers; the routes then answer 404 ``builder_env.unavailable``.
     builder_env_service: "BuilderEnvService | None" = field(init=False, default=None)
+    # Tail-appended (user extensions, stage 1): the host that loaded
+    # ``<data>/extensions/*`` chat tools, set by
+    # ``wire_user_extensions_into_chat`` at the end of phase 2. ``None`` when
+    # the chat registry is not the registry-backed adapter (test containers).
+    user_extensions: "UserExtensionHost | None" = field(init=False, default=None)
 
     @classmethod
     def build(cls, *, settings: Settings, repo_root: Path) -> Container:
@@ -496,6 +503,10 @@ class Container:
         # over the chat image-upload store; owner id = ``ConversationId.value``.
         self.computer = build_computer_services(self)
         wire_computer_tool_into_chat(chat=self.chat, container=self)
+        # User extensions (stage 1): LAST tool registration of phase 2, so
+        # every built-in tool name is already taken and wins a collision
+        # (the extension tool is refused with a reason, never overwrites).
+        wire_user_extensions_into_chat(chat=self.chat, container=self)
 
     def _wire_cross_context(self) -> None:
         """Phase 3 — cross-context joins built after every namespace.
