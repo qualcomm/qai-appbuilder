@@ -51,6 +51,7 @@ from typing import Any, TypeVar
 from qai.chat.adapters import RegistryBackedToolInvocation
 from qai.chat.application.ports import PromptAddenda
 from qai.chat.application.use_cases.tool_advertise import TOOL_ORDER
+from qai.chat.domain.mcp_server import McpServerConfig, McpTransport
 from qai.chat.domain.tool_groups import add_group_members, remove_group_members
 from qai.platform.logging import get_logger
 from qai.platform.skills import (
@@ -62,7 +63,9 @@ from qai.platform.user_extensions import (
     STATE_FILENAME,
     ExtensionStateStore,
     ExtensionStatus,
+    UnknownExtensionError,
     UserExtensionHost,
+    discover_extension_dirs,
     settings_view,
     update_settings,
 )
@@ -77,6 +80,7 @@ __all__ = [
     "build_user_extension_host",
     "extension_skill_roots",
     "prompt_addenda_for",
+    "sync_extension_mcp",
     "wire_user_extensions_into_chat",
 ]
 
@@ -87,6 +91,8 @@ _T = TypeVar("_T")
 EXTENSIONS_DIRNAME = "extensions"
 #: ``SkillInfo.source`` prefix for extension-provided skills.
 SKILL_SOURCE_PREFIX = "extension:"
+#: ``McpServerStatus.source`` prefix for extension-provided MCP servers.
+MCP_SOURCE_PREFIX = "extension:"
 
 #: Built-in tool names an extension may never take, even when the built-in
 #: is not registered right now (``computer`` / ``browser`` disabled, ``agent``
@@ -182,6 +188,21 @@ class UserExtensionManager:
         self._host = host
         self._state = state
         self._lock = threading.Lock()
+        #: Async follow-up after a change (MCP servers live on the event loop).
+        #: Bound by the composition root; awaited by :meth:`sync_runtime`.
+        self.on_runtime_sync: Callable[[], Awaitable[None]] | None = None
+
+    async def sync_runtime(self) -> None:
+        """Apply the current extension state to the async subsystems (MCP).
+
+        Called on the event loop after each (threaded) operation. Never raises.
+        """
+        if self.on_runtime_sync is None:
+            return
+        try:
+            await self.on_runtime_sync()
+        except Exception:  # noqa: BLE001 - never fail the management call
+            _LOG.warning("user_extensions.runtime_sync_failed", exc_info=True)
 
     @property
     def host(self) -> UserExtensionHost:
@@ -216,6 +237,18 @@ class UserExtensionManager:
 
         return self._change(op)
 
+    def unload(self, name: str) -> None:
+        """Unload one extension (kept on disk; it comes back on the next reload).
+        :class:`UnknownExtensionError` when there is no such extension."""
+
+        def op() -> None:
+            if not self._host.unload(name) and name not in {
+                p.name for p in discover_extension_dirs(self._host.scan_root)
+            }:
+                raise UnknownExtensionError(name)
+
+        self._change(op)
+
     def remove(self, name: str, *, purge_data: bool = False) -> None:
         """Uninstall: unload, delete the directory; with ``purge_data`` also its
         data directory, secrets and stored settings / switch."""
@@ -241,6 +274,8 @@ class UserExtensionManager:
             manifest = self._host.manifest(name)
             state, secrets = self._require_state(), self._host.secrets_of(name)
             update_settings(manifest, state, secrets, values)
+            # MCP server configs embed settings / secrets: re-resolve them.
+            self._host.refresh_mcp(name)
             return settings_view(manifest, state, secrets)
 
     def _require_state(self) -> ExtensionStateStore:
@@ -306,10 +341,59 @@ def wire_user_extensions_into_chat(*, chat: Any, container: Any) -> UserExtensio
         with contextlib.suppress(Exception):
             manager.unload_all()
         return None
+    manager.on_runtime_sync = lambda: sync_extension_mcp(container)
     # Stripped-down test containers may refuse the attribute.
     with contextlib.suppress(Exception):
         container.user_extensions = manager
     return manager
+
+
+async def sync_extension_mcp(container: Any) -> None:
+    """Make the MCP registry's contributed servers match the loaded extensions.
+
+    Called after every extension change (startup, reload, enable / disable,
+    uninstall, settings update). Desired-state: unchanged servers keep their
+    session; the registry never writes them to ``mcp_servers.json``. A config
+    the registry refuses (name clash, invalid) becomes a warning on its
+    extension. Best-effort: never raises.
+    """
+    manager = getattr(container, "user_extensions", None)
+    host = getattr(manager, "host", None)
+    registry = getattr(getattr(container, "chat", None), "mcp_server_registry", None)
+    sync = getattr(registry, "set_contributed_servers", None)
+    if host is None or sync is None:
+        return
+    by_source: dict[str, list[McpServerConfig]] = {}
+    invalid: dict[str, str] = {}
+    for server in host.mcp_servers():
+        try:
+            cfg = McpServerConfig(
+                name=server.name,
+                transport=McpTransport(server.transport),
+                command=server.command,
+                args=server.args,
+                env=dict(server.env),
+                cwd=server.cwd,
+                url=server.url,
+                headers=dict(server.headers),
+                timeout_s=server.timeout_s,
+                secret_env_keys=server.secret_env_keys,
+            )
+        except ValueError as exc:
+            invalid[server.name] = str(exc)
+            continue
+        by_source.setdefault(MCP_SOURCE_PREFIX + server.extension, []).append(cfg)
+    try:
+        refused = await sync(by_source)
+    except Exception:  # noqa: BLE001 - MCP must never break extension management
+        _LOG.warning("user_extensions.mcp_sync_failed", exc_info=True)
+        return
+    for name, reason in {**invalid, **refused}.items():
+        for status in host.statuses:
+            if name in status.mcp_servers:
+                note = f"mcp server {name!r} not started: {reason}"
+                if note not in status.warnings:
+                    status.warnings.append(note)
 
 
 def prompt_addenda_for(container: Any, selected: frozenset[str]) -> PromptAddenda:

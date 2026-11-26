@@ -52,6 +52,7 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, field_validator
 
+from qai.chat.application.ports import McpServerReadOnlyError
 from qai.chat.domain.mcp_server import McpServerConfig, McpTransport
 from qai.platform.config.settings import LOOPBACK_HOST, LOOPBACK_HOST_NAME
 
@@ -142,6 +143,10 @@ class McpServerStatusModel(BaseModel):
     prompt_count: int = 0
     enabled: bool = True
     error: str = ""
+    # "" = the user's own server; "extension:<name>" = provided by a user
+    # extension: read-only (no edit / delete), only enable / disable.
+    source: str = ""
+    read_only: bool = False
 
 
 class McpResourceModel(BaseModel):
@@ -798,12 +803,16 @@ def _status_to_model(
     prompt_count: int = 0,
 ) -> McpServerStatusModel:
     cfg = status_obj.config
+    source = getattr(status_obj, "source", "") or ""
+    # Contributed servers: their secret env values come from the extension's
+    # secret space and are never echoed (they cannot be edited here anyway).
+    secret_env = set(getattr(cfg, "secret_env_keys", ()) or ()) if source else set()
     return McpServerStatusModel(
         name=cfg.name,
         transport=cfg.transport.value,
         command=cfg.command,
         args=list(cfg.args),
-        env=dict(cfg.env),
+        env={k: ("__secret__" if k in secret_env else v) for k, v in cfg.env.items()},
         cwd=cfg.cwd,
         url=cfg.url,
         # Mask credential values — never echo a secret back to the client.
@@ -817,6 +826,8 @@ def _status_to_model(
         prompt_count=prompt_count,
         enabled=getattr(cfg, "enabled", True),
         error=status_obj.error,
+        source=source,
+        read_only=bool(source),
     )
 
 
@@ -988,7 +999,10 @@ def build_router(*, container: "Container") -> APIRouter:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
             ) from exc
-        result = await _use_case().add_server(config)
+        try:
+            result = await _use_case().add_server(config)
+        except McpServerReadOnlyError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
         rc, pc = _counts(_registry(), result.config.name)
         return _status_to_model(result, resource_count=rc, prompt_count=pc)
 
@@ -998,7 +1012,10 @@ def build_router(*, container: "Container") -> APIRouter:
         response_model=None,
     )
     async def remove_mcp_server(name: str) -> None:
-        removed = await _use_case().remove_server(name)
+        try:
+            removed = await _use_case().remove_server(name)
+        except McpServerReadOnlyError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
         if not removed:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -1302,6 +1319,8 @@ def build_router(*, container: "Container") -> APIRouter:
                 header_values=header_values,
                 source=body.source or None,
             )
+        except McpServerReadOnlyError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
         except McpCatalogInstallError as exc:
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,

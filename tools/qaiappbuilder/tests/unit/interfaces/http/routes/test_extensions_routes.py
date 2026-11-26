@@ -106,6 +106,7 @@ def test_list(env) -> None:
             "skills": [],
             "warnings": [],
             "prompts": {},
+            "mcp_servers": [],
         }
     ]
 

@@ -35,8 +35,10 @@ import inspect
 import json
 import logging
 import os
+import re
 import shutil
 import sys
+import time
 import tomllib
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
@@ -63,6 +65,7 @@ __all__ = [
     "ExtensionStatus",
     "PromptFragment",
     "RegisteredTool",
+    "ResolvedMcpServer",
     "SecretStoreLike",
     "ToolCall",
     "ToolSink",
@@ -182,6 +185,31 @@ class ExtensionStatus:
     warnings: list[str] = field(default_factory=list)
     #: Number of prompt fragments per condition (``always`` / ``active``).
     prompts: dict[str, int] = field(default_factory=dict)
+    #: App-wide names (``<extension>-<server>``) of its resolved MCP servers.
+    mcp_servers: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedMcpServer:
+    """A loaded extension's MCP server with every placeholder filled in.
+
+    ``name`` is the app-wide server name ``<extension>-<server>``. Values
+    that came from ``${secret:...}`` are listed in ``secret_env_keys`` /
+    ``secret_header_keys`` so they are masked wherever the config is shown.
+    Never persisted: it lives as long as the extension is loaded.
+    """
+
+    name: str
+    extension: str
+    transport: str
+    command: str | None
+    args: tuple[str, ...]
+    env: Mapping[str, str]
+    cwd: str | None
+    url: str | None
+    headers: Mapping[str, str]
+    timeout_s: float
+    secret_env_keys: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -496,6 +524,9 @@ class UserExtensionHost:
         self._on_tool_added = on_tool_added or (lambda _n, _g: None)
         self._on_tool_removed = on_tool_removed or (lambda _n: None)
         self._is_disabled = is_disabled or (lambda _n: False)
+        self._stored_settings: Callable[[str], Mapping[str, Any]] = stored_settings or (
+            lambda _n: {}
+        )
         self._services = {
             "secret_store": secret_store,
             "proxy_url": proxy_url,
@@ -506,6 +537,7 @@ class UserExtensionHost:
         self._tools: dict[str, RegisteredTool] = {}
         self._skill_roots: dict[str, ExtensionSkillRoot] = {}
         self._prompts: dict[str, tuple[PromptFragment, ...]] = {}
+        self._mcp: dict[str, tuple[ResolvedMcpServer, ...]] = {}
         self._contexts: dict[str, ExtensionContext] = {}
         self._modules: dict[str, list[str]] = {}
 
@@ -649,6 +681,7 @@ class UserExtensionHost:
             ctx._run_unload()
         self._skill_roots.pop(name, None)
         self._prompts.pop(name, None)
+        self._mcp.pop(name, None)
         self._modules.pop(name, None)
         # Every module under the extension's private name, including submodules
         # first imported later (from a tool handler), so a reload never reuses one.
@@ -737,6 +770,7 @@ class UserExtensionHost:
             status.state = "loaded"
             self._commit_skills(manifest, status)
             self._commit_prompts(manifest.name, fragments, status)
+            self._commit_mcp(manifest, status)
             return status
 
         ctx = ExtensionContext(
@@ -785,7 +819,97 @@ class UserExtensionHost:
         status.warnings.extend(ctx._warnings)
         self._commit_skills(manifest, status)
         self._commit_prompts(manifest.name, fragments, status)
+        self._commit_mcp(manifest, status)
         return status
+
+    # -- MCP servers --------------------------------------------------------
+
+    def mcp_servers(self) -> tuple[ResolvedMcpServer, ...]:
+        """Every loaded extension's MCP servers, sorted by server name."""
+        snap = dict(self._mcp)
+        return tuple(sorted((s for v in snap.values() for s in v), key=lambda s: s.name))
+
+    def refresh_mcp(self, name: str) -> None:
+        """Re-resolve a loaded extension's servers (its settings changed)."""
+        status = self._statuses.get(name)
+        if status is None or status.state != "loaded":
+            return
+        try:
+            manifest = load_manifest(status.root)
+        except ManifestError:
+            return  # the next reload reports it
+        status.warnings = [w for w in status.warnings if not w.startswith("mcp server ")]
+        self._commit_mcp(manifest, status)
+
+    def _commit_mcp(self, manifest: ExtensionManifest, status: ExtensionStatus) -> None:
+        resolved: list[ResolvedMcpServer] = []
+        for decl in manifest.mcp_servers:
+            try:
+                resolved.append(self._resolve_mcp(manifest, decl))
+            except ExtensionError as exc:
+                status.warnings.append(f"mcp server {decl.name!r} not started: {exc}")
+        if resolved:
+            self._mcp[manifest.name] = tuple(resolved)
+        else:
+            self._mcp.pop(manifest.name, None)
+        status.mcp_servers = tuple(s.name for s in resolved)
+
+    def _resolve_mcp(self, manifest: ExtensionManifest, decl: Any) -> ResolvedMcpServer:
+        name = manifest.name
+        stored: Mapping[str, Any] = self._stored_settings(name)
+        defaults = {s.key: s.default for s in manifest.settings}
+        secrets = self.secrets_of(name)
+        used_secret = False
+
+        def fill(value: str) -> str:
+            nonlocal used_secret
+
+            def one(match: re.Match[str]) -> str:
+                nonlocal used_secret
+                ph = match.group(1)
+                if ph == "root":
+                    return str(manifest.root)
+                if ph == "data_dir":
+                    data_dir = self._data_root / DATA_DIRNAME / name
+                    data_dir.mkdir(parents=True, exist_ok=True)
+                    return str(data_dir)
+                if ph == "python":
+                    return sys.executable
+                kind, _, key = ph.partition(":")
+                if kind == "setting":
+                    v = stored.get(key, defaults.get(key))
+                    return "" if v is None else (str(v).lower() if isinstance(v, bool) else str(v))
+                secret = secrets.get(key)  # kind == "secret" (validated by the manifest)
+                if secret is None:
+                    raise ExtensionError(f"secret setting {key!r} is not set")
+                used_secret = True
+                return secret
+
+            return _PLACEHOLDER.sub(one, value)
+
+        env: dict[str, str] = {}
+        secret_env: list[str] = []
+        for key, value in decl.env.items():
+            used_secret = False
+            env[key] = fill(value)
+            if used_secret:
+                secret_env.append(key)
+        return ResolvedMcpServer(
+            name=f"{name}-{decl.name}",
+            extension=name,
+            transport=decl.transport,
+            command=fill(decl.command) if decl.command is not None else None,
+            args=tuple(fill(a) for a in decl.args),
+            env=env,
+            # No default cwd (the app's, like a user's own server): a process
+            # sitting in the extension directory would keep Windows from
+            # deleting it on uninstall. Paths go through ${root} / ${data_dir}.
+            cwd=fill(decl.cwd) if decl.cwd is not None else None,
+            url=fill(decl.url) if decl.url is not None else None,
+            headers={k: fill(v) for k, v in decl.headers.items()},
+            timeout_s=decl.timeout_s,
+            secret_env_keys=tuple(secret_env),
+        )
 
     def _commit_prompts(
         self, name: str, fragments: tuple[PromptFragment, ...], status: ExtensionStatus
@@ -829,6 +953,9 @@ def module_name_for(extension: str) -> str:
     return _MODULE_PREFIX + extension.replace("-", "_")
 
 
+_PLACEHOLDER = re.compile(r"\$\{([^}]*)\}")
+
+
 def _read_prompts(manifest: ExtensionManifest) -> tuple[PromptFragment, ...]:
     """Resolve ``prompts[]`` (read ``file`` entries now, once per load)."""
     ext_root = manifest.root.resolve()
@@ -858,14 +985,27 @@ def _read_prompts(manifest: ExtensionManifest) -> tuple[PromptFragment, ...]:
     return tuple(out)
 
 
-def _remove_tree(path: Path) -> None:
-    """Delete ``path``: a link is unlinked (its target is left alone)."""
-    if path.is_symlink() or _is_junction(path):
-        os.unlink(path) if path.is_symlink() else os.rmdir(path)
-    elif path.is_dir():
-        shutil.rmtree(path)
-    elif path.exists():
-        path.unlink()
+def _remove_tree(path: Path, *, attempts: int = 20) -> None:
+    """Delete ``path``: a link is unlinked (its target is left alone).
+
+    Retries for a few seconds on a sharing violation: on Windows a process
+    that was just stopped (an MCP server started through a venv launcher, a
+    file watcher) can hold a handle a moment longer.
+    """
+    for attempt in range(attempts):
+        try:
+            if path.is_symlink() or _is_junction(path):
+                os.unlink(path) if path.is_symlink() else os.rmdir(path)
+            elif path.is_dir():
+                shutil.rmtree(path)
+            elif path.exists():
+                path.unlink()
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(0.25)
+        else:
+            return
 
 
 def _is_junction(path: Path) -> bool:

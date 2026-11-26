@@ -74,10 +74,12 @@ import dataclasses
 import json
 import logging
 import time
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from qai.chat.application.ports import (
+    McpServerReadOnlyError,
     McpServerRegistryPort,
     McpServerStatus,
     ToolInvocationRequest,
@@ -125,6 +127,7 @@ if TYPE_CHECKING:  # pragma: no cover
 logger = logging.getLogger("qai.chat.mcp_registry")
 
 __all__ = [
+    "McpServerReadOnlyError",
     "McpServerRegistry",
     "McpToolInvocationAdapter",
 ]
@@ -991,10 +994,24 @@ class McpServerRegistry(McpServerRegistryPort):
         # (which guards config/state) to avoid a slow spawn holding the config
         # lock and blocking read-only API like ``list_servers``.
         self._pool_lock = asyncio.Lock()
+        # Background connect tasks for contributed servers (kept referenced),
+        # plus the in-flight one per server so a sync can cancel it.
+        self._background: set[asyncio.Task[None]] = set()
+        self._contributed_tasks: dict[str, asyncio.Task[None]] = {}
         # User-added custom registry sources: list of dicts with keys
         # {id, name, url, token, cookie}. Loaded from / persisted to
         # ``custom_registry_sources`` in mcp_servers.json.
         self._custom_sources: list[dict[str, str]] = []
+        # ── Contributed servers (user extensions) ──
+        # name -> source (e.g. ``extension:demo-ext``). Their configs live in
+        # ``self._servers`` like any other server (so connect / invoke / gate /
+        # status are shared), but they are NEVER written to mcp_servers.json,
+        # cannot be edited or removed through the user API, and are replaced
+        # wholesale by :meth:`set_contributed_servers`. Only the user's
+        # per-server on/off choice for them is persisted
+        # (``disabled_contributed``).
+        self._contributed: dict[str, str] = {}
+        self._contributed_disabled: set[str] = set()
 
     # ---- config file I/O -------------------------------------------------
 
@@ -1025,6 +1042,9 @@ class McpServerRegistry(McpServerRegistryPort):
         # compatible — an existing config keeps whatever the seed said).
         if isinstance(raw, dict) and "global_enabled" in raw:
             self._enabled = bool(raw.get("global_enabled"))
+        disabled_contributed = (raw or {}).get("disabled_contributed")
+        if isinstance(disabled_contributed, list):
+            self._contributed_disabled = {n for n in disabled_contributed if isinstance(n, str)}
         # Load user-added custom registry sources (backwards-compat: older files
         # without this key leave _custom_sources as the empty-list default).
         custom = (raw or {}).get("custom_registry_sources")
@@ -1044,9 +1064,15 @@ class McpServerRegistry(McpServerRegistryPort):
             self._config_path.parent.mkdir(parents=True, exist_ok=True)
             payload = {
                 "global_enabled": self._enabled,
-                "servers": [self._config_to_dict(c) for c in self._servers.values()],
+                "servers": [
+                    self._config_to_dict(c)
+                    for c in self._servers.values()
+                    if c.name not in self._contributed  # never persisted
+                ],
                 "custom_registry_sources": self._custom_sources,
             }
+            if self._contributed_disabled:
+                payload["disabled_contributed"] = sorted(self._contributed_disabled)
             # UTF-8, no BOM, LF (AGENTS.md §3.10).
             self._config_path.write_text(
                 json.dumps(payload, ensure_ascii=False, indent=2),
@@ -1480,7 +1506,111 @@ class McpServerRegistry(McpServerRegistryPort):
             tool_count=len(names),
             tool_names=names,
             error=self._errors.get(cfg.name, ""),
+            source=self._contributed.get(cfg.name, ""),
         )
+
+    def _refuse_contributed(self, name: str) -> None:
+        source = self._contributed.get(name)
+        if source is not None:
+            raise McpServerReadOnlyError(
+                f"mcp server {name!r} is provided by {source} and is read-only "
+                "(it can only be enabled or disabled)"
+            )
+
+    async def set_contributed_servers(
+        self, servers: Mapping[str, Sequence[McpServerConfig]]
+    ) -> dict[str, str]:
+        """Replace ALL contributed servers with ``servers`` (source -> configs).
+
+        Desired-state sync: a server whose config is unchanged keeps its live
+        session; a changed or removed one is disconnected and its tools
+        unregistered; a new or changed one is connected in the background
+        (when the global switch is on and the user has not disabled it) and
+        shows ``connecting…`` meanwhile. Nothing is written except the
+        user's on/off list.
+
+        Returns ``{server name: reason}`` for configs that were refused (the
+        name is taken by one of the user's own servers or by another source).
+        """
+        refused: dict[str, str] = {}
+        to_connect: list[McpServerConfig] = []
+        async with self._lock:
+            self._load_from_disk()
+            wanted: dict[str, tuple[str, McpServerConfig]] = {}
+            for source, configs in servers.items():
+                for offered in configs:
+                    name = offered.name
+                    if name in self._servers and name not in self._contributed:
+                        refused[name] = "the name is used by one of your own MCP servers"
+                    elif name in wanted:
+                        refused[name] = f"the name is already provided by {wanted[name][0]}"
+                    else:
+                        wanted[name] = (
+                            source,
+                            dataclasses.replace(
+                                offered, enabled=name not in self._contributed_disabled
+                            ),
+                        )
+            for name in list(self._contributed):
+                new = wanted.get(name)
+                if new is not None and new[1] == self._servers.get(name):
+                    self._contributed[name] = new[0]
+                    del wanted[name]  # unchanged: keep the live session
+                    continue
+                await self._drop_server(name)
+            for name, (source, cfg) in wanted.items():
+                self._servers[name] = cfg
+                self._contributed[name] = source
+                if self._enabled and cfg.enabled:
+                    self._connected[name] = False
+                    self._errors[name] = "connecting…"
+                    to_connect.append(cfg)
+                else:
+                    await self._connect_and_register(cfg)  # records the gate reason
+            for cfg in to_connect:
+                # Started under the lock, so a later sync always finds (and
+                # cancels) it before dropping / replacing this server.
+                task = asyncio.get_running_loop().create_task(self._connect_contributed(cfg))
+                self._contributed_tasks[cfg.name] = task
+                self._background.add(task)
+                task.add_done_callback(self._background.discard)
+        return refused
+
+    async def _connect_contributed(self, cfg: McpServerConfig) -> None:
+        """Background connect of one contributed server. Runs WITHOUT ``_lock``
+        (a slow npx start must not block the panel); a sync that drops or
+        replaces the server cancels this task first (:meth:`_drop_server`)."""
+        try:
+            await asyncio.wait_for(
+                self._connect_and_register(cfg, silent_oauth=True),
+                timeout=min(cfg.timeout_s + 10.0, 120.0),
+            )
+        except TimeoutError:
+            self._unregister_tools(cfg.name)
+            await self._close_pooled(cfg.name)
+            self._connected[cfg.name] = False
+            self._errors[cfg.name] = "connect/discover timed out"
+        except Exception as exc:  # noqa: BLE001 - recorded per server
+            self._connected[cfg.name] = False
+            self._errors[cfg.name] = f"unexpected: {exc}"
+        finally:
+            if self._contributed_tasks.get(cfg.name) is asyncio.current_task():
+                del self._contributed_tasks[cfg.name]
+
+    async def _drop_server(self, name: str) -> None:
+        """Forget a contributed server entirely (caller holds ``_lock``)."""
+        task = self._contributed_tasks.pop(name, None)
+        if task is not None and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+        self._servers.pop(name, None)
+        self._contributed.pop(name, None)
+        self._unregister_tools(name)
+        for d in (self._connected, self._errors, self._tool_names,
+                  self._resource_count, self._prompt_count):
+            d.pop(name, None)
+        await self._close_pooled(name)
 
     def result_budget_for_tool(self, tool_name: str) -> int | None:
         """Per-server result cap (characters) for a registered MCP tool name.
@@ -1510,6 +1640,7 @@ class McpServerRegistry(McpServerRegistryPort):
     async def add_server(self, config: McpServerConfig) -> McpServerStatus:
         async with self._lock:
             self._load_from_disk()
+            self._refuse_contributed(config.name)
             # ``max_result_chars`` has no UI field, so an edit that re-posts the
             # server (UI save, re-install) arrives with it UNSET. Keep the value
             # the operator hand-wrote instead of silently resetting it; an
@@ -1540,6 +1671,7 @@ class McpServerRegistry(McpServerRegistryPort):
     async def remove_server(self, name: str) -> bool:
         async with self._lock:
             self._load_from_disk()
+            self._refuse_contributed(name)
             existed = name in self._servers
             cfg = self._servers.pop(name, None)
             self._unregister_tools(name)
@@ -1589,6 +1721,12 @@ class McpServerRegistry(McpServerRegistryPort):
 
             new_cfg = dataclasses.replace(cfg, enabled=enabled)
             self._servers[name] = new_cfg
+            if name in self._contributed:
+                # Only the on/off choice of a contributed server is kept.
+                if enabled:
+                    self._contributed_disabled.discard(name)
+                else:
+                    self._contributed_disabled.add(name)
             self._persist_to_disk()
             # Apply: ON → (re)connect + register; OFF → the gate in
             # ``_connect_and_register`` disconnects + unregisters.
@@ -2194,6 +2332,8 @@ class McpServerRegistry(McpServerRegistryPort):
         # Tear down every persistent pooled session (terminate the spawned
         # subprocesses / close remote HTTP clients) and drop the registered tool
         # handlers so a re-wire does not double-register.
+        for task in list(self._background):
+            task.cancel()
         async with self._pool_lock:
             clients = list(self._pool.values())
             self._pool.clear()

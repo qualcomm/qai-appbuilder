@@ -64,6 +64,7 @@ def status_to_wire(status: ExtensionStatus) -> dict[str, Any]:
         "skills": list(status.skills),
         "warnings": list(status.warnings),
         "prompts": dict(status.prompts),
+        "mcp_servers": list(status.mcp_servers),
     }
 
 
@@ -94,11 +95,14 @@ def build_router(*, container: Container) -> APIRouter:
     async def reload_all() -> dict[str, Any]:
         manager = _manager()
         await run_in_threadpool(manager.reload_all)
+        await manager.sync_runtime()
         return _listing(manager)
 
     async def _run(name: str, fn: Any, *args: Any, **kwargs: Any) -> Any:
+        """Run a (sync) manager operation in a worker thread, then bring the
+        async parts of the app (MCP servers) in line with the result."""
         try:
-            return await run_in_threadpool(fn, *args, **kwargs)
+            result = await run_in_threadpool(fn, *args, **kwargs)
         except UnknownExtensionError:
             raise NotFoundError("extensions.not_found", "extension", name) from None
         except ManifestError as exc:
@@ -109,11 +113,13 @@ def build_router(*, container: Container) -> APIRouter:
                 "some settings are invalid",
                 field_errors={k: [v] for k, v in exc.errors.items()},
             ) from None
+        await _manager().sync_runtime()
+        return result
 
     @router.get("/{name}/settings")
     async def get_settings(name: str) -> dict[str, Any]:
-        manifest = _manager()
-        return {"settings": await _run(name, manifest.settings, name)}
+        manager = _manager()
+        return {"settings": await _run(name, manager.settings, name)}
 
     @router.put("/{name}/settings")
     async def put_settings(name: str, body: SettingsUpdate) -> dict[str, Any]:
@@ -138,6 +144,9 @@ def build_router(*, container: Container) -> APIRouter:
     @router.delete("/{name}", status_code=204)
     async def remove(name: str, purge_data: bool = False) -> Response:
         manager = _manager()
+        # Stop its MCP server processes BEFORE the directory is deleted (a
+        # running process can keep Windows from deleting files it uses).
+        await _run(name, manager.unload, name)
         await _run(name, manager.remove, name, purge_data=purge_data)
         return Response(status_code=204)
 

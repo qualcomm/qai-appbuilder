@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import textwrap
+import time
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -189,8 +190,14 @@ def test_prompt_fragments_reach_the_model(be: tuple, llm: StandInLLM) -> None:
     (ext / "extension.json").write_text(
         json.dumps(
             {
-                "manifest_version": 1, "name": "prompt-ext", "version": "1", "description": "e2e",
-                "prompts": [{"when": "always", "text": "ALWAYS-MARKER: be brief"}, {"when": "active", "file": "active.md"}],
+                "manifest_version": 1,
+                "name": "prompt-ext",
+                "version": "1",
+                "description": "e2e",
+                "prompts": [
+                    {"when": "always", "text": "ALWAYS-MARKER: be brief"},
+                    {"when": "active", "file": "active.md"},
+                ],
             }
         ),
         encoding="utf-8",
@@ -210,10 +217,106 @@ def test_prompt_fragments_reach_the_model(be: tuple, llm: StandInLLM) -> None:
 
     for msgs in (plain, active):
         assert msgs[0]["role"] == "system"
-        assert msgs[0]["content"].rstrip().endswith("ALWAYS-MARKER: be brief\n</extension_instructions>")
-    assert plain[0]["content"] == active[0]["content"], "system prompt must not change with the selection"
+        assert (
+            msgs[0]["content"]
+            .rstrip()
+            .endswith("ALWAYS-MARKER: be brief\n</extension_instructions>")
+        )
+    assert plain[0]["content"] == active[0]["content"], (
+        "system prompt must not change with the selection"
+    )
     assert not any("ACTIVE-MARKER" in str(m.get("content")) for m in plain)
     (ctx,) = [m for m in active if "ACTIVE-MARKER" in str(m.get("content"))]
     assert ctx["role"] == "user"
     assert active.index(ctx) == len(active) - 2  # right before the real user message
     assert active[-1]["content"] == "[echo] hi"
+
+
+# -- MCP servers ------------------------------------------------------------------------
+
+_MINI_MCP = Path(__file__).resolve().parents[1] / "fixtures" / "mini_mcp_server.py"
+
+
+def _mcp_servers(cl: httpx.Client) -> dict[str, dict]:
+    return {s["name"]: s for s in cl.get("/api/chat/mcp/servers").json()["servers"]}
+
+
+def _wait_connected(cl: httpx.Client, name: str, *, timeout: float = 30.0) -> dict:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        server = _mcp_servers(cl).get(name)
+        if server and server["connected"]:
+            return server
+        time.sleep(0.3)
+    raise AssertionError(f"{name} never connected: {_mcp_servers(cl).get(name)}")
+
+
+def test_an_extension_mcp_server_is_usable_read_only_and_never_persisted(
+    be: tuple, llm: StandInLLM
+) -> None:
+    ob, cl = be
+    assert cl.patch("/api/chat/mcp/enabled", json={"enabled": True}).status_code == 200
+    ext = ob.data_dir / "extensions" / "mcp-ext"
+    ext.mkdir(parents=True)
+    (ext / "server.py").write_text(_MINI_MCP.read_text("utf-8"), encoding="utf-8")
+    (ext / "extension.json").write_text(
+        json.dumps(
+            {
+                "manifest_version": 1,
+                "name": "mcp-ext",
+                "version": "1",
+                "description": "e2e",
+                "settings": [{"key": "token", "type": "secret", "label": "Token"}],
+                "mcp_servers": [
+                    {
+                        "name": "mini",
+                        "command": "${python}",
+                        "args": ["${root}/server.py"],
+                        "env": {"MINI_MCP_PREFIX": "${secret:token}|"},
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    # The secret store is the OS keyring, which outlives this throw-away data dir: start clean.
+    cl.post("/api/extensions/mcp-ext/reload")
+    assert (
+        cl.put("/api/extensions/mcp-ext/settings", json={"values": {"token": None}}).status_code
+        == 200
+    )
+    status = cl.post("/api/extensions/mcp-ext/reload").json()
+    assert status["state"] == "loaded" and status["mcp_servers"] == []
+    assert any("secret setting 'token' is not set" in w for w in status["warnings"]), status
+
+    # Filling in the settings card starts the server -- no reload.
+    r = cl.put("/api/extensions/mcp-ext/settings", json={"values": {"token": "TKN-123"}})
+    assert r.status_code == 200, r.text
+    server = _wait_connected(cl, "mcp-ext-mini")
+    assert server["source"] == "extension:mcp-ext" and server["read_only"] is True
+    assert server["env"] == {"MINI_MCP_PREFIX": "__secret__"}
+    assert set(server["tool_names"]) == {"echo", "env", "cwd"}
+
+    llm.clear()
+    cid = cl.post("/api/chat/conversations", json={"title": "e2e"}).json()["id"]
+    turn = run_turn(
+        cl, cid, "t-mcp", "[tool mcp-ext-mini__echo " + json.dumps({"text": "hi"}) + "]", seconds=60
+    )
+    assert turn.status == 200, turn.body
+    assert "TKN-123|hi" in json.dumps(_result(turn))
+
+    # Read-only through the user API; never written to the user's file.
+    assert cl.delete("/api/chat/mcp/servers/mcp-ext-mini").status_code == 409
+    assert (
+        cl.post("/api/chat/mcp/servers", json={"name": "mcp-ext-mini", "command": "x"}).status_code
+        == 409
+    )
+    assert "mcp-ext-mini" not in (ob.data_dir / "config" / "mcp_servers.json").read_text("utf-8")
+
+    # Disabling the extension removes the server and its tools.
+    assert cl.post("/api/extensions/mcp-ext/disable").json()["state"] == "disabled"
+    assert "mcp-ext-mini" not in _mcp_servers(cl)
+
+    # Uninstall with purge: also removes the keyring secret.
+    assert cl.delete("/api/extensions/mcp-ext", params={"purge_data": "true"}).status_code == 204
+    assert not ext.exists()

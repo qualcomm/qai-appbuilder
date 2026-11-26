@@ -2083,6 +2083,12 @@ async def _connect_mcp_servers(container: Container) -> None:
                 raise
             except Exception:  # noqa: BLE001
                 _log.warning("lifespan.mcp_servers_connect_failed", exc_info=True)
+            # User extensions' MCP servers: added AFTER the user's own ones, so a
+            # name clash always resolves in the user's favour and connect_all
+            # never connects a contributed server a second time.
+            _extensions = getattr(container, "user_extensions", None)
+            if _extensions is not None and hasattr(_extensions, "sync_runtime"):
+                await _extensions.sync_runtime()
 
         task = asyncio.create_task(_bg_connect(), name="lifespan-mcp-connect")
         # Stash on the registry so shutdown can cancel an in-flight connect.

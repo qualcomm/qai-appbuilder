@@ -2423,6 +2423,17 @@ class McpServerStatus:
     tool_count: int = 0
     tool_names: tuple[str, ...] = ()
     error: str = ""
+    # Who provides the server (tail-appended). ``""`` = the user's own
+    # (persisted, editable); otherwise e.g. ``"extension:<name>"`` -- a
+    # contributed server: never persisted, read-only except enable/disable.
+    source: str = ""
+
+
+class McpServerReadOnlyError(ValueError):
+    """An edit / remove of a contributed (e.g. extension-provided) MCP server.
+
+    Raised by the registry; such a server can only be enabled or disabled.
+    """
 
 
 @runtime_checkable
@@ -2914,6 +2925,7 @@ __all__ = [
     "SystemPromptResult",
     "PromptAddenda",
     "PromptAddendaProvider",
+    "McpServerReadOnlyError",
     # PR-402 — title generation
     "TitleGeneratorPort",
     "TitleGenerationRequest",

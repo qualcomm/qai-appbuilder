@@ -55,17 +55,20 @@ __all__ = [
     "DEFAULT_SKILLS_DIR",
     "MANIFEST_FILENAME",
     "MANIFEST_VERSION",
+    "MCP_TRANSPORTS",
     "PROMPT_MAX_CHARS",
     "PROMPT_WHEN",
     "SETTING_TYPES",
     "ExtensionManifest",
     "ManifestError",
+    "McpServerDeclaration",
     "PromptDeclaration",
     "SettingDeclaration",
     "SkillsDeclaration",
     "ToolDeclaration",
     "load_manifest",
     "parse_manifest",
+    "placeholders_in",
 ]
 
 MANIFEST_FILENAME: Final[str] = "extension.json"
@@ -95,8 +98,18 @@ _TOP_KEYS: Final[frozenset[str]] = frozenset(
         "skills",
         "prompts",
         "settings",
+        "mcp_servers",
     }
 )
+_MCP_KEYS: Final[frozenset[str]] = frozenset(
+    {"name", "transport", "command", "args", "env", "cwd", "url", "headers", "timeout_s"}
+)
+_MCP_STDIO_ONLY: Final[tuple[str, ...]] = ("command", "args", "env", "cwd")
+_MCP_REMOTE_ONLY: Final[tuple[str, ...]] = ("url", "headers")
+MCP_TRANSPORTS: Final[frozenset[str]] = frozenset({"stdio", "http", "sse"})
+#: ``${root}`` / ``${data_dir}`` / ``${python}`` / ``${setting:KEY}`` / ``${secret:KEY}``.
+_PLACEHOLDER_RE: Final[re.Pattern[str]] = re.compile(r"\$\{([^}]*)\}")
+_PLAIN_PLACEHOLDERS: Final[frozenset[str]] = frozenset({"root", "data_dir", "python"})
 _SETTING_KEYS: Final[frozenset[str]] = frozenset(
     {"key", "type", "label", "description", "default", "required", "options", "min", "max"}
 )
@@ -178,6 +191,22 @@ class SettingDeclaration:
 
 
 @dataclass(frozen=True, slots=True)
+class McpServerDeclaration:
+    """One ``mcp_servers[]`` entry. String values may hold placeholders
+    (resolved by the host at load; see :func:`placeholders_in`)."""
+
+    name: str
+    transport: str = "stdio"
+    command: str | None = None
+    args: tuple[str, ...] = ()
+    env: Mapping[str, str] = field(default_factory=dict)
+    cwd: str | None = None
+    url: str | None = None
+    headers: Mapping[str, str] = field(default_factory=dict)
+    timeout_s: float = 30.0
+
+
+@dataclass(frozen=True, slots=True)
 class PromptDeclaration:
     """One ``prompts[]`` entry: exactly one of ``text`` / ``file`` is set."""
 
@@ -199,6 +228,7 @@ class ExtensionManifest:
     skills: SkillsDeclaration = field(default_factory=SkillsDeclaration)
     prompts: tuple[PromptDeclaration, ...] = ()
     settings: tuple[SettingDeclaration, ...] = ()
+    mcp_servers: tuple[McpServerDeclaration, ...] = ()
 
     @property
     def tool_names(self) -> frozenset[str]:
@@ -253,8 +283,119 @@ def parse_manifest(raw: Any, *, root: Path) -> ExtensionManifest:
         tools=tools,
         skills=_parse_skills(obj.get("skills")),
         prompts=_parse_prompts(obj.get("prompts")),
-        settings=_parse_settings(obj.get("settings")),
+        settings=(settings := _parse_settings(obj.get("settings"))),
+        mcp_servers=_parse_mcp_servers(obj.get("mcp_servers"), settings),
     )
+
+
+def placeholders_in(value: str) -> list[str]:
+    """The placeholder bodies in ``value`` (``"${secret:k}"`` -> ``["secret:k"]``)."""
+    return _PLACEHOLDER_RE.findall(value)
+
+
+def _parse_mcp_servers(
+    raw: Any, settings: tuple[SettingDeclaration, ...]
+) -> tuple[McpServerDeclaration, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ManifestError("mcp_servers must be an array")
+    kinds = {s.key: s.type for s in settings}
+    out: list[McpServerDeclaration] = []
+    for index, item in enumerate(raw):
+        decl = _parse_mcp_server(item, where=f"mcp_servers[{index}]", kinds=kinds)
+        if any(d.name == decl.name for d in out):
+            raise ManifestError(f"mcp_servers[{index}].name {decl.name!r} is declared twice")
+        out.append(decl)
+    return tuple(out)
+
+
+def _parse_mcp_server(item: Any, *, where: str, kinds: Mapping[str, str]) -> McpServerDeclaration:
+    entry = _object(item, where)
+    _known_keys(entry, _MCP_KEYS, where=where)
+    _require(entry, ("name",), where=where)
+    name = entry["name"]
+    if not isinstance(name, str) or len(name) > _NAME_MAX or not _EXT_NAME_RE.match(name):
+        raise ManifestError(
+            f"{where}.name {name!r} must match ^[a-z][a-z0-9]*(-[a-z0-9]+)*$ (max {_NAME_MAX})"
+        )
+    transport = entry.get("transport", "stdio")
+    if transport not in MCP_TRANSPORTS:
+        raise ManifestError(f"{where}.transport {transport!r} must be stdio, http or sse")
+    stdio = transport == "stdio"
+    required, forbidden = ("command", _MCP_REMOTE_ONLY) if stdio else ("url", _MCP_STDIO_ONLY)
+    if required not in entry:
+        raise ManifestError(f"{where} with transport {transport!r} needs '{required}'")
+    for key in forbidden:
+        if key in entry:
+            raise ManifestError(f"{where}.{key} is not valid for transport {transport!r}")
+    timeout = entry.get("timeout_s", 30.0)
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
+        raise ManifestError(f"{where}.timeout_s must be a positive number")
+    decl = McpServerDeclaration(
+        name=name,
+        transport=transport,
+        command=_mcp_str(entry, "command", where),
+        args=tuple(_mcp_str_list(entry.get("args"), f"{where}.args")),
+        env=_mcp_str_map(entry.get("env"), f"{where}.env"),
+        cwd=_mcp_str(entry, "cwd", where),
+        url=_mcp_str(entry, "url", where),
+        headers=_mcp_str_map(entry.get("headers"), f"{where}.headers"),
+        timeout_s=float(timeout),
+    )
+    for value in _mcp_values(decl):
+        for ph in placeholders_in(value):
+            _check_placeholder(ph, where=where, kinds=kinds)
+    return decl
+
+
+def _mcp_values(decl: McpServerDeclaration) -> list[str]:
+    values = [v for v in (decl.command, decl.cwd, decl.url) if v is not None]
+    return [*values, *decl.args, *decl.env.values(), *decl.headers.values()]
+
+
+def _check_placeholder(ph: str, *, where: str, kinds: Mapping[str, str]) -> None:
+    if ph in _PLAIN_PLACEHOLDERS:
+        return
+    kind, _, key = ph.partition(":")
+    if kind == "setting" and kinds.get(key) not in (None, "secret"):
+        return
+    if kind == "secret" and kinds.get(key) == "secret":
+        return
+    if kind in ("setting", "secret"):
+        wanted = "secret" if kind == "secret" else "non-secret"
+        raise ManifestError(f"{where}: ${{{ph}}} must name a declared {wanted} setting")
+    raise ManifestError(
+        f"{where}: unknown placeholder ${{{ph}}} (use root, data_dir, python, "
+        "setting:KEY or secret:KEY)"
+    )
+
+
+def _mcp_str(entry: Mapping[str, Any], key: str, where: str) -> str | None:
+    if key not in entry:
+        return None
+    value = entry[key]
+    if not isinstance(value, str) or not value.strip():
+        raise ManifestError(f"{where}.{key} must be a non-empty string")
+    return value
+
+
+def _mcp_str_list(raw: Any, where: str) -> list[str]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or not all(isinstance(v, str) for v in raw):
+        raise ManifestError(f"{where} must be an array of strings")
+    return list(raw)
+
+
+def _mcp_str_map(raw: Any, where: str) -> dict[str, str]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict) or not all(
+        isinstance(k, str) and k and isinstance(v, str) for k, v in raw.items()
+    ):
+        raise ManifestError(f"{where} must be an object of string values")
+    return dict(raw)
 
 
 def _parse_settings(raw: Any) -> tuple[SettingDeclaration, ...]:
