@@ -78,7 +78,13 @@ State = Literal["loaded", "failed"]
 
 
 class ExtensionError(Exception):
-    """An extension misused the API (undeclared tool, bad argument, ...)."""
+    """Raised by the extension API when it is misused or cannot do what was asked.
+
+    Public (``qai.ext``). Examples: registering an undeclared tool, an invalid
+    ``config.toml``, a disallowed secret key, no secret store available. Raised
+    during ``activate`` it fails the extension's load; raised later (from a
+    tool handler) the extension may catch it.
+    """
 
 
 class ToolSink(Protocol):
@@ -111,7 +117,12 @@ class SecretStoreLike(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class ToolCall:
-    """What a tool handler receives."""
+    """What a tool handler receives. Public (``qai.ext``).
+
+    ``arguments``: the arguments the model passed (a fresh dict per call).
+    ``tool_name``: the tool being called. ``conversation_id`` / ``tab_id``:
+    where the call comes from (opaque strings; use them as keys only).
+    """
 
     arguments: dict[str, Any]
     tool_name: str
@@ -165,7 +176,14 @@ class _PendingTool:
 
 
 class ExtensionSecrets:
-    """The extension's own credential space (service ``ext.<name>``)."""
+    """``ctx.secrets``: the extension's own credential space. Public (``qai.ext``).
+
+    Backed by the app's secret store (OS keyring or encrypted file) under the
+    service name ``ext.<extension name>``; another extension's secrets are not
+    reachable. Keys must be non-empty and contain no ``/``, ``\\`` or ``..``.
+    Every method raises :class:`ExtensionError` on a disallowed key or when no
+    secret store is available.
+    """
 
     def __init__(self, store: SecretStoreLike | None, extension: str) -> None:
         self._store = store
@@ -186,6 +204,7 @@ class ExtensionSecrets:
         return store.get(self._service, key) if store.exists(self._service, key) else None
 
     def set(self, key: str, value: str) -> None:
+        """Store ``value`` (a string) under ``key``, replacing any previous value."""
         if not isinstance(value, str):
             raise ExtensionError("secret values must be strings")
         self._require(key).set(self._service, key, value)
@@ -197,15 +216,20 @@ class ExtensionSecrets:
             store.delete(self._service, key)
 
     def keys(self) -> list[str]:
+        """The stored keys (never the values), sorted."""
         return sorted(self._require().list_keys(self._service))
 
 
 class ExtensionContext:
-    """The ``ctx`` passed to ``activate(ctx)``. The whole extension API.
+    """The ``ctx`` passed to ``activate(ctx)``. Public (``qai.ext``).
 
-    Registration methods are valid only while ``activate`` runs; everything
-    else (``data_dir``, ``secrets``, ``proxy_url()``, ...) may also be used
-    later, from tool handlers.
+    Created by the host only; an extension never constructs one. Its public
+    members are the whole runtime API (design doc §4.4): ``name``,
+    ``version``, ``root``, ``data_dir``, ``config``, ``logger``, ``secrets``,
+    ``proxy_url()``, ``ssl_verify``, ``register_tool()``, ``on_unload()``.
+
+    ``register_tool`` / ``on_unload`` are valid only while ``activate`` runs;
+    everything else may also be used later, from tool handlers.
     """
 
     def __init__(
@@ -227,7 +251,9 @@ class ExtensionContext:
         self._unload: list[Callable[[], None]] = []
         self._config: Mapping[str, Any] | None = None
         self._active = True
+        #: The extension's own credential space (:class:`ExtensionSecrets`).
         self.secrets = ExtensionSecrets(secret_store, manifest.name)
+        #: Logger ``qai.user_extension.<name>``; records go to the app log.
         self.logger = logging.getLogger(f"qai.user_extension.{manifest.name}")
         #: Host-side notes for the extension's status; not part of the extension API.
         self._warnings: list[str] = []
@@ -236,10 +262,12 @@ class ExtensionContext:
 
     @property
     def name(self) -> str:
+        """The manifest ``name``."""
         return self._manifest.name
 
     @property
     def version(self) -> str:
+        """The manifest ``version``."""
         return self._manifest.version
 
     @property
