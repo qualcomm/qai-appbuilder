@@ -59,6 +59,7 @@ from typing import TYPE_CHECKING, Any, cast
 if TYPE_CHECKING:
     from qai.chat.adapters.compaction_journal import CompactionJournal
     from qai.chat.application.ports import ModelContextWindowPort
+    from qai.chat.application.task_usage_ledger import TaskUsageLedger
 from qai.chat.application.ports import (
     BudgetTrackerPort,
     ContextCompressionPort,
@@ -729,7 +730,12 @@ class AgentToolHandler:
         # agent's. ``None`` (legacy / unit stubs) falls back to the static
         # family-table guess, byte-for-byte the prior behaviour.
         context_windows: "ModelContextWindowPort | None" = None,
+        # Per-user-task token ledger shared with ``StreamChatUseCase``: every
+        # sub-agent round books into the spawning task (``task_id`` kwarg on
+        # ``iter_events``). ``None`` disables attribution.
+        task_usage_ledger: "TaskUsageLedger | None" = None,
     ) -> None:
+        self._task_ledger = task_usage_ledger
         self._llm = llm
         self._tool_executor = tool_executor
         self._max_rounds = max_rounds
@@ -1099,6 +1105,9 @@ class AgentToolHandler:
         # inside ``_resolve_session``.  Ignored on a resume, which already has
         # an id.
         preassigned_subagent_id: SubAgentSessionId | None = None,
+        # Per-user-task ledger key (set by the main agent's spawn; propagated
+        # to nested spawns). ``None`` → rounds are not attributed to a task.
+        task_id: str | None = None,
     ) -> AsyncIterator[SubAgentEvent]:
         """Run the sub-agent and yield SSE-shaped event dicts.
 
@@ -1300,6 +1309,7 @@ class AgentToolHandler:
                 parent_abort_check=parent_abort_check,
                 parent_consume_cancel_tool=parent_consume_cancel_tool,
                 preassigned_subagent_id=preassigned_subagent_id,
+                task_id=task_id,
             ):
                 _publish(event)
                 yield event
@@ -1332,6 +1342,12 @@ class AgentToolHandler:
             # set at ``agent_tool.py`` ~1254). Best-effort — never let cleanup
             # mask the exception being unwound.
             _abort_id = broadcast.get("id")
+            # Task ledger: this run is no longer in flight (every exit path).
+            if self._task_ledger is not None and task_id:
+                try:
+                    self._task_ledger.end_subagent(task_id, _abort_id)
+                except Exception:  # noqa: BLE001
+                    pass
             if self._abort_registry is not None and _abort_id is not None:
                 try:
                     self._abort_registry.unregister(_abort_id)
@@ -1671,6 +1687,7 @@ class AgentToolHandler:
         parent_abort_check: Callable[[], bool] | None = None,
         parent_consume_cancel_tool: Callable[[str], bool] | None = None,
         preassigned_subagent_id: SubAgentSessionId | None = None,
+        task_id: str | None = None,
     ) -> AsyncIterator[SubAgentEvent]:
         """Run the sub-agent agentic loop and yield SSE events.
 
@@ -1843,6 +1860,18 @@ class AgentToolHandler:
             # whether a broadcaster is wired (previously it was gated behind the
             # broadcaster, so a registry-only wiring leaked the flag on cancel).
             broadcast["id"] = session.id.value
+            # Task ledger: register this run under the spawning task (a resumed
+            # session starts from ZERO for this task — historical
+            # ``session.usage`` is never read).
+            if self._task_ledger is not None and task_id:
+                try:
+                    self._task_ledger.begin_subagent(
+                        task_id,
+                        session.id.value,
+                        session.title or subagent_name or session.subagent_type,
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
             # Stash the live RUNNING working aggregate so ``iter_events``'
             # anti-leak ``finally`` (Fix B-1) can settle it as INTERRUPTED when a
             # cancel/aclose unwinds this run before its own terminal
@@ -2461,6 +2490,7 @@ class AgentToolHandler:
                             session.id if session is not None else None
                         ),
                         current_parent_round_index=round_no,
+                        task_id=task_id,
                         # Fix 2: forward the parent-Stop predicate so a nested
                         # (grand) spawn started from THIS sub-agent's tool round
                         # also observes the originating tab's ⏹.
@@ -3008,6 +3038,21 @@ class AgentToolHandler:
             # loops; see the tail of this function for the retry / stop
             # decision logic).
             _usage = end_payload.get("usage")
+            # Task ledger: exactly once per ended sub-agent round, attributed
+            # to THIS run's session under the spawning task.
+            if self._task_ledger is not None and task_id:
+                try:
+                    self._task_ledger.add_round(
+                        task_id,
+                        _usage if isinstance(_usage, dict) else None,
+                        model_id=model_hint,
+                        subagent_id=(
+                            session.id.value if session is not None
+                            else f"anon-{agent_index}"
+                        ),
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
             if isinstance(_usage, dict):
                 _round_usages[round_no] = dict(_usage)
                 # NOTE: sub-agent DOES NOT mark the shared
@@ -3549,6 +3594,15 @@ class AgentToolHandler:
             part.startswith("[sub-agent round ") and "error:" in part
             for part in accumulated_text
         )
+        # Task ledger: mark this run ended BEFORE ``_finalize_session``
+        # publishes ``SubAgentSessionTerminated`` — the headless follow-up it
+        # triggers must not snapshot this run as still running. (The
+        # ``iter_events`` finally repeats this idempotently for cancel paths.)
+        if self._task_ledger is not None and task_id and session is not None:
+            try:
+                self._task_ledger.end_subagent(task_id, session.id.value)
+            except Exception:  # noqa: BLE001
+                pass
         subagent_id = await self._finalize_session(
             session,
             wire_messages=wire_messages,
@@ -4177,6 +4231,7 @@ class AgentToolHandler:
         parent_abort_check: Callable[[], bool] | None = None,
         parent_consume_cancel_tool: Callable[[str], bool] | None = None,
         on_partial: Callable[[str], None] | None = None,
+        task_id: str | None = None,
     ) -> str:
         """Execute a single tool call.
 
@@ -4333,6 +4388,7 @@ class AgentToolHandler:
                     # ``parent_abort_check``). The check is keyed by ``call_id``,
                     # so it only fires for the exact call the user stopped.
                     parent_consume_cancel_tool=parent_consume_cancel_tool,
+                    task_id=task_id,
                 ),
             )
 

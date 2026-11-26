@@ -602,6 +602,33 @@ export interface SubAgentBlock {
   readonly recoveryHint?: string;
 }
 
+/** Whole-task totals: tokens = main + every sub-agent; duration = wall-clock. */
+export interface TaskSummary {
+  task_id?: string;
+  /** false while sub-agents of this task are still running. */
+  complete?: boolean;
+  main_rounds?: number;
+  total_tokens: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  /** Portion of output_tokens spent on hidden reasoning (absent on old rows). */
+  reasoning_tokens?: number;
+  main_tokens: number;
+  duration_ms: number;
+  model?: string;
+  sub_agents?: Array<{
+    id?: string;
+    name: string;
+    tokens: number;
+    input?: number;
+    output?: number;
+    rounds?: number;
+    running?: boolean;
+  }>;
+}
+
 /** Token usage as carried by the terminal `end` frame (OpenAI shape). */
 export interface ChatMessageUsage {
   readonly prompt_tokens?: number;
@@ -1445,6 +1472,9 @@ export interface ChatTab {
    *  ``meta.request_id`` by ``confirmDone`` so the "Prompt Snapshot" button
    *  can surface it.  Reset to ``null`` on ``setStreaming`` / ``confirmAbort``. */
   streamingRequestId: string | null;
+  /** Task-level totals (main + all sub-agents tokens, wall-clock duration)
+   *  from the terminal `end` frame; stamped to `meta.task_summary`. */
+  streamingTaskSummary: TaskSummary | null;
   /** Persisted assistant Message id for the in-flight turn, captured from the
    *  terminal ``end`` frame's ``payload.assistant_message_id`` (backend §3.1
    *  tail-append). Used by ``confirmDone`` as the committed trailing assistant

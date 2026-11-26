@@ -187,6 +187,7 @@ from qai.chat.application.use_cases._single_agent_turn import (
     SingleAgentTurnKernel,
     ToolExecutionItem,
 )
+from qai.chat.application.task_usage_ledger import TaskUsageLedger
 from qai.chat.application.use_cases._streaming_subagent_frames import (
     SUBAGENT_FRAME_TYPES as _SUBAGENT_FRAME_TYPES,
     accumulate_sub_agent_block as _accumulate_sub_agent_block,
@@ -1972,6 +1973,11 @@ class StreamChatUseCase:
         # turn). Shared-ownership model: the main agent can still later wake
         # the same sub-agent to read the user-driven conclusion.
         sub_agent_sessions: SubAgentSessionRepositoryPort | None = None,
+        # ---- Per-user-task token ledger (main + all sub-agents) ----
+        # Shared with ``AgentToolHandler`` so every sub-agent round lands in
+        # the SAME task bucket. ``None`` → a private in-process ledger (main
+        # agent only; sub-agent rounds then simply are not attributed).
+        task_usage_ledger: "TaskUsageLedger | None" = None,
         # ---- Runtime debug-config reader (forge-config service_launch) ----
         # Optional zero-arg callable (sync or async) returning the per-turn
         # runtime debug flags, e.g. ``{"prompt_debug": bool,
@@ -2377,6 +2383,10 @@ class StreamChatUseCase:
         # the ``_budget`` property lazily returns a NullBudgetTracker (disabled).
         self._budget_tracker = budget_tracker
         self._null_budget_tracker: "BudgetTrackerPort | None" = None
+        self._task_ledger: TaskUsageLedger = (
+            task_usage_ledger if task_usage_ledger is not None
+            else TaskUsageLedger()
+        )
         #: Per-conversation "last seen compaction checkpoint signature" (改动:
         #: 平稳期缓存闭环). Maps ``_conv_key(conv)`` → the checkpoint's
         #: ``anchor_index`` observed on the previous round (``None`` when no
@@ -3247,6 +3257,14 @@ class StreamChatUseCase:
                     and bool(frame.payload.get("truncated"))
                 ):
                     _usage = frame.payload.get("usage") or {}
+                    # Task ledger: a suppressed truncated attempt still
+                    # consumed its FULL prompt + completion — book it now
+                    # (its completion is ALSO folded into the final round's
+                    # usage below for the legacy turn figure, but the
+                    # ledger records rounds independently, never that sum).
+                    self._record_task_round(
+                        request, _usage if isinstance(_usage, dict) else None
+                    )
                     _completion_tokens = (
                         _usage.get("completion_tokens", 0)
                         if isinstance(_usage, dict)
@@ -3380,6 +3398,9 @@ class StreamChatUseCase:
                         if not k.startswith("last_round_")
                         and not k.startswith("first_round_")
                     }
+                    # Task ledger: round 0 (single-round turn), raw usage
+                    # BEFORE the truncated-attempt completion fold below.
+                    self._record_task_round(request, dict(_u))
                     if state.round0_truncated_completion_tokens:
                         # Fold in the completion tokens spent on the
                         # SUPPRESSED round-0 truncated attempt(s) this turn,
@@ -3604,6 +3625,9 @@ class StreamChatUseCase:
                     # V1 useChat.js:2351-2356 accumulation parity).
                     _init_u = tail_frame.payload.get("usage")
                     if isinstance(_init_u, dict):
+                        # Task ledger: round 0 of a tool-calling turn (raw,
+                        # before the truncated-attempt completion fold).
+                        self._record_task_round(request, dict(_init_u))
                         if state.round0_truncated_completion_tokens:
                             # Fold in tokens spent on SUPPRESSED round-0
                             # truncated attempt(s), exactly once — mirrors
@@ -4375,6 +4399,13 @@ class StreamChatUseCase:
         # leaves every completed tool round on disk (V1 frontend-save parity,
         # done server-side).
         state.turn_persist_baseline = len(conv.messages)
+        # Per-user-task token ledger: resolve (or open) the task this turn
+        # belongs to and stash ``_task_id`` on ``request.extra`` so every
+        # round below + every sub-agent it spawns books into it.
+        self._bind_task(
+            conv=conv, request=request, user_msg=user_msg,
+            started_ms=_turn_started_ms,
+        )
         # Diagnostics: one ``chat.turn.start`` here and exactly one
         # ``chat.turn.end`` on whichever exit path the turn takes (see
         # ``_log_turn_end``). A ``start`` with no ``end`` in the log means the
@@ -6731,7 +6762,14 @@ class StreamChatUseCase:
             if isinstance(_tp, dict)
             else None
         )
+        _task_summary = await self._collect_task_summary(
+            conv=conv,
+            request=request,
+            turn_usage=turn_usage,
+            turn_started_ms=turn_started_ms,
+        )
         _assistant_meta = _build_assistant_meta(
+            task_summary=_task_summary,
             request_id=_snapshot_request_id,
             ttft_ms=ttft_ms,
             turn_started_ms=turn_started_ms,
@@ -6931,6 +6969,9 @@ class StreamChatUseCase:
                 reason="snapshot",
                 request_id=_snapshot_request_id,
                 assistant_message_id=_assistant_msg_id,
+                extra=(
+                    {"task_summary": _task_summary} if _task_summary else None
+                ),
             )
             await self._publish(
                 ChatStreamFrameEvent(
@@ -6944,6 +6985,127 @@ class StreamChatUseCase:
         outcome.assistant_msg = assistant_msg
         outcome.frame_count = frame_count
         outcome.synth_seq = synth_seq
+
+    # ── Per-user-task token ledger ─────────────────────────────────────────────────────
+    @staticmethod
+    def _task_id_of(request: "StreamChatInput") -> str | None:
+        extra = request.extra if isinstance(request.extra, dict) else None
+        tid = extra.get("_task_id") if extra else None
+        return tid if isinstance(tid, str) and tid else None
+
+    def _record_task_round(
+        self, request: "StreamChatInput", usage: dict[str, Any] | None
+    ) -> None:
+        """Fold ONE main-agent LLM round's usage into its task (once/round)."""
+        try:
+            self._task_ledger.add_round(
+                self._task_id_of(request), usage, model_id=request.model_hint
+            )
+        except Exception:  # noqa: BLE001 — bookkeeping never breaks a turn
+            pass
+
+    def _bind_task(
+        self,
+        *,
+        conv: Any,
+        request: "StreamChatInput",
+        user_msg: Message,
+        started_ms: int,
+    ) -> None:
+        """Resolve the user task this turn belongs to; stash it on ``extra``.
+
+        * user turn (incl. sub-agent take-over) → a NEW task keyed by the
+          user message id, started now;
+        * headless follow-up → the task that spawned the sub-agent whose
+          SYSTEM_NOTICE triggered it (falls back to the conversation's latest
+          task, else a fresh task).
+        """
+        try:
+            ledger = self._task_ledger
+            task_id: str | None = None
+            if request.headless:
+                for m in reversed(list(conv.messages)[-50:]):
+                    if m.role is not MessageRole.SYSTEM_NOTICE:
+                        continue
+                    src = (m.meta or {}).get(SYSTEM_NOTICE_META_SOURCE_ID)
+                    cand = ledger.task_for_subagent(
+                        src if isinstance(src, str) else None
+                    )
+                    if ledger.has_task(cand):
+                        task_id = cand
+                        break
+                # No sub-agent match (e.g. a background-process notice):
+                # fall through to a FRESH task anchored on the notice — never
+                # glue it onto an unrelated (possibly hours-old) task.
+            if task_id is None:
+                task_id = user_msg.id.value
+                ledger.open_task(
+                    task_id,
+                    conversation_id=conv.id.value,
+                    started_ms=started_ms,
+                    model=request.model_hint or None,
+                )
+            if request.extra is None:
+                object.__setattr__(request, "extra", {})
+            if isinstance(request.extra, dict):
+                request.extra["_task_id"] = task_id
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("chat.task_usage.bind_failed", error=str(exc))
+
+    async def _collect_task_summary(
+        self,
+        *,
+        conv: Any,
+        request: "StreamChatInput",
+        turn_usage: dict[str, Any] | None,
+        turn_started_ms: int,
+    ) -> dict[str, Any] | None:
+        """Snapshot of this turn's task: tokens = every LLM round of the main
+        agent + every sub-agent round run FOR THIS TASK (resumed sub-agents
+        contribute only this task's rounds); duration = wall-clock since the
+        user sent the request. Best-effort."""
+        del turn_usage, turn_started_ms
+        now_ms = _now_ms(self._clock)
+        own = self._task_id_of(request)
+        try:
+            self._restamp_absorbed_tasks(conv=conv, own_task=own, now_ms=now_ms)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            return self._task_ledger.snapshot(own, now_ms=now_ms)
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _restamp_absorbed_tasks(
+        self, *, conv: Any, own_task: str | None, now_ms: int
+    ) -> None:
+        """Refresh OTHER tasks' persisted cards whose sub-agents finished.
+
+        A live turn of task B can absorb the SYSTEM_NOTICE of a sub-agent that
+        belongs to an earlier task A (no headless follow-up then runs for A),
+        which would leave A's card frozen at "running" without that sub-agent's
+        final rounds. Re-stamp A's LAST summary message in place; the caller's
+        ``_save_parent_conv`` upserts it (``meta_json`` is rewritten).
+        """
+        ledger = self._task_ledger
+        msgs = conv.messages
+        seen: set[str] = set()
+        for i in range(len(msgs) - 1, max(-1, len(msgs) - 400), -1):
+            m = msgs[i]
+            ts = (m.meta or {}).get("task_summary") if m.meta else None
+            if not isinstance(ts, dict):
+                continue
+            tid = ts.get("task_id")
+            if not isinstance(tid, str) or tid == own_task or tid in seen:
+                continue
+            seen.add(tid)
+            if ts.get("complete") is not False or not ledger.has_task(tid):
+                continue
+            fresh = ledger.snapshot(tid, now_ms=now_ms)
+            if fresh is None or fresh == ts:
+                continue
+            # Duration becomes "request → last sub-agent finished" (now).
+            msgs[i] = replace(m, meta={**m.meta, "task_summary": fresh})
 
     async def _detect_promote_ready(self, *, conv: Any, joined: str) -> None:
         """Turn-end promote-ready detection → ``conv.detected_model`` (057).
@@ -13045,6 +13207,12 @@ class StreamChatUseCase:
             _before_tt = int(usage_accumulator.get("total_tokens", 0) or 0)
             # Accumulate this round's usage into the running turn total.
             self._accumulate_usage(usage_accumulator, _round_usage_in)
+            # Task ledger: follow-up round N (fires exactly once per ended
+            # round — retries / re-opened integration rounds included).
+            self._record_task_round(
+                request,
+                _round_usage_in if isinstance(_round_usage_in, dict) else None,
+            )
             try:
                 _delta_pt = 0
                 _delta_tt = 0
@@ -14735,6 +14903,11 @@ class StreamChatUseCase:
                 total_agents=total,
                 model_hint=request.model_hint,
             )
+            # Per-user-task token ledger: the sub-agent (and any nested
+            # child it spawns) books every round into THIS task.
+            _tid = self._task_id_of(request)
+            if _tid is not None:
+                extra["task_id"] = _tid
             try:
                 sub_handle = await self._sub_agent_bridge.spawn(
                     conv_id=conv.id.value,

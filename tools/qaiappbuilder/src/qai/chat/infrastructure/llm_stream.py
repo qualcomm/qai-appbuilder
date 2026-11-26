@@ -236,6 +236,8 @@ _CHAT_CONTROL_KEYS: frozenset[str] = frozenset(
         # snapshot gate); never valid OpenAI body fields.
         "_prompt_debug",
         "_show_prompt_in_ui",
+        # Per-user-task token-ledger key stashed by ``StreamChatUseCase``.
+        "_task_id",
         # Skill body text separated from the system prompt for prompt-cache
         # stability. Consumed by ``_build_payload`` and injected as a
         # synthetic user-role message; never a valid OpenAI body field.
@@ -3600,6 +3602,14 @@ def _extract_usage(event: dict[str, Any]) -> dict[str, Any] | None:
     # real path, while legacy hand-built stub usage dicts stay unaffected.
     if _reported_cache:
         result["provider_reported_cache"] = True
+    # Tail-appended boolean (never summed — bool keys are skipped by every
+    # usage accumulator): ``prompt_tokens`` was corrected to ``total -
+    # completion`` and therefore ALREADY includes any cached volume. Lets the
+    # per-task billing ledger tell "cache inside prompt" from the Anthropic
+    # "cache split out of prompt" shape without guessing. Emitted only when
+    # True so the majority shape stays byte-for-byte unchanged.
+    if _prompt_corrected:
+        result["prompt_includes_cache"] = True
     # 改动3: surface the observe-only cache-read volume when the corrected
     # branch zeroed ``cache_read_tokens`` (so eff-prompt math is unaffected) —
     # ONLY when positive, so the majority path (no correction / no cache) keeps

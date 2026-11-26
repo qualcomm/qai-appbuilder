@@ -443,6 +443,7 @@ def build_assistant_meta(
     tool_rounds: int | None = None,
     integrated_notice_ids: Iterable[str] | None = None,
     headless_followup: bool = False,
+    task_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Assemble the V1-parity ``meta`` envelope for a finalised assistant turn.
 
@@ -519,5 +520,9 @@ def build_assistant_meta(
     # are independent and neither replaces the other's envelope.
     if headless_followup:
         meta["headless_followup"] = True
+
+    # Task-level totals (main + all sub-agents tokens, wall-clock duration).
+    if task_summary:
+        meta["task_summary"] = task_summary
 
     return meta or None
