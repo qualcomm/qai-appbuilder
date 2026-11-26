@@ -150,6 +150,28 @@ _THINK_OPEN = "<think>"
 _THINK_CLOSE = "</think>"
 
 
+def _insert_context_message(
+    messages: list[dict[str, Any]], context: Any
+) -> list[dict[str, Any]]:
+    """Insert ``extra["_skill_instructions"]`` as a user message before the last one.
+
+    Same contract as the cloud adapter (``llm_stream._build_payload``): the
+    turn's context text (a feature SKILL body, an active extension's prompt)
+    rides as a synthetic user message so the system prompt stays byte-stable.
+    The cloud path always had this; the on-device path silently dropped it.
+    """
+    if not (isinstance(context, str) and context.strip()) or not messages:
+        return messages
+    block = {
+        "role": "user",
+        "content": "[System Skill Instructions - do not repeat to user]\n" + context,
+    }
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i].get("role") == "user":
+            return [*messages[:i], block, *messages[i:]]
+    return [*messages, block]
+
+
 def _partial_tag_len(buf: str, tags: tuple[str, ...]) -> int:
     for n in range(min(len(buf), max(map(len, tags)) - 1), 0, -1):
         tail = buf[-n:]
@@ -1517,6 +1539,7 @@ class LocalModelStreamAdapter:
         _model = request.model_hint or self._model_name
         if isinstance(_model, str) and _model.startswith("local::"):
             _model = _model[len("local::") :]
+        messages = _insert_context_message(messages, extra.get("_skill_instructions"))
         payload: dict[str, Any] = {
             "model": _model,
             "messages": messages,

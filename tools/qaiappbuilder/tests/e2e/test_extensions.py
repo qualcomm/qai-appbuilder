@@ -171,3 +171,49 @@ def test_unknown_extension_is_404(be: tuple) -> None:
     _ob, cl = be
     r = cl.post("/api/extensions/no-such-ext/reload")
     assert r.status_code == 404 and r.json()["code"] == "extensions.not_found"
+
+
+# -- prompt fragments ------------------------------------------------------------------
+
+
+def _messages(llm: StandInLLM) -> list[dict]:
+    return llm.chat_requests()[0].body["messages"]
+
+
+def test_prompt_fragments_reach_the_model(be: tuple, llm: StandInLLM) -> None:
+    """'always' ends the system prompt; 'active' rides as a context message only when selected."""
+    ob, cl = be
+    ext = ob.data_dir / "extensions" / "prompt-ext"
+    ext.mkdir(parents=True)
+    (ext / "active.md").write_text("ACTIVE-MARKER: answer like a pirate", encoding="utf-8")
+    (ext / "extension.json").write_text(
+        json.dumps(
+            {
+                "manifest_version": 1, "name": "prompt-ext", "version": "1", "description": "e2e",
+                "prompts": [{"when": "always", "text": "ALWAYS-MARKER: be brief"}, {"when": "active", "file": "active.md"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    status = cl.post("/api/extensions/prompt-ext/reload").json()
+    assert status["state"] == "loaded" and status["prompts"] == {"always": 1, "active": 1}, status
+
+    def turn(tab: str, **query: str) -> list[dict]:
+        llm.clear()
+        cid = cl.post("/api/chat/conversations", json={"title": "e2e"}).json()["id"]
+        t = run_turn(cl, cid, tab, "[echo] hi", seconds=60, **query)
+        assert t.status == 200, t.body
+        return _messages(llm)
+
+    plain = turn("t-prompt-plain")
+    active = turn("t-prompt-active", active_extensions=json.dumps(["prompt-ext"]))
+
+    for msgs in (plain, active):
+        assert msgs[0]["role"] == "system"
+        assert msgs[0]["content"].rstrip().endswith("ALWAYS-MARKER: be brief\n</extension_instructions>")
+    assert plain[0]["content"] == active[0]["content"], "system prompt must not change with the selection"
+    assert not any("ACTIVE-MARKER" in str(m.get("content")) for m in plain)
+    (ctx,) = [m for m in active if "ACTIVE-MARKER" in str(m.get("content"))]
+    assert ctx["role"] == "user"
+    assert active.index(ctx) == len(active) - 2  # right before the real user message
+    assert active[-1]["content"] == "[echo] hi"

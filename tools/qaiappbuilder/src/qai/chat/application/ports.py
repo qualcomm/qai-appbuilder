@@ -1699,6 +1699,30 @@ class SystemPromptBuilderPort(Protocol):
         ...
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PromptAddenda:
+    """Extra prompt text contributed by the composition root for one turn.
+
+    ``system_suffix`` is appended to the system prompt. It must only change
+    when the contributing configuration changes (never per turn), because the
+    whole system prompt is one prompt-cache prefix.
+
+    ``context`` varies with per-turn state (what the user has selected). It is
+    sent as a synthetic user-role message right before the real user message
+    -- the same channel as the SKILL body -- so the system prompt stays
+    byte-stable. Empty strings mean "nothing".
+    """
+
+    system_suffix: str = ""
+    context: str = ""
+
+
+#: ``provider(selected) -> PromptAddenda``. ``selected`` is the set of names the
+#: client marked active for this turn (``extra["active_extensions"]``). The chat
+#: context does not interpret the names; the provider does.
+PromptAddendaProvider = Callable[[frozenset[str]], PromptAddenda]
+
+
 # ---------------------------------------------------------------------------
 # Title generation (PR-402 / S7.5 lane L4)
 #
@@ -2888,6 +2912,8 @@ __all__ = [
     "SystemPromptBuilderPort",
     "SystemPromptRequest",
     "SystemPromptResult",
+    "PromptAddenda",
+    "PromptAddendaProvider",
     # PR-402 — title generation
     "TitleGeneratorPort",
     "TitleGenerationRequest",

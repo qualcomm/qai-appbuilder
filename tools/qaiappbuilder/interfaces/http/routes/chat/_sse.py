@@ -286,6 +286,7 @@ async def _stream_chat_sse(
     self_allow_spawn: bool = False,
     disabled_tools: list[str] | None = None,
     disabled_skills: list[str] | None = None,
+    active_extensions: list[str] | None = None,
 ) -> AsyncIterator[bytes]:
     """Drive ``StreamChatUseCase`` and yield SSE-encoded bytes.
 
@@ -364,6 +365,9 @@ async def _stream_chat_sse(
             extra["disabled_tools"] = [str(n) for n in disabled_tools if n]
         if disabled_skills:
             extra["disabled_skills"] = [str(n) for n in disabled_skills if n]
+        # User extensions whose entry is selected (their 'active' prompts).
+        if active_extensions:
+            extra["active_extensions"] = [str(n) for n in active_extensions if n]
 
         # R12 dealign: code-persona resolution (id → prompt + name) now
         # happens inside ``StreamChatUseCase`` via the injected cross-BC
@@ -876,6 +880,15 @@ def build_router(*, container: "Container") -> APIRouter:
                 "(refactor-plan §3.1)."
             ),
         ),
+        active_extensions: str | None = Query(
+            default=None,
+            max_length=4096,
+            description=(
+                "User extensions whose entry is selected for this turn - a "
+                "JSON-encoded array of extension names. Their 'active' prompt "
+                "fragments are added to the turn's context. Additive."
+            ),
+        ),
     ) -> StreamingResponse:
         """Open an SSE stream that runs one chat turn.
 
@@ -943,6 +956,7 @@ def build_router(*, container: "Container") -> APIRouter:
         # defensively (a malformed value is simply ignored → no override).
         disabled_tools_list = _parse_name_array(disabled_tools)
         disabled_skills_list = _parse_name_array(disabled_skills)
+        active_extensions_list = _parse_name_array(active_extensions)
 
         body = _stream_chat_sse(
             container=container,
@@ -961,6 +975,7 @@ def build_router(*, container: "Container") -> APIRouter:
             self_allow_spawn=self_allow_spawn,
             disabled_tools=disabled_tools_list or None,
             disabled_skills=disabled_skills_list or None,
+            active_extensions=active_extensions_list or None,
         )
         return StreamingResponse(
             body,

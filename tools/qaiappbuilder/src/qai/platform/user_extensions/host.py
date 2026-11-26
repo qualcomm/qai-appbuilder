@@ -46,6 +46,7 @@ from typing import Any, Final, Literal, Protocol
 
 from .manifest import (
     DEFAULT_SKILLS_DIR,
+    PROMPT_MAX_CHARS,
     ExtensionManifest,
     ManifestError,
     ToolDeclaration,
@@ -60,6 +61,7 @@ __all__ = [
     "ExtensionSecrets",
     "ExtensionSkillRoot",
     "ExtensionStatus",
+    "PromptFragment",
     "RegisteredTool",
     "SecretStoreLike",
     "ToolCall",
@@ -178,6 +180,17 @@ class ExtensionStatus:
     tools: tuple[str, ...] = ()
     skills: tuple[str, ...] = ()
     warnings: list[str] = field(default_factory=list)
+    #: Number of prompt fragments per condition (``always`` / ``active``).
+    prompts: dict[str, int] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class PromptFragment:
+    """A loaded extension's prompt text, ready to inject."""
+
+    extension: str
+    when: str
+    text: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -466,6 +479,7 @@ class UserExtensionHost:
         self._statuses: dict[str, ExtensionStatus] = {}
         self._tools: dict[str, RegisteredTool] = {}
         self._skill_roots: dict[str, ExtensionSkillRoot] = {}
+        self._prompts: dict[str, tuple[PromptFragment, ...]] = {}
         self._contexts: dict[str, ExtensionContext] = {}
         self._modules: dict[str, list[str]] = {}
 
@@ -502,6 +516,21 @@ class UserExtensionHost:
 
     def status(self, name: str) -> ExtensionStatus | None:
         return self._statuses.get(name)
+
+    def prompt_fragments(
+        self, when: str, *, extensions: frozenset[str] | None = None
+    ) -> tuple[PromptFragment, ...]:
+        """Loaded fragments with condition ``when``, sorted by extension name
+        (stable order: the ``always`` block must be byte-identical turn to
+        turn). ``extensions`` restricts to those extension names."""
+        snap = dict(self._prompts)
+        return tuple(
+            f
+            for name in sorted(snap)
+            if extensions is None or name in extensions
+            for f in snap[name]
+            if f.when == when
+        )
 
     def load_all(self) -> tuple[ExtensionStatus, ...]:
         """Load every extension directory not loaded yet (sorted by name).
@@ -577,6 +606,7 @@ class UserExtensionHost:
         if ctx is not None:
             ctx._run_unload()
         self._skill_roots.pop(name, None)
+        self._prompts.pop(name, None)
         self._modules.pop(name, None)
         # Every module under the extension's private name, including submodules
         # first imported later (from a tool handler), so a reload never reuses one.
@@ -656,9 +686,15 @@ class UserExtensionHost:
         if self._is_disabled(manifest.name):
             status.state = "disabled"
             return status
+        try:
+            fragments = _read_prompts(manifest)
+        except ExtensionError as exc:
+            status.error = f"ExtensionError: {exc}"
+            return status
         if manifest.entry is None:
             status.state = "loaded"
             self._commit_skills(manifest, status)
+            self._commit_prompts(manifest.name, fragments, status)
             return status
 
         ctx = ExtensionContext(
@@ -706,7 +742,18 @@ class UserExtensionHost:
         status.tools = tuple(committed)
         status.warnings.extend(ctx._warnings)
         self._commit_skills(manifest, status)
+        self._commit_prompts(manifest.name, fragments, status)
         return status
+
+    def _commit_prompts(
+        self, name: str, fragments: tuple[PromptFragment, ...], status: ExtensionStatus
+    ) -> None:
+        if fragments:
+            self._prompts[name] = fragments
+        counts: dict[str, int] = {}
+        for f in fragments:
+            counts[f.when] = counts.get(f.when, 0) + 1
+        status.prompts = counts
 
     def _taken_tool_names(self) -> frozenset[str]:
         """Names an extension may not take: registered now, or reserved."""
@@ -738,6 +785,35 @@ class UserExtensionHost:
 def module_name_for(extension: str) -> str:
     """The private :data:`sys.modules` name of an extension's entry."""
     return _MODULE_PREFIX + extension.replace("-", "_")
+
+
+def _read_prompts(manifest: ExtensionManifest) -> tuple[PromptFragment, ...]:
+    """Resolve ``prompts[]`` (read ``file`` entries now, once per load)."""
+    ext_root = manifest.root.resolve()
+    out: list[PromptFragment] = []
+    for index, decl in enumerate(manifest.prompts):
+        text = decl.text
+        if decl.file is not None:
+            path = manifest.root / decl.file
+            try:
+                inside = path.resolve(strict=True).is_relative_to(ext_root)
+            except OSError as exc:
+                raise ExtensionError(f"prompts[{index}].file {decl.file!r} not found") from exc
+            if not inside:
+                raise ExtensionError(f"prompts[{index}].file resolves outside the extension")
+            try:
+                text = path.read_text(encoding="utf-8-sig")
+            except (OSError, UnicodeDecodeError) as exc:
+                raise ExtensionError(f"prompts[{index}].file cannot be read: {exc}") from exc
+            if len(text) > PROMPT_MAX_CHARS:
+                raise ExtensionError(
+                    f"prompts[{index}].file is longer than {PROMPT_MAX_CHARS} characters"
+                )
+        assert text is not None
+        text = text.strip()
+        if text:
+            out.append(PromptFragment(extension=manifest.name, when=decl.when, text=text))
+    return tuple(out)
 
 
 def _remove_tree(path: Path) -> None:

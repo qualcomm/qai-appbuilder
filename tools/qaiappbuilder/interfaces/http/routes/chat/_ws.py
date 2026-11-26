@@ -475,6 +475,13 @@ def build_router(*, container: "Container") -> APIRouter:
                         ]
                         if isinstance(ws_disabled_skills, list)
                         else None,
+                        active_extensions=[
+                            str(n)
+                            for n in msg.get("active_extensions") or []
+                            if isinstance(n, str) and n
+                        ]
+                        if isinstance(msg.get("active_extensions"), list)
+                        else None,
                     )
                     return
                 elif kind == "stop":
@@ -660,6 +667,7 @@ async def _run_one_turn(
     disabled_tools: list[str] | None = None,
     disabled_skills: list[str] | None = None,
     locale: str | None = None,
+    active_extensions: list[str] | None = None,
 ) -> None:
     """Drive one ``StreamChatUseCase`` turn over the WebSocket."""
     try:
@@ -697,6 +705,9 @@ async def _run_one_turn(
             extra["disabled_tools"] = [str(n) for n in disabled_tools if n]
         if disabled_skills:
             extra["disabled_skills"] = [str(n) for n in disabled_skills if n]
+        # User extensions whose entry is selected (their 'active' prompts).
+        if active_extensions:
+            extra["active_extensions"] = [str(n) for n in active_extensions if n]
         # R12 dealign: code-persona resolution now happens inside
         # ``StreamChatUseCase`` via the injected cross-BC resolver port
         # (apps bridge); the WS route no longer imports ``qai.user_prefs``.

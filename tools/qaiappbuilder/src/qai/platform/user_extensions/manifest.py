@@ -50,8 +50,11 @@ __all__ = [
     "DEFAULT_SKILLS_DIR",
     "MANIFEST_FILENAME",
     "MANIFEST_VERSION",
+    "PROMPT_MAX_CHARS",
+    "PROMPT_WHEN",
     "ExtensionManifest",
     "ManifestError",
+    "PromptDeclaration",
     "SkillsDeclaration",
     "ToolDeclaration",
     "load_manifest",
@@ -75,8 +78,26 @@ _GROUPS: Final[frozenset[str | None]] = frozenset({"read", "edit", "command", No
 _SKILL_MODES: Final[frozenset[str]] = frozenset({"off", "cloud", "local", "both"})
 
 _TOP_KEYS: Final[frozenset[str]] = frozenset(
-    {"manifest_version", "name", "version", "description", "entry", "tools", "skills"}
+    {
+        "manifest_version",
+        "name",
+        "version",
+        "description",
+        "entry",
+        "tools",
+        "skills",
+        "prompts",
+    }
 )
+_PROMPT_KEYS: Final[frozenset[str]] = frozenset({"text", "file", "when"})
+#: ``always``: end of the system prompt on every turn (changes only when the
+#: extension is installed / reloaded, so the prompt cache stays valid).
+#: ``active``: only while the user has this extension's entry selected; sent
+#: as a context message, never in the system prompt.
+PROMPT_WHEN: Final[frozenset[str]] = frozenset({"always", "active"})
+#: Per fragment, after reading ``file``: keeps one extension from flooding
+#: every turn's context.
+PROMPT_MAX_CHARS: Final[int] = 8000
 _REQUIRED_TOP: Final[tuple[str, ...]] = ("manifest_version", "name", "version", "description")
 _TOOL_KEYS: Final[frozenset[str]] = frozenset({"name", "group"})
 _SKILLS_KEYS: Final[frozenset[str]] = frozenset({"dir", "default_modes"})
@@ -103,6 +124,16 @@ class SkillsDeclaration:
 
 
 @dataclass(frozen=True, slots=True)
+class PromptDeclaration:
+    """One ``prompts[]`` entry: exactly one of ``text`` / ``file`` is set."""
+
+    when: str
+    text: str | None = None
+    #: Relative path (validated) of a UTF-8 text file inside the extension.
+    file: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ExtensionManifest:
     name: str
     version: str
@@ -112,6 +143,7 @@ class ExtensionManifest:
     entry: str | None = None
     tools: tuple[ToolDeclaration, ...] = ()
     skills: SkillsDeclaration = field(default_factory=SkillsDeclaration)
+    prompts: tuple[PromptDeclaration, ...] = ()
 
     @property
     def tool_names(self) -> frozenset[str]:
@@ -165,7 +197,39 @@ def parse_manifest(raw: Any, *, root: Path) -> ExtensionManifest:
         entry=entry,
         tools=tools,
         skills=_parse_skills(obj.get("skills")),
+        prompts=_parse_prompts(obj.get("prompts")),
     )
+
+
+def _parse_prompts(raw: Any) -> tuple[PromptDeclaration, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ManifestError("prompts must be an array")
+    out: list[PromptDeclaration] = []
+    for index, item in enumerate(raw):
+        where = f"prompts[{index}]"
+        entry = _object(item, where)
+        _known_keys(entry, _PROMPT_KEYS, where=where)
+        _require(entry, ("when",), where=where)
+        when = entry["when"]
+        if when not in PROMPT_WHEN:
+            raise ManifestError(f"{where}.when {when!r} must be 'always' or 'active'")
+        has_text, has_file = "text" in entry, "file" in entry
+        if has_text == has_file:
+            raise ManifestError(f"{where} needs exactly one of 'text' or 'file'")
+        if has_text:
+            text = entry["text"]
+            if not isinstance(text, str) or not text.strip():
+                raise ManifestError(f"{where}.text must be a non-empty string")
+            if len(text) > PROMPT_MAX_CHARS:
+                raise ManifestError(f"{where}.text is longer than {PROMPT_MAX_CHARS} characters")
+            out.append(PromptDeclaration(when=when, text=text))
+        else:
+            out.append(
+                PromptDeclaration(when=when, file=_rel_path(entry["file"], label=f"{where}.file"))
+            )
+    return tuple(out)
 
 
 def _parse_name(name: Any, *, root: Path) -> str:

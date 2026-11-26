@@ -75,6 +75,7 @@ from qai.chat.application.ports import (
     LLMStreamPort,
     LLMStreamRequest,
     ModelContextWindowPort,
+    PromptAddendaProvider,
     PromptSnapshot,
     PromptSnapshotStorePort,
     PromoteReadyScanPort,
@@ -2196,8 +2197,13 @@ class StreamChatUseCase:
         # one. ``None`` (legacy callers / unit stubs) keeps this a no-op —
         # identical to the pre-override behaviour.
         family_max_tokens_overrides: dict[str, Any] | None = None,
+        # Extra prompt text from the composition root (user extensions):
+        # ``system_suffix`` -> end of the system prompt (cache-stable),
+        # ``context`` -> synthetic user message (per-turn). ``None`` = off.
+        prompt_addenda_provider: PromptAddendaProvider | None = None,
     ) -> None:
         self._conversations = conversations
+        self._prompt_addenda_provider = prompt_addenda_provider
         self._tabs = tabs
         self._llm = llm
         self._tools = tools
@@ -9796,7 +9802,53 @@ class StreamChatUseCase:
         """
         if "system_prompt" in extra:
             return
+        self._build_system_prompt(extra=extra, request=request)
+        self._apply_prompt_addenda(extra=extra)
 
+    def _apply_prompt_addenda(self, *, extra: dict[str, Any]) -> None:
+        """Add the composition root's prompt addenda (user extensions).
+
+        ``system_suffix`` is appended to the system prompt (it only changes
+        when extensions change, so the cached prefix stays valid turn to
+        turn). ``context`` goes through the ``_skill_instructions`` side
+        channel: a synthetic user message just before the real one, keeping
+        the system prompt byte-stable while the user toggles an entry. Runs
+        once per user turn (the built prompt is persisted for follow-up
+        rounds). Best-effort: a failing provider never breaks the turn.
+        """
+        if self._prompt_addenda_provider is None:
+            return
+        raw = extra.get("active_extensions")
+        selected = (
+            frozenset(n for n in raw if isinstance(n, str) and n)
+            if isinstance(raw, (list, tuple, set, frozenset))
+            else frozenset()
+        )
+        try:
+            addenda = self._prompt_addenda_provider(selected)
+        except Exception as exc:  # noqa: BLE001 - optional contribution
+            _log.warning("chat.prompt_addenda_failed", error=str(exc))
+            return
+        suffix = addenda.system_suffix.strip()
+        if suffix:
+            base = extra.get("system_prompt")
+            extra["system_prompt"] = (
+                f"{base}\n\n{suffix}" if isinstance(base, str) and base.strip() else suffix
+            )
+        context = addenda.context.strip()
+        if context:
+            prior = extra.get("_skill_instructions")
+            extra["_skill_instructions"] = (
+                f"{prior}\n\n{context}" if isinstance(prior, str) and prior.strip() else context
+            )
+
+    def _build_system_prompt(
+        self,
+        *,
+        extra: dict[str, Any],
+        request: "StreamChatInput",
+    ) -> None:
+        """The local / cloud system prompt (see :meth:`_apply_system_prompt`)."""
         # ── V1 parity: local vs cloud dispatch (chat_handler.py:400) ──
         if _is_local_model_hint(request.model_hint):
             local_prompt = self._build_local_system_prompt(

@@ -104,6 +104,7 @@ def test_list(env) -> None:
             "tools": ["demo_ext_tool"],
             "skills": [],
             "warnings": [],
+            "prompts": {},
         }
     ]
 

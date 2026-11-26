@@ -242,6 +242,9 @@ _CHAT_CONTROL_KEYS: frozenset[str] = frozenset(
         # stability. Consumed by ``_build_payload`` and injected as a
         # synthetic user-role message; never a valid OpenAI body field.
         "_skill_instructions",
+        # User extensions whose entry is selected this turn (route -> use
+        # case -> prompt addenda provider). Orchestration only.
+        "active_extensions",
     }
 )
 

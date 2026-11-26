@@ -701,6 +701,18 @@ def _build_lazy_hook_engine(container: Container) -> Any:
     return LazyReloadHookEngine(lambda: _load_chat_hooks(container))
 
 
+def _extension_prompt_addenda(container: Container) -> Callable[[frozenset[str]], Any]:
+    """Late-bound provider of user-extension prompt fragments (see
+    ``_user_extensions_di.prompt_addenda_for``)."""
+
+    def _provider(selected: frozenset[str]) -> Any:
+        from ._user_extensions_di import prompt_addenda_for
+
+        return prompt_addenda_for(container, selected)
+
+    return _provider
+
+
 def _build_runtime_debug_config_reader(
     container: Container,
 ) -> Callable[[], dict[str, Any]]:
@@ -2605,6 +2617,9 @@ def build_chat_services(container: Container) -> ChatServices:
         # agent / discussion speaker/social/validator) gets the identical,
         # retuned family default (Q2, 2026-11).
         family_max_tokens_overrides=family_max_tokens_overrides,
+        # User extensions' prompt fragments. Late-bound: the extension host is
+        # wired at the end of phase 2, after this use case is built.
+        prompt_addenda_provider=_extension_prompt_addenda(container),
         budget_tracker=enforcement_tracker,
         budget_raise_pct=int(
             getattr(chat_settings, "chat_budget_raise_pct", 20)

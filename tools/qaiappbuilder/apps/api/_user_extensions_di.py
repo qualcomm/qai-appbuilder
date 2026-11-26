@@ -49,6 +49,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from qai.chat.adapters import RegistryBackedToolInvocation
+from qai.chat.application.ports import PromptAddenda
 from qai.chat.application.use_cases.tool_advertise import TOOL_ORDER
 from qai.chat.domain.tool_groups import add_group_members, remove_group_members
 from qai.platform.logging import get_logger
@@ -73,6 +74,7 @@ __all__ = [
     "UserExtensionManager",
     "build_user_extension_host",
     "extension_skill_roots",
+    "prompt_addenda_for",
     "wire_user_extensions_into_chat",
 ]
 
@@ -289,6 +291,39 @@ def wire_user_extensions_into_chat(*, chat: Any, container: Any) -> UserExtensio
     with contextlib.suppress(Exception):
         container.user_extensions = manager
     return manager
+
+
+def prompt_addenda_for(container: Any, selected: frozenset[str]) -> PromptAddenda:
+    """The loaded extensions' prompt fragments for one turn (design doc §5.1.3).
+
+    * ``always`` fragments of every loaded extension -> system prompt suffix.
+      Sorted by extension name and wrapped per extension, so the text only
+      changes when an extension is installed / reloaded / switched;
+    * ``active`` fragments of the extensions in ``selected`` (the entries the
+      user has selected this turn) -> the turn's context message.
+    """
+    manager = getattr(container, "user_extensions", None)
+    host = getattr(manager, "host", None)
+    if host is None:
+        return PromptAddenda()
+    return PromptAddenda(
+        system_suffix=_render_fragments(host.prompt_fragments("always")),
+        context=_render_fragments(host.prompt_fragments("active", extensions=selected))
+        if selected
+        else "",
+    )
+
+
+def _render_fragments(fragments: Any) -> str:
+    by_ext: dict[str, list[str]] = {}
+    for f in fragments:
+        by_ext.setdefault(f.extension, []).append(f.text)
+    return "\n\n".join(
+        f'<extension_instructions extension="{name}">\n'
+        + "\n\n".join(texts)
+        + "\n</extension_instructions>"
+        for name, texts in by_ext.items()
+    )
 
 
 def extension_skill_roots(container: Any) -> list[ContributedSkillRoot]:

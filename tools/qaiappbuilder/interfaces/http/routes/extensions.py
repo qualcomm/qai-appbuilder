@@ -49,6 +49,7 @@ def status_to_wire(status: ExtensionStatus) -> dict[str, Any]:
         "tools": list(status.tools),
         "skills": list(status.skills),
         "warnings": list(status.warnings),
+        "prompts": dict(status.prompts),
     }
 
 
