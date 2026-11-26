@@ -32,6 +32,10 @@ const mcpServers = {
     title: "No MCP servers configured",
     hint: "Add a server to expose its tools to the chat agent — e.g. a local stdio subprocess or a remote SSE/HTTP endpoint.",
   },
+  source: {
+    extension: "Extension: {name}",
+    readOnlyHint: "Provided by an extension: read-only here (enable / disable only). Manage it on the Extensions tab.",
+  },
   status: {
     connected: "Connected",
     idle: "Not connected",

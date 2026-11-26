@@ -36,6 +36,7 @@ import depBroker from "./en/depBroker";
 import downloads from "./en/downloads";
 import error from "./en/error";
 import execBroker from "./en/execBroker";
+import extensions from "./en/extensions";
 import feishu from "./en/feishu";
 import favorites from "./en/favorites";
 import fontSize from "./en/fontSize";
@@ -106,6 +107,7 @@ const en = {
   downloads,
   error,
   execBroker,
+  extensions,
   feishu,
   favorites,
   fontSize,

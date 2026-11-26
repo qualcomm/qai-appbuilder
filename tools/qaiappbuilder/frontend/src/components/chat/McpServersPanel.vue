@@ -72,6 +72,13 @@ const toast = useToast();
 const { confirm } = useConfirm();
 const store = useMcpServersStore();
 
+/** `extension:<name>` -> a localized "Extension: <name>" badge. */
+function sourceLabel(source: string): string {
+  return source.startsWith("extension:")
+    ? t("mcpServers.source.extension", { name: source.slice("extension:".length) })
+    : source;
+}
+
 const servers = computed<McpServerStatus[]>(() => store.servers);
 const loading = computed(() => store.loading);
 const gateEnabled = computed(() => store.enabled);
@@ -1154,6 +1161,14 @@ onUnmounted(() => {
               <span class="mcp-card__name">{{ server.name }}</span>
               <span class="mcp-badge">{{ server.transport }}</span>
               <span
+                v-if="server.source"
+                class="mcp-badge mcp-badge--source"
+                data-testid="mcp-source-badge"
+                :title="t('mcpServers.source.readOnlyHint')"
+              >
+                {{ sourceLabel(server.source) }}
+              </span>
+              <span
                 v-if="(server.enabled ?? true) === false"
                 class="mcp-badge mcp-badge--off"
               >
@@ -1246,6 +1261,7 @@ onUnmounted(() => {
             {{ isTesting(server.name) ? t("mcpServers.action.testing") : t("mcpServers.action.test") }}
           </button>
           <button
+            v-if="!server.read_only"
             type="button"
             class="btn btn-ghost btn-sm mcp-card__remove"
             data-testid="mcp-remove-btn"
@@ -2023,6 +2039,10 @@ onUnmounted(() => {
 }
 .mcp-card__remove {
   color: var(--error);
+}
+.mcp-badge--source {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 /* ── Add modal ────────────────────────────────────────────────────────── */

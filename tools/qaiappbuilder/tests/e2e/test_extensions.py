@@ -157,6 +157,10 @@ def test_an_extension_skill_appears_after_reload(be: tuple) -> None:
     assert status["skills"] == ["late-helper"]
     listed = {s["skill_id"]: s for s in cl.get("/api/skills").json()["skills"]}
     assert listed["late-helper"]["source"] == "extension:late-ext"
+    # The Skills settings panel reads the security discovery list: same provider.
+    panel = {s["skill_name"]: s for s in cl.get("/api/security/skill-discovery").json()["skills"]}
+    assert panel["late-helper"]["provider"] == "extension:late-ext"
+    assert panel["late-helper"]["source"] == "skills"
 
 
 def test_a_broken_reload_is_reported_and_the_tool_goes_away(be: tuple, llm: StandInLLM) -> None:

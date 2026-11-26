@@ -691,6 +691,10 @@ class SkillDiscoveryUseCase:
                 "read": [],
                 "write": [],
             }
+            if contributed is not None:
+                # Who provides it (e.g. ``extension:<name>``), for a UI badge;
+                # ``source`` stays the features / skills bucket.
+                entry["provider"] = skill_info.source
             skills_list.append(entry)
             by_name[sname] = entry
 

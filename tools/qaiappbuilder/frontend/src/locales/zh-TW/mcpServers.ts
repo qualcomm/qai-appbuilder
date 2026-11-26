@@ -32,6 +32,10 @@ const mcpServers = {
     title: "尚未設定 MCP 伺服器",
     hint: "新增一個伺服器即可將其工具提供給聊天智慧代理 —— 例如本機 stdio 子行程或遠端 SSE/HTTP 端點。",
   },
+  source: {
+    extension: "擴充：{name}",
+    readOnlyHint: "由擴充提供：此處唯讀（只能啟用/停用），請在「擴充」頁管理。",
+  },
   status: {
     connected: "已連接",
     idle: "未連接",

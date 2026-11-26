@@ -41,6 +41,8 @@ export interface Skill {
   npu_optimized?: boolean;
   mode?: SkillMode;
   display_name?: string;
+  /** Who provides it: "" / absent = the app or the user; "extension:<name>". */
+  source?: string;
 }
 
 interface RawSkill extends Omit<Skill, "id"> {

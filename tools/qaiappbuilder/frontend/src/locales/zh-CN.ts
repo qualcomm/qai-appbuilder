@@ -37,6 +37,7 @@ import depBroker from "./zh-CN/depBroker";
 import downloads from "./zh-CN/downloads";
 import error from "./zh-CN/error";
 import execBroker from "./zh-CN/execBroker";
+import extensions from "./zh-CN/extensions";
 import feishu from "./zh-CN/feishu";
 import favorites from "./zh-CN/favorites";
 import fontSize from "./zh-CN/fontSize";
@@ -107,6 +108,7 @@ const zh_CN: MessageSchema = {
   downloads,
   error,
   execBroker,
+  extensions,
   feishu,
   favorites,
   fontSize,

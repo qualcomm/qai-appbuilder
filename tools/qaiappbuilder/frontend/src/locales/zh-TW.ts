@@ -37,6 +37,7 @@ import depBroker from "./zh-TW/depBroker";
 import downloads from "./zh-TW/downloads";
 import error from "./zh-TW/error";
 import execBroker from "./zh-TW/execBroker";
+import extensions from "./zh-TW/extensions";
 import feishu from "./zh-TW/feishu";
 import favorites from "./zh-TW/favorites";
 import fontSize from "./zh-TW/fontSize";
@@ -107,6 +108,7 @@ const zh_TW: MessageSchema = {
   downloads,
   error,
   execBroker,
+  extensions,
   feishu,
   favorites,
   fontSize,

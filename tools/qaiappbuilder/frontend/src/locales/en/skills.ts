@@ -17,6 +17,8 @@
 // =============================================================================
 
 const skills = {
+  fromExtension: "Extension: {name}",
+  fromExtensionHint: "Provided by an extension; it goes away when the extension is uninstalled or disabled.",
   btnBoth: "Dual",
   btnBothTitle: "Enable for cloud + NPU",
   btnCloud: "Cloud",

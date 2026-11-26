@@ -74,6 +74,9 @@ const ChatHooksSettings = defineAsyncComponent(
 const McpServersPanel = defineAsyncComponent(
   () => import("@/components/chat/McpServersPanel.vue"),
 );
+const ExtensionsPanel = defineAsyncComponent(
+  () => import("@/components/settings/ExtensionsPanel.vue"),
+);
 const ScheduledTasksPanel = defineAsyncComponent(
   () => import("@/components/chat/ScheduledTasksPanel.vue"),
 );
@@ -84,7 +87,7 @@ import { useCodePersonas } from "@/composables/useCodePersonas";
 import { useHeaderActions } from "@/composables/useHeaderActions";
 import { ICON_REFRESH } from "@/components/icons/topbarIcons";
 
-type SettingsTab = "app" | "cloud-models" | "coding-modes" | "ai-coding" | "agent" | "search" | "hooks" | "mcp" | "scheduled-tasks";
+type SettingsTab = "app" | "cloud-models" | "coding-modes" | "ai-coding" | "agent" | "search" | "hooks" | "mcp" | "extensions" | "scheduled-tasks";
 type AiCodingSubTab = "claude-code" | "opencode";
 
 const { t } = useI18n();
@@ -102,6 +105,7 @@ const _SETTINGS_TABS: ReadonlySet<SettingsTab> = new Set([
   "search",
   "hooks",
   "mcp",
+  "extensions",
   "scheduled-tasks",
 ]);
 /** localStorage key remembering the last Settings tab the user was on.
@@ -189,6 +193,7 @@ const settingsTabs = computed(() => [
   { id: "search", label: "🔎 " + t("settings.tab.search") },
   { id: "hooks", label: "🪝 " + t("settings.tab.hooks") },
   { id: "mcp", label: "🔌 " + t("settings.tab.mcp") },
+  { id: "extensions", label: "🧩 " + t("settings.tab.extensions") },
   { id: "scheduled-tasks", label: "⏰ " + t("settings.tab.scheduledTasks") },
 ]);
 
@@ -205,6 +210,7 @@ const subtitle = computed(() => {
   if (activeTab.value === "search") return t("settings.subtitle.search");
   if (activeTab.value === "hooks") return t("settings.subtitle.hooks");
   if (activeTab.value === "mcp") return t("settings.subtitle.mcp");
+  if (activeTab.value === "extensions") return t("settings.subtitle.extensions");
   if (activeTab.value === "scheduled-tasks") return t("settings.subtitle.scheduledTasks");
   if (activeTab.value === "ai-coding") {
     if (aiCodingSubTab.value === "claude-code") return t("settings.subtitle.claudeCode");
@@ -254,6 +260,7 @@ const showRefresh = computed(
     activeTab.value !== "search" &&
     activeTab.value !== "hooks" &&
     activeTab.value !== "mcp" &&
+    activeTab.value !== "extensions" &&
     activeTab.value !== "scheduled-tasks",
 );
 
@@ -378,6 +385,12 @@ useHeaderActions(() =>
       <McpServersPanel
         v-if="visited.has('mcp')"
         v-show="activeTab === 'mcp'"
+      />
+
+      <!-- Extensions tab — user extensions: add / configure / enable / uninstall -->
+      <ExtensionsPanel
+        v-if="visited.has('extensions')"
+        v-show="activeTab === 'extensions'"
       />
 
       <!-- Scheduled Tasks tab — WebUI manager: list / edit content +

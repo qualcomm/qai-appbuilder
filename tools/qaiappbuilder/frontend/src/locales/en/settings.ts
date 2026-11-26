@@ -34,6 +34,7 @@ const settings = {
     mcp: "Model Context Protocol servers — connect external tool providers",
     opencode: "forge_config.json (opencode) — Open Code AI coding assistant settings",
     scheduledTasks: "Scheduled tasks — list, edit content, and set per-task tool / skill permissions",
+    extensions: "Extensions — add, configure, enable / disable and uninstall your own extensions",
     search: "Search engines behind the Agent search tool — toggles, measured quality, and API keys",
   },
   tab: {
@@ -45,6 +46,7 @@ const settings = {
     hooks: "Hooks",
     mcp: "MCP",
     scheduledTasks: "Scheduled Tasks",
+    extensions: "Extensions",
     search: "Search",
   },
   tabAiCoding: "AI Coding",

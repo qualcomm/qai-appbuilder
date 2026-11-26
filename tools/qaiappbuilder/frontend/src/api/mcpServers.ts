@@ -62,6 +62,10 @@ export interface McpServerStatus {
   /** Per-server master switch (independent of the global gate). */
   enabled?: boolean;
   error: string;
+  /** "" = the user's own server; "extension:<name>" = provided by an extension. */
+  source?: string;
+  /** Provided servers cannot be edited or removed here (only enabled / disabled). */
+  read_only?: boolean;
 }
 
 /** One curated marketplace catalog entry. */

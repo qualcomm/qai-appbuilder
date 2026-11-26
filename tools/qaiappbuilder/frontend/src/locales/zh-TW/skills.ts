@@ -17,6 +17,8 @@
 // =============================================================================
 
 const skills = {
+  fromExtension: "擴充：{name}",
+  fromExtensionHint: "由擴充提供；解除安裝或停用該擴充後消失。",
   btnBoth: "雙模",
   btnBothTitle: "雲端 + NPU 同時",
   btnCloud: "雲端",

@@ -17,6 +17,8 @@
 // =============================================================================
 
 const skills = {
+  fromExtension: "扩展：{name}",
+  fromExtensionHint: "由扩展提供；卸载或停用该扩展后消失。",
   btnBoth: "双模",
   btnBothTitle: "云端 + NPU 同时",
   btnCloud: "云端",

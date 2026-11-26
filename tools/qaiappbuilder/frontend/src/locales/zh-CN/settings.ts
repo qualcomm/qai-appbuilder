@@ -34,6 +34,7 @@ const settings = {
     mcp: "Model Context Protocol 服务器 — 连接外部工具提供方",
     opencode: "forge_config.json (opencode) — Open Code AI 编程助手设置",
     scheduledTasks: "定时任务 — 查看、编辑内容，并设置每个任务的工具 / 技能权限",
+    extensions: "扩展 — 添加、配置、启用/停用和卸载你自己的扩展",
     search: "Agent 搜索工具背后的搜索引擎 — 开关、实测质量与 API Key",
   },
   tab: {
@@ -45,6 +46,7 @@ const settings = {
     hooks: "Hook",
     mcp: "MCP",
     scheduledTasks: "定时任务",
+    extensions: "扩展",
     search: "搜索",
   },
   tabAiCoding: "AI 编程",

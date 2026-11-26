@@ -324,6 +324,12 @@ onMounted(() => {
                 v-if="skill.npu_optimized"
                 class="npu-badge"
               >🔷 NPU</span>
+              <span
+                v-if="skill.source?.startsWith('extension:')"
+                class="skill-source-badge"
+                data-testid="skill-source-badge"
+                :title="t('skills.fromExtensionHint')"
+              >{{ t("skills.fromExtension", { name: skill.source.slice("extension:".length) }) }}</span>
             </div>
             <div class="skill-card-id">
               {{ skill.id }}
@@ -429,6 +435,15 @@ onMounted(() => {
 </template>
 
 <style>
+.skill-source-badge {
+  margin-left: var(--space-2);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm, 4px);
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: 500;
+}
 /* Skills-specific styles not covered by global settings.css.
    The skill card / mode-selector / npu-badge / tag / divider / path styles
    all live in styles/common/settings.css (full V1 parity) and are reused
