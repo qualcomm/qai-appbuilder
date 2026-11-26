@@ -69,9 +69,7 @@ DEFAULT_SKILL_MODES: Final[dict[str, str]] = {
 }
 
 
-def resolve_skill_mode(
-    override: object, npu_optimized: bool, skill_id: str = ""
-) -> str:
+def resolve_skill_mode(override: object, npu_optimized: bool, skill_id: str = "") -> str:
     """Resolve a skill's effective run mode (``off``/``cloud``/``local``/``both``).
 
     Precedence:
@@ -155,12 +153,11 @@ def _parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
         if km:
             val = km.group(2).strip()
             if len(val) >= 2 and (
-                (val[0] == '"' and val[-1] == '"')
-                or (val[0] == "'" and val[-1] == "'")
+                (val[0] == '"' and val[-1] == '"') or (val[0] == "'" and val[-1] == "'")
             ):
                 val = val[1:-1]
             meta[km.group(1)] = val
-    body = text[m.end():]
+    body = text[m.end() :]
     return meta, body
 
 
@@ -187,7 +184,7 @@ def _extract_h1(body: str) -> str:
     for line in body.splitlines():
         stripped = line.strip()
         if stripped.startswith("# ") and not stripped.startswith("##"):
-            return stripped[len("# "):].strip()
+            return stripped[len("# ") :].strip()
     return ""
 
 
@@ -281,16 +278,21 @@ class ContributedSkillRoot:
 
     ``source`` is copied onto every :class:`SkillInfo` found under it.
     ``excluded`` are absolute sub-paths to skip: a skill directory equal to
-    or inside one of them is not discovered.
+    or inside one of them is not discovered. ``only`` (when set) is an
+    allow-list of skill ids: a directory added after the contributor vetted
+    the root (a new link, an id it never checked) is not discovered.
     """
 
     path: Path
     source: str
     excluded: tuple[Path, ...] = ()
+    only: frozenset[str] | None = None
 
 
-def _is_excluded(path: Path, excluded: tuple[Path, ...]) -> bool:
-    return any(path == ex or ex in path.parents for ex in excluded)
+def _is_excluded(path: Path, root: ContributedSkillRoot) -> bool:
+    if root.only is not None and path.name not in root.only:
+        return True
+    return any(path == ex or ex in path.parents for ex in root.excluded)
 
 
 class SkillDiscovery:
@@ -365,7 +367,7 @@ class SkillDiscovery:
                 continue
             count = 0
             for entry in sorted(skills_dir.iterdir()):
-                if not entry.is_dir() or _is_excluded(entry, root.excluded):
+                if not entry.is_dir() or _is_excluded(entry, root):
                     continue
                 skill = self._parse_skill_dir(entry)
                 if skill is not None and skill.skill_id not in seen:
@@ -400,7 +402,7 @@ class SkillDiscovery:
                 skill_dir.resolve().relative_to(skills_dir.resolve())
             except (ValueError, OSError):
                 continue
-            if not skill_dir.is_dir() or _is_excluded(skill_dir, root.excluded):
+            if not skill_dir.is_dir() or _is_excluded(skill_dir, root):
                 continue
             for ext in _ICON_EXTS:
                 candidate = skill_dir / f"icon{ext}"
@@ -460,10 +462,9 @@ class SkillDiscovery:
 
         # NPU-optimised: trailing "." on the raw ``tags:`` value (after
         # stripping whitespace), OR a legacy ``npu.txt`` marker file.
-        npu_optimized = (
-            (isinstance(tags_raw, str) and tags_raw.rstrip().endswith("."))
-            or (path / "npu.txt").exists()
-        )
+        npu_optimized = (isinstance(tags_raw, str) and tags_raw.rstrip().endswith(".")) or (
+            path / "npu.txt"
+        ).exists()
 
         # Strip the trailing "." sentinel from the last tag if present.
         if npu_optimized and tags and tags[-1].endswith("."):

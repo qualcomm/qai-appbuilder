@@ -76,6 +76,20 @@ def test_contributed_excluded_paths(roots) -> None:
     assert disc.icon_path("ext-only") == ext / "ext-only" / "icon.png"
 
 
+def test_contributed_allow_list(roots) -> None:
+    """``only``: a skill dir the contributor never vetted is not discovered."""
+    user, ext = roots
+    disc = SkillDiscovery(
+        [user],
+        contributed_roots=lambda: [
+            ContributedSkillRoot(path=ext, source="extension:demo", only=frozenset({"ext-only"}))
+        ],
+    )
+    ids = {s.skill_id for s in disc.scan() if s.source}
+    assert ids == {"ext-only"}
+    assert disc.icon_path("hidden") is None
+
+
 def test_provider_is_read_every_scan(roots) -> None:
     user, ext = roots
     current: list[ContributedSkillRoot] = []

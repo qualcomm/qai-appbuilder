@@ -16,69 +16,72 @@ from typing import Any
 
 import pytest
 
+from qai.platform.user_extensions import UserExtensionHost, module_name_for
 
-def _manifest(name: str, tools: list[dict[str, Any]] | None, **extra: Any) -> dict[str, Any]:
+
+def manifest(name: str = "demo-ext", **extra: Any) -> dict[str, Any]:
     data: dict[str, Any] = {
+        "manifest_version": 1,
         "name": name,
         "version": "1.0.0",
-        "api_version": 2,
-        "description": {"en": f"{name} test extension"},
+        "description": f"{name} test extension",
     }
-    if tools is not None:
-        data["python_package"] = "qai_ext_" + name.replace("-", "_")
-        data["contributes"] = {"tools": tools}
     data.update(extra)
     return data
 
 
-def tool_decl(name: str, **extra: Any) -> dict[str, Any]:
-    return {"name": name, "group": "read", "result_category": "query", **extra}
+def tool_decl(name: str, group: str | None = "read") -> dict[str, Any]:
+    return {"name": name, "group": group}
 
 
 ECHO_BODY = """
-def wire_into_chat(ctx, services):
-    async def _h(request):
-        return "echo:" + request.arguments.get("text", "")
-    ctx.register_chat_tool(
-        {tool!r},
-        _h,
-        schema={{"type": "function", "function": {{"name": {tool!r},
-            "description": "echo", "parameters": {{"type": "object"}}}}}},
-    )
+def activate(ctx):
+    async def _h(call):
+        return "echo:" + call.arguments.get("text", "")
+    params = {{"type": "object", "properties": {{"text": {{"type": "string"}}}}}}
+    ctx.register_tool({tool!r}, _h, description="echo", parameters=params)
 """
 
 
 @pytest.fixture
 def make_ext(tmp_path: Path) -> Iterator[Callable[..., Path]]:
-    """``make_ext(name, tools=[...], code="...")`` -> the extension dir."""
+    """``make_ext(name, tools=[...], code="...")`` -> the extension dir.
+
+    ``code`` becomes ``main.py`` and ``entry`` is set to it (unless the
+    manifest is passed whole).
+    """
     root = tmp_path / "extensions"
     root.mkdir()
-    packages: list[str] = []
+    names: list[str] = []
 
     def _make(
         name: str,
         *,
         tools: list[dict[str, Any]] | None = None,
         code: str | None = None,
-        manifest: dict[str, Any] | None = None,
+        manifest_data: dict[str, Any] | None = None,
         **extra: Any,
     ) -> Path:
         ext = root / name
         ext.mkdir()
-        data = manifest if manifest is not None else _manifest(name, tools, **extra)
-        (ext / "extension.json").write_text(json.dumps(data), encoding="utf-8")
+        if manifest_data is None:
+            fields: dict[str, Any] = dict(extra)
+            if code is not None:
+                fields.setdefault("entry", "main.py")
+            if tools is not None:
+                fields["tools"] = tools
+            manifest_data = manifest(name, **fields)
+        (ext / "extension.json").write_text(json.dumps(manifest_data), encoding="utf-8")
         if code is not None:
-            package = "qai_ext_" + name.replace("-", "_")
-            pkg = ext / "python" / package
-            pkg.mkdir(parents=True)
-            (pkg / "__init__.py").write_text(textwrap.dedent(code), encoding="utf-8")
-            packages.append(package)
+            (ext / "main.py").write_text(textwrap.dedent(code), encoding="utf-8")
+        names.append(name)
         return ext
 
     _make.root = root  # type: ignore[attr-defined]
     yield _make
-    for package in packages:
-        for mod in [m for m in sys.modules if m == package or m.startswith(package + ".")]:
+    for name in names:
+        module = module_name_for(name)
+        for mod in [m for m in sys.modules if m == module or m.startswith(module + ".")]:
             sys.modules.pop(mod, None)
 
 
@@ -102,6 +105,37 @@ class FakeSink:
         self.schemas.pop(name, None)
 
 
+class FakeSecretStore:
+    def __init__(self) -> None:
+        self.data: dict[tuple[str, str], str] = {}
+
+    def get(self, service: str, key: str) -> str:
+        return self.data[(service, key)]
+
+    def set(self, service: str, key: str, value: str) -> None:
+        self.data[(service, key)] = value
+
+    def delete(self, service: str, key: str) -> None:
+        del self.data[(service, key)]
+
+    def list_keys(self, service: str) -> list[str]:
+        return [k for s, k in self.data if s == service]
+
+    def exists(self, service: str, key: str) -> bool:
+        return (service, key) in self.data
+
+
 @pytest.fixture
 def sink() -> FakeSink:
     return FakeSink()
+
+
+@pytest.fixture
+def new_host(make_ext, sink: FakeSink, tmp_path: Path) -> Callable[..., UserExtensionHost]:
+    """``new_host(**kwargs)``: a host over ``make_ext.root`` with data under ``tmp_path/data``."""
+
+    def _new(**kwargs: Any) -> UserExtensionHost:
+        kwargs.setdefault("data_root", tmp_path / "data")
+        return UserExtensionHost(make_ext.root, kwargs.pop("sink", sink), **kwargs)
+
+    return _new

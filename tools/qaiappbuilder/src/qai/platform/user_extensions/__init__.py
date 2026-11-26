@@ -3,28 +3,33 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 
-"""User extensions: QAIModelBuilder-compatible extension host (stage 1).
+"""User extensions: appbuilder's own extension host.
 
-Stage 1 loads extensions from ``<data>/extensions/<name>/`` and wires the
-chat tools they declare and the skills they ship. Design:
-``docs/extension-overall-design.md``.
+Loads extensions from ``<data>/extensions/<name>/``: the chat tools they
+register from ``activate(ctx)`` and the skills they ship. Design:
+``docs/extension-overall-design.md`` §10.0 (the extension API).
 """
 
 from .host import (
-    ExtensionContractError,
+    CONFIG_FILENAME,
+    DATA_DIRNAME,
+    ExtensionContext,
+    ExtensionError,
+    ExtensionSecrets,
     ExtensionSkillRoot,
     ExtensionStatus,
     RegisteredTool,
+    SecretStoreLike,
+    ToolCall,
     ToolSink,
-    UserExtensionContext,
     UserExtensionHost,
     discover_extension_dirs,
+    module_name_for,
 )
 from .manifest import (
     DEFAULT_SKILLS_DIR,
-    HOST_EDITION,
     MANIFEST_FILENAME,
-    SUPPORTED_API_VERSION,
+    MANIFEST_VERSION,
     ExtensionManifest,
     ManifestError,
     SkillsDeclaration,
@@ -34,22 +39,27 @@ from .manifest import (
 )
 
 __all__ = [
+    "CONFIG_FILENAME",
+    "DATA_DIRNAME",
     "DEFAULT_SKILLS_DIR",
-    "HOST_EDITION",
     "MANIFEST_FILENAME",
-    "SUPPORTED_API_VERSION",
-    "ExtensionContractError",
+    "MANIFEST_VERSION",
+    "ExtensionContext",
+    "ExtensionError",
     "ExtensionManifest",
+    "ExtensionSecrets",
     "ExtensionSkillRoot",
     "ExtensionStatus",
     "ManifestError",
     "RegisteredTool",
+    "SecretStoreLike",
     "SkillsDeclaration",
+    "ToolCall",
     "ToolDeclaration",
     "ToolSink",
-    "UserExtensionContext",
     "UserExtensionHost",
     "discover_extension_dirs",
     "load_manifest",
+    "module_name_for",
     "parse_manifest",
 ]

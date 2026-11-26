@@ -3,39 +3,41 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 
-"""Discover, import and wire user extensions (stage 1: chat tools only).
+"""Discover, import and activate user extensions.
 
 Lifecycle, per extension directory under the scan root:
 
 1. :func:`~.manifest.load_manifest` validates ``extension.json``;
-2. the ``python_package`` is imported from ``<ext>/python/<package>/``
-   (registered in :data:`sys.modules` under its own name, no ``sys.path``
-   change);
-3. ``build_services(ctx)`` then ``wire_into_chat(ctx, services)`` run, both
-   optional, exactly as in the QAIModelBuilder contract;
-4. registrations are STAGED on the context and committed to the
-   :class:`ToolSink` only after both hooks returned, so a failing extension
-   leaves nothing behind (no partial registration to roll back).
+2. the ``entry`` (a ``.py`` file or a package directory) is imported under
+   the private module name ``qai_user_ext_<name>`` (registered in
+   :data:`sys.modules`, no ``sys.path`` change);
+3. its ``activate(ctx)`` runs (synchronously, once);
+4. tool registrations are STAGED on the context and committed to the
+   :class:`ToolSink` only after ``activate`` returned, so a failing extension
+   leaves nothing behind; its ``on_unload`` callbacks run (newest first).
 
-Name policy (design doc §3.6 / §8.6, user decision): a tool keeps the name
-its manifest declares. A name already taken -- by a built-in tool, an MCP
-tool or an earlier extension -- is REFUSED for that one tool with an
-operator-facing reason; the rest of the extension still loads.
+Name policy (design doc §4.2): a tool keeps the name its manifest declares;
+a name already taken -- by a built-in tool, an MCP tool or an earlier
+extension -- is REFUSED for that one tool with a reason, the rest loads.
 
-Everything here is stdlib-only and knows nothing about the chat context:
-the composition root adapts the chat tool registry to :class:`ToolSink`.
+Stdlib-only; knows nothing about the chat context. The composition root
+adapts the chat tool registry to :class:`ToolSink` and passes the app
+services the context exposes (secret store, proxy, TLS setting).
 """
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import inspect
+import json
 import logging
 import sys
+import tomllib
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from types import ModuleType
+from types import MappingProxyType, ModuleType
 from typing import Any, Final, Literal, Protocol
 
 from .manifest import (
@@ -47,46 +49,36 @@ from .manifest import (
 )
 
 __all__ = [
-    "ExtensionContractError",
+    "CONFIG_FILENAME",
+    "DATA_DIRNAME",
+    "ExtensionContext",
+    "ExtensionError",
+    "ExtensionSecrets",
     "ExtensionSkillRoot",
     "ExtensionStatus",
     "RegisteredTool",
+    "SecretStoreLike",
+    "ToolCall",
     "ToolSink",
-    "UserExtensionContext",
     "UserExtensionHost",
     "discover_extension_dirs",
+    "module_name_for",
 ]
 
 logger = logging.getLogger("qai.platform.user_extensions")
 
-#: ``ExtensionContext`` methods of the ModelBuilder contract this host does not
-#: implement yet. Calling one is a no-op that records a warning (design doc
-#: §1.4 "降级而非拒绝"), so a ModelBuilder extension still loads its tools.
-_DEGRADED_METHODS: Final[tuple[str, ...]] = (
-    "register_mode",
-    "register_prompt_fragment",
-    "register_router",
-    "register_search_provider",
-    "register_search_tool",
-    "register_curated_mcp_entry",
-    "register_mcp_registry_source",
-    "register_skill_market_source",
-    "register_login_claims",
-    "register_query_mapper",
-    "register_query_transport",
-    "register_workspace_provider",
-    "register_cli_result_renderer",
-    "register_cli_retired_config_key",
-    "register_cli_command",
-    "register_qairt_participant",
-    "register_read_only_root",
-)
+#: ``<ext>/config.toml``: the extension's own read-only defaults.
+CONFIG_FILENAME: Final[str] = "config.toml"
+#: ``<data>/extensions-data/<name>/``: per-extension writable data, kept apart
+#: from the code directory so removing / replacing the code keeps the data.
+DATA_DIRNAME: Final[str] = "extensions-data"
+_MODULE_PREFIX: Final[str] = "qai_user_ext_"
 
 State = Literal["loaded", "failed"]
 
 
-class ExtensionContractError(Exception):
-    """An extension broke the host contract (undeclared tool, bad schema, ...)."""
+class ExtensionError(Exception):
+    """An extension misused the API (undeclared tool, bad argument, ...)."""
 
 
 class ToolSink(Protocol):
@@ -107,28 +99,47 @@ class ToolSink(Protocol):
     def unregister(self, name: str) -> None: ...
 
 
+class SecretStoreLike(Protocol):
+    """The subset of ``qai.platform.persistence.secrets.SecretStore`` used here."""
+
+    def get(self, service: str, key: str) -> str: ...
+    def set(self, service: str, key: str, value: str) -> None: ...
+    def delete(self, service: str, key: str) -> None: ...
+    def list_keys(self, service: str) -> list[str]: ...
+    def exists(self, service: str, key: str) -> bool: ...
+
+
+@dataclass(frozen=True, slots=True)
+class ToolCall:
+    """What a tool handler receives."""
+
+    arguments: dict[str, Any]
+    tool_name: str
+    conversation_id: str
+    tab_id: str
+
+
 @dataclass(frozen=True, slots=True)
 class RegisteredTool:
     name: str
     extension: str
     declaration: ToolDeclaration
-    advertised: bool
 
 
 @dataclass(frozen=True, slots=True)
 class ExtensionSkillRoot:
-    """One loaded extension's ``skills/`` root, as the skill scanner needs it.
+    """One loaded extension's skills directory, as the skill scanner needs it.
 
-    ``excluded`` are absolute sub-paths the scanner must skip: edition
-    exclusions, skill directories that escape the root through a link, and
-    skills refused because their id was already taken.
+    ``excluded``: absolute sub-paths the scanner must skip -- skill
+    directories that escape the root through a link, and skills refused
+    because their id was already taken.
     """
 
     extension: str
     path: Path
     excluded: tuple[Path, ...]
     skill_ids: tuple[str, ...]
-    default_modes: tuple[tuple[str, str], ...] = ()
+    default_modes: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -149,139 +160,199 @@ class ExtensionStatus:
 class _PendingTool:
     name: str
     handler: Callable[[Any], Awaitable[Any]]
-    schema: Mapping[str, Any] | None
+    schema: Mapping[str, Any]
     declaration: ToolDeclaration
 
 
-class UserExtensionContext:
-    """The ``ctx`` handed to ``build_services`` / ``wire_into_chat``.
+class ExtensionSecrets:
+    """The extension's own credential space (service ``ext.<name>``)."""
 
-    Implements the subset of the QAIModelBuilder ``ExtensionContext`` that
-    stage 1 supports; see :data:`_DEGRADED_METHODS` for the rest.
+    def __init__(self, store: SecretStoreLike | None, extension: str) -> None:
+        self._store = store
+        self._service = f"ext.{extension}"
+
+    def _require(self, key: str | None = None) -> SecretStoreLike:
+        if self._store is None:
+            raise ExtensionError("no secret store is available in this host")
+        if key is not None and (
+            not isinstance(key, str) or not key or any(c in key for c in "/\\\x00") or ".." in key
+        ):
+            raise ExtensionError(f"secret key {key!r} is not allowed (no '/', '\\', '..')")
+        return self._store
+
+    def get(self, key: str) -> str | None:
+        """The stored value, or ``None`` when absent."""
+        store = self._require(key)
+        return store.get(self._service, key) if store.exists(self._service, key) else None
+
+    def set(self, key: str, value: str) -> None:
+        if not isinstance(value, str):
+            raise ExtensionError("secret values must be strings")
+        self._require(key).set(self._service, key, value)
+
+    def delete(self, key: str) -> None:
+        """Remove ``key``; absent is not an error."""
+        store = self._require(key)
+        if store.exists(self._service, key):
+            store.delete(self._service, key)
+
+    def keys(self) -> list[str]:
+        return sorted(self._require().list_keys(self._service))
+
+
+class ExtensionContext:
+    """The ``ctx`` passed to ``activate(ctx)``. The whole extension API.
+
+    Registration methods are valid only while ``activate`` runs; everything
+    else (``data_dir``, ``secrets``, ``proxy_url()``, ...) may also be used
+    later, from tool handlers.
     """
 
     def __init__(
         self,
         manifest: ExtensionManifest,
         *,
+        data_root: Path,
         taken_names: Callable[[], frozenset[str]],
+        secret_store: SecretStoreLike | None = None,
+        proxy_url: Callable[[], str | None] | None = None,
+        ssl_verify: Callable[[], bool] | None = None,
     ) -> None:
         self._manifest = manifest
+        self._data_dir = data_root / DATA_DIRNAME / manifest.name
         self._taken_names = taken_names
+        self._proxy_url = proxy_url or (lambda: None)
+        self._ssl_verify = ssl_verify or (lambda: True)
         self._pending: dict[str, _PendingTool] = {}
-        self._rollbacks: list[Callable[[], None]] = []
-        self._closed = False
+        self._unload: list[Callable[[], None]] = []
+        self._config: Mapping[str, Any] | None = None
+        self._active = True
+        self.secrets = ExtensionSecrets(secret_store, manifest.name)
+        self.logger = logging.getLogger(f"qai.user_extension.{manifest.name}")
         self.warnings: list[str] = []
 
-    # -- identity ---------------------------------------------------------
+    # -- identity / environment ------------------------------------------
 
     @property
     def name(self) -> str:
         return self._manifest.name
 
     @property
+    def version(self) -> str:
+        return self._manifest.version
+
+    @property
     def root(self) -> Path:
+        """The extension's own directory (treat as read-only)."""
         return self._manifest.root
 
     @property
-    def manifest(self) -> ExtensionManifest:
-        return self._manifest
+    def data_dir(self) -> Path:
+        """Writable per-extension data directory, created on first access."""
+        self._data_dir.mkdir(parents=True, exist_ok=True)
+        return self._data_dir
 
-    # -- supported registrations -----------------------------------------
+    @property
+    def config(self) -> Mapping[str, Any]:
+        """``<ext>/config.toml`` parsed (read-only); ``{}`` when absent."""
+        if self._config is None:
+            path = self._manifest.root / CONFIG_FILENAME
+            try:
+                data = tomllib.loads(path.read_text(encoding="utf-8-sig")) if path.is_file() else {}
+            except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError) as exc:
+                raise ExtensionError(f"{CONFIG_FILENAME} is invalid: {exc}") from exc
+            self._config = _freeze(data)
+        return self._config
 
-    def register_chat_tool(
+    def proxy_url(self) -> str | None:
+        """The app's current proxy URL (may embed credentials -- never log it)."""
+        return self._proxy_url()
+
+    @property
+    def ssl_verify(self) -> bool:
+        """The app's current TLS-verification setting; read it per request."""
+        return self._ssl_verify()
+
+    # -- registrations (only during activate) ----------------------------
+
+    def register_tool(
         self,
         name: str,
-        handler: Callable[..., Any],
+        handler: Callable[[ToolCall], Any],
         *,
-        schema: Any = None,
-        descriptor: Any = None,
-        validate_arguments: bool = True,
+        description: str,
+        parameters: Mapping[str, Any] | None = None,
     ) -> None:
-        """Stage one chat tool. Mirrors ModelBuilder's signature.
+        """Register chat tool ``name`` (declared in the manifest's ``tools``).
 
-        Contract errors (raise, failing the hook): the name is not declared in
-        ``contributes.tools``, the handler is not callable, the schema is not
-        an OpenAI function schema for ``name``, or the name is staged twice.
-
-        A name already used by another tool is NOT a contract error: that one
-        tool is refused (warning) and the extension keeps loading.
+        ``handler(call: ToolCall)`` may be sync or async; its return value is
+        the tool result. ``parameters`` is a JSON-schema object (default: no
+        arguments). Misuse raises :class:`ExtensionError` and fails the load;
+        a name already used by another tool only refuses this tool (warning).
         """
-        self._require_open("register_chat_tool")
+        self._require_active("register_tool")
         decl = self._manifest.tool(name)
         if decl is None:
-            raise ExtensionContractError(
-                f"register_chat_tool({name!r}): not declared in contributes.tools"
-            )
-        if not callable(handler):
-            raise ExtensionContractError(f"register_chat_tool({name!r}): handler is not callable")
+            raise ExtensionError(f"register_tool({name!r}): not declared in the manifest's tools")
         if name in self._pending:
-            raise ExtensionContractError(f"register_chat_tool({name!r}): registered twice")
-        if schema is not None:
-            _check_schema(name, schema)
-        if descriptor is not None:
-            self.warnings.append(
-                f"register_chat_tool({name!r}): descriptor= is ignored; "
-                "the declaration in contributes.tools is used"
+            raise ExtensionError(f"register_tool({name!r}): registered twice")
+        if not callable(handler):
+            raise ExtensionError(f"register_tool({name!r}): handler is not callable")
+        if not isinstance(description, str) or not description.strip():
+            raise ExtensionError(f"register_tool({name!r}): description must be a non-empty string")
+        params = (
+            dict(parameters) if parameters is not None else {"type": "object", "properties": {}}
+        )
+        if params.get("type") != "object":
+            raise ExtensionError(
+                f"register_tool({name!r}): parameters must be a JSON schema object"
             )
+        try:  # sent to the model on every turn: must serialise
+            json.dumps(params)
+        except (TypeError, ValueError) as exc:
+            raise ExtensionError(
+                f"register_tool({name!r}): parameters is not JSON-serialisable: {exc}"
+            ) from exc
         if name in self._taken_names():
-            self.warnings.append(
-                f"tool {name!r} refused: the name is already used by another tool"
-            )
+            self.warnings.append(f"tool {name!r} refused: the name is already used by another tool")
             return
         self._pending[name] = _PendingTool(
             name=name,
-            handler=_as_async(handler),
-            schema=dict(schema) if schema is not None else None,
+            handler=_adapt_handler(handler),
+            schema={
+                "type": "function",
+                "function": {"name": name, "description": description, "parameters": params},
+            },
             declaration=decl,
         )
 
-    def on_rollback(self, callback: Callable[[], None]) -> None:
-        """Run ``callback`` if this extension fails to load (newest first)."""
-        self._require_open("on_rollback")
+    def on_unload(self, callback: Callable[[], None]) -> None:
+        """Run ``callback`` when the extension is unloaded or fails to load (newest first)."""
+        self._require_active("on_unload")
         if not callable(callback):
-            raise ExtensionContractError("on_rollback: callback is not callable")
-        self._rollbacks.append(callback)
-
-    def load_config(self, *_args: Any, **_kwargs: Any) -> Any:
-        raise ExtensionContractError(
-            "load_config is not supported yet (contributes.settings is not implemented)"
-        )
-
-    # -- degraded registrations ------------------------------------------
-
-    def __getattr__(self, attr: str) -> Any:
-        if attr in _DEGRADED_METHODS:
-
-            def _degraded(*_args: Any, **_kwargs: Any) -> None:
-                self.warnings.append(f"{attr} is not supported yet and was ignored")
-
-            return _degraded
-        raise AttributeError(
-            f"{type(self).__name__!s} has no attribute {attr!r} (not part of the "
-            "supported extension API)"
-        )
+            raise ExtensionError("on_unload: callback is not callable")
+        self._unload.append(callback)
 
     # -- host side --------------------------------------------------------
 
-    def _require_open(self, what: str) -> None:
-        if self._closed:
-            raise ExtensionContractError(f"{what}: called after the WIRE phase ended")
+    def _require_active(self, what: str) -> None:
+        if not self._active:
+            raise ExtensionError(f"{what}: only allowed while activate() runs")
 
-    def _close(self) -> list[_PendingTool]:
-        self._closed = True
+    def _finish(self) -> list[_PendingTool]:
+        self._active = False
         return list(self._pending.values())
 
-    def _rollback(self) -> None:
-        self._closed = True
+    def _run_unload(self) -> None:
+        self._active = False
         self._pending.clear()
-        for callback in reversed(self._rollbacks):
+        callbacks, self._unload = self._unload, []
+        for callback in reversed(callbacks):
             try:
                 callback()
             except Exception:
                 logger.warning(
-                    "user_extensions.rollback_callback_failed extension=%s", self.name,
-                    exc_info=True,
+                    "user_extensions.unload_callback_failed extension=%s", self.name, exc_info=True
                 )
 
 
@@ -293,16 +364,27 @@ class UserExtensionHost:
         scan_root: Path,
         sink: ToolSink,
         *,
+        data_root: Path,
         taken_skill_ids: Callable[[], frozenset[str]] | None = None,
+        secret_store: SecretStoreLike | None = None,
+        proxy_url: Callable[[], str | None] | None = None,
+        ssl_verify: Callable[[], bool] | None = None,
     ) -> None:
-        """``taken_skill_ids`` returns the ids of the user / built-in skills; an
+        """``taken_skill_ids`` returns the ids of the app's own skills; an
         extension skill with one of those ids is refused (same rule as tools)."""
         self._scan_root = scan_root
         self._sink = sink
+        self._data_root = data_root
         self._taken_skill_ids = taken_skill_ids or frozenset
+        self._services = {
+            "secret_store": secret_store,
+            "proxy_url": proxy_url,
+            "ssl_verify": ssl_verify,
+        }
         self._statuses: dict[str, ExtensionStatus] = {}
         self._tools: dict[str, RegisteredTool] = {}
         self._skill_roots: dict[str, ExtensionSkillRoot] = {}
+        self._contexts: dict[str, ExtensionContext] = {}
         self._modules: dict[str, list[str]] = {}
 
     @property
@@ -325,10 +407,10 @@ class UserExtensionHost:
         return tuple(self._skill_roots[k] for k in sorted(self._skill_roots))
 
     def skill_default_modes(self) -> dict[str, str]:
-        """``skill id -> skills[].default_mode`` across loaded extensions."""
+        """``skill id -> default mode`` across loaded extensions (visible skills only)."""
         out: dict[str, str] = {}
         for root in self.skill_roots():
-            for skill_id, mode in root.default_modes:
+            for skill_id, mode in root.default_modes.items():
                 if skill_id in root.skill_ids:
                     out.setdefault(skill_id, mode)
         return out
@@ -347,39 +429,38 @@ class UserExtensionHost:
         except ManifestError as exc:
             return ExtensionStatus(name=ext_dir.name, root=ext_dir, state="failed", error=str(exc))
         status = ExtensionStatus(
-            name=manifest.name,
-            root=ext_dir,
-            state="failed",
-            version=manifest.version,
-            warnings=list(manifest.warnings),
+            name=manifest.name, root=ext_dir, state="failed", version=manifest.version
         )
         if manifest.name in self._statuses and self._statuses[manifest.name].state == "loaded":
             status.error = "an extension with this name is already loaded"
             return status
-        if manifest.python_package is None:
+        if manifest.entry is None:
             status.state = "loaded"
             self._commit_skills(manifest, status)
             return status
 
-        ctx = UserExtensionContext(manifest, taken_names=self._sink.tool_names)
-        package = manifest.python_package
+        ctx = ExtensionContext(
+            manifest,
+            data_root=self._data_root,
+            taken_names=self._sink.tool_names,
+            **self._services,  # type: ignore[arg-type]
+        )
+        module_name = module_name_for(manifest.name)
         try:
-            module = _import_package(manifest)
-            build = getattr(module, "build_services", None)
-            wire = getattr(module, "wire_into_chat", None)
-            services = build(ctx) if callable(build) else None
-            if callable(wire):
-                wire(ctx, services)
-        except Exception as exc:  # noqa: BLE001 - extension code is untrusted
-            ctx._rollback()
-            _forget_modules(_own_modules(package))
+            _activate(_import_entry(manifest, module_name), ctx)
+        except KeyboardInterrupt:
+            raise
+        except BaseException as exc:  # noqa: BLE001 - untrusted code; incl. SystemExit
+            ctx._run_unload()
+            _forget_modules(_own_modules(module_name))
             status.warnings.extend(ctx.warnings)
             status.error = f"{type(exc).__name__}: {exc}"
             return status
 
-        self._modules[manifest.name] = _own_modules(package)
+        self._modules[manifest.name] = _own_modules(module_name)
+        self._contexts[manifest.name] = ctx
         committed: list[str] = []
-        for pending in ctx._close():
+        for pending in ctx._finish():
             # Re-check: another tool may have taken the name meanwhile.
             if pending.name in self._sink.tool_names():
                 ctx.warnings.append(
@@ -388,15 +469,11 @@ class UserExtensionHost:
                 continue
             self._sink.register(pending.name, pending.handler, schema=pending.schema)
             self._tools[pending.name] = RegisteredTool(
-                name=pending.name,
-                extension=manifest.name,
-                declaration=pending.declaration,
-                advertised=pending.schema is not None,
+                name=pending.name, extension=manifest.name, declaration=pending.declaration
             )
             committed.append(pending.name)
-        undeclared = sorted(manifest.tool_names - set(committed))
-        for name in undeclared:
-            if not any(name in w for w in ctx.warnings):
+        for name in sorted(manifest.tool_names - set(committed)):
+            if not any(repr(name) in w for w in ctx.warnings):
                 ctx.warnings.append(f"tool {name!r} is declared but was never registered")
         status.state = "loaded"
         status.tools = tuple(committed)
@@ -418,10 +495,17 @@ class UserExtensionHost:
             status.skills = root.skill_ids
 
     def unload_all(self) -> None:
-        """Unregister every committed tool and forget imported modules."""
+        """Unregister tools, then run ``on_unload`` callbacks, then forget modules.
+
+        Tools go first so no new call reaches an extension whose resources its
+        callbacks are tearing down.
+        """
         for name in list(self._tools):
             self._sink.unregister(name)
         self._tools.clear()
+        for name in sorted(self._contexts, reverse=True):
+            self._contexts[name]._run_unload()
+        self._contexts.clear()
         self._skill_roots.clear()
         for modules in self._modules.values():
             _forget_modules(modules)
@@ -429,21 +513,25 @@ class UserExtensionHost:
         self._statuses.clear()
 
 
+def module_name_for(extension: str) -> str:
+    """The private :data:`sys.modules` name of an extension's entry."""
+    return _MODULE_PREFIX + extension.replace("-", "_")
+
+
 def discover_extension_dirs(scan_root: Path) -> list[Path]:
     """Immediate sub-directories of ``scan_root`` that may hold an extension.
 
-    ``_``/``.``-prefixed directories (templates, VCS metadata) and
-    ``__pycache__`` are skipped, matching ModelBuilder. Sorted by name so
-    load order -- and therefore which extension wins a name -- is stable.
+    ``_``/``.``-prefixed directories (templates, VCS metadata, ``__pycache__``)
+    are skipped. Sorted by name so load order -- and therefore which
+    extension wins a name -- is stable.
     """
     if not scan_root.is_dir():
         return []
-    out = []
-    for entry in sorted(scan_root.iterdir(), key=lambda p: p.name):
-        if not entry.is_dir() or entry.name.startswith((".", "_")):
-            continue
-        out.append(entry)
-    return out
+    return [
+        entry
+        for entry in sorted(scan_root.iterdir(), key=lambda p: p.name)
+        if entry.is_dir() and not entry.name.startswith((".", "_"))
+    ]
 
 
 def _collect_skills(
@@ -453,47 +541,44 @@ def _collect_skills(
     claimed: frozenset[str],
     warnings: list[str],
 ) -> ExtensionSkillRoot | None:
-    """Resolve ``<ext>/<skills_dir>`` into an :class:`ExtensionSkillRoot`.
+    """Resolve ``<ext>/<skills.dir>`` into an :class:`ExtensionSkillRoot`.
 
-    Mirrors ModelBuilder ``catalog._load_skills``: the root must resolve inside
-    the extension; a skill directory whose real path escapes the root (link /
-    junction) is excluded. Additionally (appbuilder naming rule, design doc
-    §4.2): a skill id already used by a user / built-in skill or by an earlier
-    extension is refused and excluded. ``None`` when there is no skills root.
+    The root must resolve inside the extension; a skill directory whose real
+    path escapes it (link / junction) is excluded. A skill id already used by
+    an app skill or by an earlier extension is refused and excluded (design
+    doc §4.2). ``None`` when there is no skills directory.
     """
     decl = manifest.skills
     ext_root = manifest.root.resolve()
-    skills_root = manifest.root / decl.skills_dir
+    skills_root = manifest.root / decl.dir
     if not skills_root.is_dir():
-        if decl.skills_dir != DEFAULT_SKILLS_DIR:  # an explicit dir that is missing
-            warnings.append(f"skills_dir {decl.skills_dir!r} does not exist")
+        if decl.dir != DEFAULT_SKILLS_DIR:  # an explicit dir that is missing
+            warnings.append(f"skills.dir {decl.dir!r} does not exist")
         return None
     try:
         confined = skills_root.resolve(strict=True)
     except OSError:
         return None
     if not confined.is_relative_to(ext_root):
-        warnings.append(f"skills_dir {decl.skills_dir!r} resolves outside the extension; ignored")
+        warnings.append(f"skills.dir {decl.dir!r} resolves outside the extension; ignored")
         return None
 
-    excluded = [manifest.root / rel for rel in decl.excluded]
+    excluded: list[Path] = []
     ids: list[str] = []
+    present: set[str] = set()
     try:
         children = sorted(skills_root.iterdir())
     except OSError as exc:
-        warnings.append(f"could not list skills_dir {decl.skills_dir!r}: {exc}")
+        warnings.append(f"could not list skills.dir {decl.dir!r}: {exc}")
         return None
-    for child in children:
-        if not child.is_dir() or _under_any(child, excluded):
-            continue
-        if not ((child / "SKILL.md").is_file() or (child / "skill.json").is_file()):
-            continue
+    for child in filter(_is_skill_dir, children):
+        present.add(child.name)
         try:
             inside = child.resolve(strict=True).is_relative_to(confined)
         except OSError:
             inside = False
         if not inside:
-            warnings.append(f"skill {child.name!r} resolves outside skills_dir; ignored")
+            warnings.append(f"skill {child.name!r} resolves outside skills.dir; ignored")
             excluded.append(child)
             continue
         if child.name in taken or child.name in claimed:
@@ -504,46 +589,67 @@ def _collect_skills(
             continue
         if (child / "skill.policy.json").is_file():
             warnings.append(
-                f"skill {child.name!r}: skill.policy.json is not supported yet and is ignored"
+                f"skill {child.name!r}: skill.policy.json is not supported and is ignored"
             )
         ids.append(child.name)
+    for skill_id in sorted(set(decl.default_modes) - present):
+        warnings.append(f"skills.default_modes: no skill {skill_id!r} in this extension")
     return ExtensionSkillRoot(
         extension=manifest.name,
         path=skills_root,
         excluded=tuple(excluded),
         skill_ids=tuple(ids),
-        default_modes=decl.default_modes,
+        default_modes=dict(decl.default_modes),
     )
 
 
-def _under_any(path: Path, roots: Iterable[Path]) -> bool:
-    return any(path == root or root in path.parents for root in roots)
+def _is_skill_dir(path: Path) -> bool:
+    return path.is_dir() and ((path / "SKILL.md").is_file() or (path / "skill.json").is_file())
 
 
-def _import_package(manifest: ExtensionManifest) -> ModuleType:
-    package = manifest.python_package
-    assert package is not None
-    pkg_dir = manifest.root / "python" / package
-    init = pkg_dir / "__init__.py"
-    if not init.is_file():
-        raise ExtensionContractError(f"python package not found: {init}")
-    if package in sys.modules:
-        raise ExtensionContractError(f"module {package!r} is already imported by another owner")
+def _activate(module: ModuleType, ctx: ExtensionContext) -> None:
+    activate = getattr(module, "activate", None)
+    if not callable(activate):
+        raise ExtensionError("the entry defines no activate(ctx) function")
+    result = activate(ctx)
+    if inspect.isawaitable(result):
+        if inspect.iscoroutine(result):
+            result.close()  # never awaited: avoid the "never awaited" warning
+        raise ExtensionError("activate(ctx) must be a plain (non-async) function")
+
+
+def _import_entry(manifest: ExtensionManifest, module_name: str) -> ModuleType:
+    """Import ``entry`` (a ``.py`` file, or a package dir) as ``module_name``."""
+    assert manifest.entry is not None
+    target = manifest.root / manifest.entry
+    is_package = target.is_dir()
+    file = target / "__init__.py" if is_package else target
+    if is_package and not file.is_file():
+        raise ExtensionError(f"entry {manifest.entry!r} is a directory without __init__.py")
+    if not is_package and not (target.is_file() and target.suffix.lower() == ".py"):
+        raise ExtensionError(
+            f"entry {manifest.entry!r} not found (a .py file or a package directory)"
+        )
+    ext_root = manifest.root.resolve()
+    if not all(p.resolve().is_relative_to(ext_root) for p in (target, file)):
+        raise ExtensionError(f"entry {manifest.entry!r} resolves outside the extension")
     spec = importlib.util.spec_from_file_location(
-        package, init, submodule_search_locations=[str(pkg_dir)]
+        module_name, file, submodule_search_locations=[str(target)] if is_package else None
     )
+    if module_name in sys.modules:
+        raise ExtensionError(f"module {module_name!r} is already imported")
     if spec is None or spec.loader is None:
-        raise ExtensionContractError(f"cannot import {init}")
+        raise ExtensionError(f"cannot import {target}")
     module = importlib.util.module_from_spec(spec)
-    sys.modules[package] = module
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
 
 
-def _own_modules(package: str) -> list[str]:
-    """``package`` and its submodules -- never a stdlib / third-party module."""
-    prefix = package + "."
-    return sorted(m for m in sys.modules if m == package or m.startswith(prefix))
+def _own_modules(module_name: str) -> list[str]:
+    """``module_name`` and its submodules -- never a stdlib / third-party module."""
+    prefix = module_name + "."
+    return sorted(m for m in sys.modules if m == module_name or m.startswith(prefix))
 
 
 def _forget_modules(names: Iterable[str]) -> None:
@@ -551,9 +657,24 @@ def _forget_modules(names: Iterable[str]) -> None:
         sys.modules.pop(name, None)
 
 
-def _as_async(handler: Callable[..., Any]) -> Callable[[Any], Awaitable[Any]]:
+def _adapt_handler(handler: Callable[[ToolCall], Any]) -> Callable[[Any], Awaitable[Any]]:
+    """Turn the chat registry's request into a :class:`ToolCall`.
+
+    An ``async`` handler runs on the event loop; a plain function runs in a
+    worker thread, so a blocking call (network, disk) cannot freeze chat.
+    """
+    is_async = inspect.iscoroutinefunction(handler) or inspect.iscoroutinefunction(
+        getattr(handler, "__call__", None)  # noqa: B004 - async callable objects
+    )
+
     async def _call(request: Any) -> Any:
-        result = handler(request)
+        call = ToolCall(
+            arguments=dict(getattr(request, "arguments", None) or {}),
+            tool_name=str(getattr(request, "tool_name", "")),
+            conversation_id=str(getattr(request, "conversation_id", "")),
+            tab_id=str(getattr(request, "tab_id", "")),
+        )
+        result = handler(call) if is_async else await asyncio.to_thread(handler, call)
         if inspect.isawaitable(result):
             result = await result
         return result
@@ -561,28 +682,24 @@ def _as_async(handler: Callable[..., Any]) -> Callable[[Any], Awaitable[Any]]:
     return _call
 
 
-def _check_schema(name: str, schema: Any) -> None:
-    if not isinstance(schema, Mapping) or schema.get("type") != "function":
-        raise ExtensionContractError(
-            f"register_chat_tool({name!r}): schema must be an OpenAI function schema "
-            '({"type": "function", "function": {...}})'
-        )
-    function = schema.get("function")
-    if not isinstance(function, Mapping) or function.get("name") != name:
-        raise ExtensionContractError(
-            f"register_chat_tool({name!r}): schema.function.name must be {name!r}"
-        )
+def _freeze(value: Any) -> Any:
+    if isinstance(value, dict):
+        return MappingProxyType({k: _freeze(v) for k, v in value.items()})
+    if isinstance(value, list):
+        return tuple(_freeze(v) for v in value)
+    return value
 
 
 def _log_status(status: ExtensionStatus) -> None:
     if status.state == "loaded":
         logger.info(
-            "user_extensions.loaded extension=%s version=%s tools=%s",
-            status.name, status.version, ",".join(status.tools) or "-",
+            "user_extensions.loaded extension=%s version=%s tools=%s skills=%s",
+            status.name,
+            status.version,
+            ",".join(status.tools) or "-",
+            ",".join(status.skills) or "-",
         )
     else:
-        logger.warning(
-            "user_extensions.failed extension=%s error=%s", status.name, status.error
-        )
+        logger.warning("user_extensions.failed extension=%s error=%s", status.name, status.error)
     for warning in status.warnings:
         logger.warning("user_extensions.warning extension=%s %s", status.name, warning)

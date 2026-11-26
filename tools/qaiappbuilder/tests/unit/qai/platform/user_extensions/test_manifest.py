@@ -3,7 +3,7 @@
 # SPDX-License-Identifier: BSD-3-Clause
 # ---------------------------------------------------------------------
 
-"""``extension.json`` validation (ModelBuilder api_version 2 subset)."""
+"""``extension.json`` validation (manifest_version 1)."""
 
 from __future__ import annotations
 
@@ -14,18 +14,7 @@ import pytest
 
 from qai.platform.user_extensions import ManifestError, load_manifest, parse_manifest
 
-from .conftest import tool_decl
-
-
-def _base(name: str = "demo-ext", **over: Any) -> dict[str, Any]:
-    data: dict[str, Any] = {
-        "name": name,
-        "version": "1.0.0",
-        "api_version": 2,
-        "description": "demo",
-    }
-    data.update(over)
-    return data
+from .conftest import manifest, tool_decl
 
 
 def _parse(data: dict[str, Any], dirname: str = "demo-ext"):
@@ -33,129 +22,155 @@ def _parse(data: dict[str, Any], dirname: str = "demo-ext"):
 
 
 def test_minimal_manifest_without_code() -> None:
-    m = _parse(_base())
+    m = _parse(manifest())
     assert m.name == "demo-ext"
-    assert m.python_package is None
+    assert m.entry is None
     assert m.tools == ()
-    assert m.warnings == ()
+    assert m.skills.dir == "skills"
+    assert dict(m.skills.default_modes) == {}
+
+
+def test_full_manifest() -> None:
+    m = _parse(
+        manifest(
+            entry="src/main.py",
+            tools=[
+                tool_decl("demo_echo"),
+                tool_decl("demo_run", "command"),
+                tool_decl("demo_x", None),
+            ],
+            skills={"dir": "content/skills", "default_modes": {"demo-skill": "both"}},
+        )
+    )
+    assert m.entry == "src/main.py"
+    assert [(t.name, t.group) for t in m.tools] == [
+        ("demo_echo", "read"),
+        ("demo_run", "command"),
+        ("demo_x", None),
+    ]
+    assert m.skills.dir == "content/skills"
+    assert dict(m.skills.default_modes) == {"demo-skill": "both"}
 
 
 def test_locale_description_prefers_en() -> None:
-    m = _parse(_base(description={"zh-CN": "中文", "en": "English"}))
-    assert m.description == "English"
+    assert _parse(manifest(description={"zh-CN": "中文", "en": "English"})).description == "English"
 
 
-def test_tools_parsed() -> None:
-    m = _parse(
-        _base(
-            python_package="qai_ext_demo_ext",
-            contributes={"tools": [tool_decl("demo_ext_echo", mutating=False)]},
-        )
-    )
-    (decl,) = m.tools
-    assert decl.name == "demo_ext_echo"
-    assert decl.group == "read"
-    assert decl.result_category == "query"
-    assert decl.output_kind == "text"
-    assert decl.mutating is False
-
-
-@pytest.mark.parametrize("missing", ["name", "version", "api_version", "description"])
+@pytest.mark.parametrize("missing", ["manifest_version", "name", "version", "description"])
 def test_required_fields(missing: str) -> None:
-    data = _base()
+    data = manifest()
     del data[missing]
     with pytest.raises(ManifestError, match=missing):
+        _parse(data)
+
+
+@pytest.mark.parametrize("bad", [2, 0, "1", True])
+def test_unsupported_manifest_version(bad: Any) -> None:
+    with pytest.raises(ManifestError, match="manifest_version"):
+        _parse(manifest(manifest_version=bad))
+
+
+def test_unknown_top_level_field_is_an_error() -> None:
+    with pytest.raises(ManifestError, match=r"unknown field.*'tool'"):
+        _parse(manifest(tool=[]))
+
+
+def test_modelbuilder_manifest_is_rejected_with_a_clear_reason() -> None:
+    data = {
+        "name": "demo-ext",
+        "version": "1",
+        "api_version": 2,
+        "description": "d",
+        "python_package": "qai_ext_demo_ext",
+    }
+    with pytest.raises(ManifestError, match="unknown field"):
         _parse(data)
 
 
 @pytest.mark.parametrize("bad", ["Demo", "demo_ext", "-demo", "demo--x", "1demo", "a" * 65])
 def test_bad_extension_name(bad: str) -> None:
     with pytest.raises(ManifestError, match="name"):
-        _parse(_base(bad), dirname=bad)
+        _parse(manifest(bad), dirname=bad)
 
 
 def test_name_must_equal_directory() -> None:
     with pytest.raises(ManifestError, match="directory name"):
-        _parse(_base("demo-ext"), dirname="other")
+        _parse(manifest("demo-ext"), dirname="other")
 
 
-def test_unsupported_api_version() -> None:
-    with pytest.raises(ManifestError, match="api_version 1"):
-        _parse(_base(api_version=1))
+@pytest.mark.parametrize("bad", ["../x.py", "/abs.py", "a/../b.py", "", ".hidden.py"])
+def test_bad_entry_path(bad: str) -> None:
+    with pytest.raises(ManifestError, match="entry"):
+        _parse(manifest(entry=bad))
 
 
-def test_python_package_must_follow_name() -> None:
-    with pytest.raises(ManifestError, match="qai_ext_demo_ext"):
-        _parse(_base(python_package="qai_ext_other"))
-
-
-def test_tools_require_python_package() -> None:
-    with pytest.raises(ManifestError, match="requires python_package"):
-        _parse(_base(contributes={"tools": [tool_decl("demo_echo")]}))
+def test_tools_require_entry() -> None:
+    with pytest.raises(ManifestError, match="tools requires entry"):
+        _parse(manifest(tools=[tool_decl("demo_echo")]))
 
 
 @pytest.mark.parametrize(
     "bad",
-    ["Echo", "demo__echo", "mcp__x__y", "demo-echo", "_demo", "demo.echo", "d:echo", "a" * 65],
+    [
+        "Echo",
+        "demo__echo",
+        "mcp__x__y",
+        "demo-echo",
+        "_demo",
+        "1demo",
+        "demo.echo",
+        "d:echo",
+        "a" * 65,
+    ],
 )
 def test_bad_tool_name(bad: str) -> None:
-    data = _base(python_package="qai_ext_demo_ext", contributes={"tools": [tool_decl(bad)]})
     with pytest.raises(ManifestError, match=r"tools\[0\]\.name"):
-        _parse(data)
+        _parse(manifest(entry="main.py", tools=[tool_decl(bad)]))
 
 
 def test_tool_declared_twice() -> None:
-    data = _base(
-        python_package="qai_ext_demo_ext",
-        contributes={"tools": [tool_decl("demo_echo"), tool_decl("demo_echo")]},
-    )
     with pytest.raises(ManifestError, match="declared twice"):
-        _parse(data)
+        _parse(manifest(entry="main.py", tools=[tool_decl("demo_echo"), tool_decl("demo_echo")]))
+
+
+def test_tool_group_is_required_and_checked() -> None:
+    with pytest.raises(ManifestError, match="missing required field 'group'"):
+        _parse(manifest(entry="main.py", tools=[{"name": "demo_echo"}]))
+    with pytest.raises(ManifestError, match="group"):
+        _parse(manifest(entry="main.py", tools=[tool_decl("demo_echo", "write")]))
+
+
+def test_unknown_tool_field_is_an_error() -> None:
+    with pytest.raises(ManifestError, match=r"tools\[0\]: unknown field.*'mutating'"):
+        _parse(
+            manifest(
+                entry="main.py", tools=[{"name": "demo_echo", "group": "read", "mutating": True}]
+            )
+        )
 
 
 @pytest.mark.parametrize(
-    ("key", "value"),
-    [("group", "write"), ("result_category", "blob"), ("output_kind", "html"), ("mutating", "yes")],
+    ("skills", "match"),
+    [
+        ({"dir": "../outside"}, "skills.dir"),
+        ({"dir": "/abs"}, "skills.dir"),
+        ({"dir": "a/../b"}, "skills.dir"),
+        ({"default_modes": {"x": "on"}}, "default_modes"),
+        ({"default_modes": ["x"]}, "default_modes must be a JSON object"),
+        ({"editions": ["external"]}, "unknown field"),
+        ("skills", "skills must be a JSON object"),
+    ],
 )
-def test_bad_tool_attribute(key: str, value: Any) -> None:
-    data = _base(
-        python_package="qai_ext_demo_ext",
-        contributes={"tools": [tool_decl("demo_echo", **{key: value})]},
-    )
-    with pytest.raises(ManifestError, match=key):
-        _parse(data)
-
-
-def test_null_group_allowed() -> None:
-    data = _base(
-        python_package="qai_ext_demo_ext",
-        contributes={"tools": [tool_decl("demo_echo", group=None)]},
-    )
-    assert _parse(data).tools[0].group is None
-
-
-def test_unsupported_parts_warn_not_fail() -> None:
-    data = _base(
-        python_package="qai_ext_demo_ext",
-        frontend="frontend/index.ts",
-        contributes={
-            "modes": [{"id": "demo-ext"}],
-            "tools": [tool_decl("demo_echo", host_local=True, tier="SERVICE_GATED")],
-        },
-    )
-    m = _parse(data)
-    text = "\n".join(m.warnings)
-    assert "'frontend'" in text
-    assert "contributes.modes" in text
-    assert "host_local" in text and "tier" in text
-    assert m.tools[0].unsupported == ("host_local", "tier")
+def test_bad_skills(skills: Any, match: str) -> None:
+    with pytest.raises(ManifestError, match=match):
+        _parse(manifest(skills=skills))
 
 
 def test_load_manifest_reads_file_with_bom(tmp_path: Path) -> None:
     ext = tmp_path / "demo-ext"
     ext.mkdir()
     (ext / "extension.json").write_text(
-        '{"name":"demo-ext","version":"1","api_version":2,"description":"d"}',
+        '{"manifest_version":1,"name":"demo-ext","version":"1","description":"d"}',
         encoding="utf-8-sig",
     )
     assert load_manifest(ext).name == "demo-ext"
@@ -169,36 +184,6 @@ def test_load_manifest_errors(tmp_path: Path) -> None:
     (ext / "extension.json").write_text("{not json", encoding="utf-8")
     with pytest.raises(ManifestError, match="not valid JSON"):
         load_manifest(ext)
-
-
-def test_modelbuilder_template_manifest_parses() -> None:
-    """The QAIModelBuilder ``_template`` manifest (verbatim shape) is accepted."""
-    data = {
-        "name": "template-ext",
-        "version": "1.0.0",
-        "api_version": 2,
-        "description": {"en": "Copyable extension template", "zh-CN": "模板"},
-        "editions": ["internal", "external"],
-        "python_package": "qai_ext_template_ext",
-        "frontend": "frontend/index.ts",
-        "guard_tokens": ["template-ext", "template_ext", "TemplateExt"],
-        "lifecycle": {"shutdown_timeout_s": 5},
-        "contributes": {
-            "modes": [{"id": "template-ext", "toolbar_key": "template_ext"}],
-            "tools": [
-                {
-                    "name": "template_ext_echo",
-                    "group": "read",
-                    "result_category": "query",
-                    "output_kind": "text",
-                    "read_only_ok": True,
-                    "mutating": False,
-                    "tier": "SERVICE_GATED",
-                }
-            ],
-            "settings": {"config_sections": ["template_ext_cfg"]},
-        },
-    }
-    m = _parse(data, dirname="template-ext")
-    assert m.tool_names == frozenset({"template_ext_echo"})
-    assert any("contributes.settings" in w for w in m.warnings)
+    (ext / "extension.json").write_text("[]", encoding="utf-8")
+    with pytest.raises(ManifestError, match="must be a JSON object"):
+        load_manifest(ext)

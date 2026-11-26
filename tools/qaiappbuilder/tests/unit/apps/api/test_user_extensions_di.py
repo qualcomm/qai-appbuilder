@@ -21,33 +21,33 @@ from types import SimpleNamespace
 
 import pytest
 
-from apps.api._user_extensions_di import wire_user_extensions_into_chat
+import apps.api._user_extensions_di as di
+from apps.api._user_extensions_di import extension_skill_roots, wire_user_extensions_into_chat
 from qai.chat.adapters import RegistryBackedToolInvocation
 from qai.chat.application.ports import ToolInvocationRequest
 from qai.chat.application.use_cases.tool_advertise import compose_advertised_tools
 from qai.chat.domain import tool_groups
 from qai.chat.domain.agent_profile import EXPLORE
 from qai.chat.domain.ids import ConversationId, TabId
+from qai.platform.persistence.secrets import NullSecretStore
+from qai.platform.skills import SkillDiscovery
+from qai.platform.user_extensions import module_name_for
 
-_CODE = '''
-def build_services(ctx):
-    ctx.register_mode("demo-ext")  # degraded: warning only
-    return {"prefix": "demo"}
+_CODE = """
+def activate(ctx):
+    prefix = ctx.config.get("prefix", "?")
 
-def wire_into_chat(ctx, services):
-    async def _echo(request):
-        return services["prefix"] + ":" + request.arguments.get("text", "")
+    async def _echo(call):
+        return prefix + ":" + call.arguments.get("text", "")
 
     for name in ("demo_echo", "demo_run", "read"):
-        ctx.register_chat_tool(
+        ctx.register_tool(
             name,
             _echo,
-            schema={"type": "function", "function": {
-                "name": name, "description": "demo",
-                "parameters": {"type": "object",
-                               "properties": {"text": {"type": "string"}}}}},
+            description="demo",
+            parameters={"type": "object", "properties": {"text": {"type": "string"}}},
         )
-'''
+"""
 
 
 def _schema(name: str) -> dict:
@@ -57,39 +57,31 @@ def _schema(name: str) -> dict:
 @pytest.fixture
 def data_root(tmp_path: Path):
     ext = tmp_path / "extensions" / "demo-ext"
-    pkg = ext / "python" / "qai_ext_demo_ext"
-    pkg.mkdir(parents=True)
+    ext.mkdir(parents=True)
     (ext / "extension.json").write_text(
         json.dumps(
             {
+                "manifest_version": 1,
                 "name": "demo-ext",
                 "version": "0.1.0",
-                "api_version": 2,
                 "description": "demo",
-                "python_package": "qai_ext_demo_ext",
-                "contributes": {
-                    "modes": [{"id": "demo-ext"}],
-                    "tools": [
-                        {"name": "demo_echo", "group": "read", "result_category": "query"},
-                        {
-                            "name": "demo_run",
-                            "group": "command",
-                            "result_category": "command",
-                            "mutating": True,
-                        },
-                        {"name": "read", "group": "read", "result_category": "read"},
-                    ],
-                },
+                "entry": "main.py",
+                "tools": [
+                    {"name": "demo_echo", "group": "read"},
+                    {"name": "demo_run", "group": "command"},
+                    {"name": "read", "group": "read"},
+                ],
             }
         ),
         encoding="utf-8",
     )
-    (pkg / "__init__.py").write_text(textwrap.dedent(_CODE), encoding="utf-8")
+    (ext / "main.py").write_text(textwrap.dedent(_CODE), encoding="utf-8")
+    (ext / "config.toml").write_text('prefix = "demo"\n', encoding="utf-8")
     snapshot = dict(tool_groups.TOOL_GROUP_MEMBERS)
     yield tmp_path
     tool_groups.TOOL_GROUP_MEMBERS.clear()
     tool_groups.TOOL_GROUP_MEMBERS.update(snapshot)
-    sys.modules.pop("qai_ext_demo_ext", None)
+    sys.modules.pop(module_name_for("demo-ext"), None)
 
 
 @pytest.fixture
@@ -102,13 +94,9 @@ def wired(data_root: Path):
 
     tools.register("read", _builtin_read, schema=_schema("read"))
     chat = SimpleNamespace(tools=tools)
-    container = SimpleNamespace(
-        data_paths=SimpleNamespace(root=data_root), user_extensions=None
-    )
+    container = SimpleNamespace(data_paths=SimpleNamespace(root=data_root), user_extensions=None)
     host = wire_user_extensions_into_chat(chat=chat, container=container)
-    return SimpleNamespace(
-        tools=tools, host=host, container=container, builtin_read=builtin_read
-    )
+    return SimpleNamespace(tools=tools, host=host, container=container, builtin_read=builtin_read)
 
 
 def _request(tool: str, **arguments) -> ToolInvocationRequest:
@@ -136,7 +124,6 @@ async def test_builtin_name_wins(wired) -> None:
     assert status.state == "loaded"
     assert status.tools == ("demo_echo", "demo_run")
     assert any("'read' refused" in w for w in status.warnings)
-    assert any("register_mode is not supported yet" in w for w in status.warnings)
     result = await wired.tools.invoke(_request("read"))
     assert result.result is wired.builtin_read
 
@@ -203,6 +190,77 @@ def test_no_extensions_dir_is_a_noop(tmp_path: Path) -> None:
     assert host is not None
     assert host.statuses == ()
     assert tools.registered_tools == ()
+
+
+async def test_app_services_reach_the_context(data_root: Path) -> None:
+    """The secret store and the live proxy / TLS settings come from the container."""
+    (data_root / "extensions" / "demo-ext" / "main.py").write_text(
+        textwrap.dedent(
+            """
+            def activate(ctx):
+                async def _probe(call):
+                    ctx.secrets.set("k", "v")
+                    secret = ctx.secrets.get("k")
+                    return (ctx.proxy_url(), ctx.ssl_verify, secret, str(ctx.data_dir))
+                ctx.register_tool("demo_echo", _probe, description="probe")
+            """
+        ),
+        encoding="utf-8",
+    )
+    store = NullSecretStore()
+    settings = SimpleNamespace(
+        tools=SimpleNamespace(global_proxy="http://proxy:8080"), ssl_verify=False
+    )
+    container = SimpleNamespace(
+        data_paths=SimpleNamespace(root=data_root),
+        user_extensions=None,
+        secret_store=store,
+        settings=settings,
+    )
+    tools = RegistryBackedToolInvocation()
+    host = wire_user_extensions_into_chat(chat=SimpleNamespace(tools=tools), container=container)
+    assert host is not None and host.statuses[0].state == "loaded", host.statuses[0].error
+    result = await tools.invoke(_request("demo_echo"))
+    proxy, ssl, secret, data_dir = result.result
+    assert proxy == "http://proxy:8080"
+    assert ssl is False
+    assert secret == "v" and store.get("ext.demo-ext", "k") == "v"
+    assert Path(data_dir) == data_root / "extensions-data" / "demo-ext"
+
+
+def test_failure_after_registration_leaves_nothing(data_root: Path, monkeypatch) -> None:
+    """If wiring fails after tools are registered, they must not stay without a group."""
+    def _boom(_host):
+        raise RuntimeError("policy failed")
+
+    monkeypatch.setattr(di, "_apply_tool_policy", _boom)
+    tools = RegistryBackedToolInvocation()
+    container = SimpleNamespace(data_paths=SimpleNamespace(root=data_root), user_extensions=None)
+    assert (
+        wire_user_extensions_into_chat(chat=SimpleNamespace(tools=tools), container=container)
+        is None
+    )
+    assert tools.registered_tools == ()
+    assert container.user_extensions is None
+
+
+def test_skill_added_after_load_is_not_discovered(data_root: Path) -> None:
+    """Only the skills vetted at load reach the scan (allow-list)."""
+    skills = data_root / "extensions" / "demo-ext" / "skills"
+    for sid in ("vetted",):
+        (skills / sid).mkdir(parents=True)
+        (skills / sid / "SKILL.md").write_text(
+            f"---\nname: {sid}\ndescription: d\n---\n", encoding="utf-8"
+        )
+    tools = RegistryBackedToolInvocation()
+    container = SimpleNamespace(data_paths=SimpleNamespace(root=data_root), user_extensions=None)
+    wire_user_extensions_into_chat(chat=SimpleNamespace(tools=tools), container=container)
+    (skills / "late").mkdir()
+    (skills / "late" / "SKILL.md").write_text(
+        "---\nname: late\ndescription: d\n---\n", encoding="utf-8"
+    )
+    disc = SkillDiscovery([], contributed_roots=lambda: extension_skill_roots(container))
+    assert {s.skill_id for s in disc.scan()} == {"vetted"}
 
 
 def test_non_registry_tools_port_is_skipped(tmp_path: Path) -> None:

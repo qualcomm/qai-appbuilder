@@ -560,7 +560,7 @@ class SkillDiscoveryUseCase:
                 "skills",
                 skills_list,
                 by_name,
-                excluded=root.excluded,
+                contributed=root,
                 add_only=True,
             )
 
@@ -644,21 +644,18 @@ class SkillDiscoveryUseCase:
         skills_list: list[dict[str, object]],
         by_name: dict[str, dict[str, object]],
         *,
-        excluded: tuple[Path, ...] = (),
+        contributed: ContributedSkillRoot | None = None,
         add_only: bool = False,
     ) -> None:
         """Add filesystem-discovered skills not already in ``by_name``.
 
+        ``contributed``: scan through that root's own filters (excluded paths,
+        allow-listed ids) so the panel lists exactly what the Skills page does.
         ``add_only``: never touch an entry that already exists (used for
         contributed roots, whose same-id copies are refused upstream).
         """
-        if excluded:
-            disc = SkillDiscovery(
-                [],
-                contributed_roots=lambda: [
-                    ContributedSkillRoot(path=root, source="", excluded=excluded)
-                ],
-            )
+        if contributed is not None:
+            disc = SkillDiscovery([], contributed_roots=lambda: [contributed])
         else:
             disc = SkillDiscovery(root)
         for skill_info in disc.scan():
