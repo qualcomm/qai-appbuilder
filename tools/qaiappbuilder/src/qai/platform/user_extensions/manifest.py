@@ -5,7 +5,7 @@
 
 """``extension.json`` parsing + validation for user extensions.
 
-appbuilder's own manifest format (design doc §10.0). Example::
+appbuilder's own manifest format (design doc §4.2). Example::
 
     {
         "manifest_version": 1,
@@ -26,7 +26,8 @@ Rules:
 * ``description``: a string or a ``{locale: text}`` object.
 * ``entry`` (optional): relative path of a ``.py`` file or of a package
   directory (with ``__init__.py``) that defines ``activate(ctx)``.
-* ``tools[].name``: ``[a-z0-9_]``, starts with a letter, <= 64, no ``__``
+* ``tools[].name``: ``[a-z0-9_]``, starts with a letter, does not end with
+  ``_`` (the model-side name sanitizer strips it), <= 64, no ``__``
   (reserved for MCP ``server__tool``); ``tools[].group``: ``read`` / ``edit``
   / ``command`` / ``null`` -- required, so the author decides consciously
   whether persona permission groups can switch the tool off.
@@ -63,7 +64,7 @@ MANIFEST_VERSION: Final[int] = 1
 DEFAULT_SKILLS_DIR: Final[str] = "skills"
 
 _EXT_NAME_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
-_TOOL_NAME_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]*$")
+_TOOL_NAME_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z]([a-z0-9_]*[a-z0-9])?$")
 _NAME_MAX: Final[int] = 64
 #: Forward-slash relative path; no ``..``, no leading ``/`` or ``.`` segment.
 _REL_PATH_RE: Final[re.Pattern[str]] = re.compile(
@@ -197,7 +198,7 @@ def _parse_tools(raw: Any) -> tuple[ToolDeclaration, ...]:
         ):
             raise ManifestError(
                 f"{where}.name {name!r} must be lower-case letters, digits and '_', "
-                f"start with a letter, max {_NAME_MAX}, no '__'"
+                f"start with a letter, not end with '_', max {_NAME_MAX}, no '__'"
             )
         if any(t.name == name for t in out):
             raise ManifestError(f"{where}.name {name!r} is declared twice")

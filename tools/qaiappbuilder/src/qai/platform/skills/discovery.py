@@ -99,7 +99,7 @@ def resolve_skill_mode(override: object, npu_optimized: bool, skill_id: str = ""
     return _contributed_default_modes().get(skill_id, "cloud")
 
 
-#: Default modes CONTRIBUTED at runtime (user extensions' ``skills[].default_mode``),
+#: Default modes CONTRIBUTED at runtime (user extensions' ``skills.default_modes``),
 #: consulted after :data:`DEFAULT_SKILL_MODES` so a built-in default always wins.
 #: A provider (not a dict) so the composition root can bind a live view that
 #: follows extension loads without this module knowing about extensions.

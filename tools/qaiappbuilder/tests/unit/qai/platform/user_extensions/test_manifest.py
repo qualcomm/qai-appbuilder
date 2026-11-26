@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from qai.chat.adapters.openai_protocol import sanitize_tool_call_name
 from qai.platform.user_extensions import ManifestError, load_manifest, parse_manifest
 
 from .conftest import manifest, tool_decl
@@ -120,12 +121,20 @@ def test_tools_require_entry() -> None:
         "1demo",
         "demo.echo",
         "d:echo",
+        "demo_",
         "a" * 65,
     ],
 )
 def test_bad_tool_name(bad: str) -> None:
     with pytest.raises(ManifestError, match=r"tools\[0\]\.name"):
         _parse(manifest(entry="main.py", tools=[tool_decl(bad)]))
+
+
+@pytest.mark.parametrize("name", ["a", "a1", "demo_echo", "a_b_c", "x" * 64, "v2_run"])
+def test_accepted_tool_names_survive_the_model_side_sanitizer(name: str) -> None:
+    """A name the sanitizer would rewrite could no longer be dispatched to its handler."""
+    (decl,) = _parse(manifest(entry="main.py", tools=[tool_decl(name)])).tools
+    assert sanitize_tool_call_name(decl.name) == decl.name
 
 
 def test_tool_declared_twice() -> None:

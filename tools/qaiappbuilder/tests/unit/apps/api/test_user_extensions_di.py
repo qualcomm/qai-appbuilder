@@ -230,6 +230,7 @@ async def test_app_services_reach_the_context(data_root: Path) -> None:
 
 def test_failure_after_registration_leaves_nothing(data_root: Path, monkeypatch) -> None:
     """If wiring fails after tools are registered, they must not stay without a group."""
+
     def _boom(_host):
         raise RuntimeError("policy failed")
 

@@ -127,6 +127,13 @@ def test_default_modes_only_for_visible_skills(make_ext, new_host) -> None:
     assert not any("no skill 'taken'" in w for w in status.warnings)
 
 
+def test_default_modes_without_skills_dir_warn(make_ext, new_host) -> None:
+    _ext(make_ext, "docs-ext", skills={"default_modes": {"ghost": "off"}})
+    (status,) = new_host().load_all()
+    assert status.state == "loaded"
+    assert any("no skill 'ghost'" in w for w in status.warnings)
+
+
 def test_skill_policy_json_warns(make_ext, new_host) -> None:
     ext = _ext(make_ext, "docs-ext")
     d = _skill(ext / "skills", "guarded")

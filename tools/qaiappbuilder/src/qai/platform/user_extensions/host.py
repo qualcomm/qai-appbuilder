@@ -16,7 +16,7 @@ Lifecycle, per extension directory under the scan root:
    :class:`ToolSink` only after ``activate`` returned, so a failing extension
    leaves nothing behind; its ``on_unload`` callbacks run (newest first).
 
-Name policy (design doc §4.2): a tool keeps the name its manifest declares;
+Name policy (design doc §5.2): a tool keeps the name its manifest declares;
 a name already taken -- by a built-in tool, an MCP tool or an earlier
 extension -- is REFUSED for that one tool with a reason, the rest loads.
 
@@ -229,7 +229,8 @@ class ExtensionContext:
         self._active = True
         self.secrets = ExtensionSecrets(secret_store, manifest.name)
         self.logger = logging.getLogger(f"qai.user_extension.{manifest.name}")
-        self.warnings: list[str] = []
+        #: Host-side notes for the extension's status; not part of the extension API.
+        self._warnings: list[str] = []
 
     # -- identity / environment ------------------------------------------
 
@@ -314,7 +315,9 @@ class ExtensionContext:
                 f"register_tool({name!r}): parameters is not JSON-serialisable: {exc}"
             ) from exc
         if name in self._taken_names():
-            self.warnings.append(f"tool {name!r} refused: the name is already used by another tool")
+            self._warnings.append(
+                f"tool {name!r} refused: the name is already used by another tool"
+            )
             return
         self._pending[name] = _PendingTool(
             name=name,
@@ -453,7 +456,7 @@ class UserExtensionHost:
         except BaseException as exc:  # noqa: BLE001 - untrusted code; incl. SystemExit
             ctx._run_unload()
             _forget_modules(_own_modules(module_name))
-            status.warnings.extend(ctx.warnings)
+            status.warnings.extend(ctx._warnings)
             status.error = f"{type(exc).__name__}: {exc}"
             return status
 
@@ -463,7 +466,7 @@ class UserExtensionHost:
         for pending in ctx._finish():
             # Re-check: another tool may have taken the name meanwhile.
             if pending.name in self._sink.tool_names():
-                ctx.warnings.append(
+                ctx._warnings.append(
                     f"tool {pending.name!r} refused: the name is already used by another tool"
                 )
                 continue
@@ -473,11 +476,11 @@ class UserExtensionHost:
             )
             committed.append(pending.name)
         for name in sorted(manifest.tool_names - set(committed)):
-            if not any(repr(name) in w for w in ctx.warnings):
-                ctx.warnings.append(f"tool {name!r} is declared but was never registered")
+            if not any(repr(name) in w for w in ctx._warnings):
+                ctx._warnings.append(f"tool {name!r} is declared but was never registered")
         status.state = "loaded"
         status.tools = tuple(committed)
-        status.warnings.extend(ctx.warnings)
+        status.warnings.extend(ctx._warnings)
         self._commit_skills(manifest, status)
         return status
 
@@ -546,7 +549,7 @@ def _collect_skills(
     The root must resolve inside the extension; a skill directory whose real
     path escapes it (link / junction) is excluded. A skill id already used by
     an app skill or by an earlier extension is refused and excluded (design
-    doc §4.2). ``None`` when there is no skills directory.
+    doc §5.2). ``None`` when there is no skills directory.
     """
     decl = manifest.skills
     ext_root = manifest.root.resolve()
@@ -554,6 +557,8 @@ def _collect_skills(
     if not skills_root.is_dir():
         if decl.dir != DEFAULT_SKILLS_DIR:  # an explicit dir that is missing
             warnings.append(f"skills.dir {decl.dir!r} does not exist")
+        for skill_id in sorted(decl.default_modes):
+            warnings.append(f"skills.default_modes: no skill {skill_id!r} in this extension")
         return None
     try:
         confined = skills_root.resolve(strict=True)

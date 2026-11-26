@@ -5,14 +5,14 @@
 
 """Composition-root wiring for user extensions (chat tools + skills).
 
-Extensions are a side channel (design doc §4.1): they contribute tools to the
+Extensions are a side channel (design doc §5.1): they contribute tools to the
 SAME chat tool registry every built-in tool lives in, and skills to the SAME
 skill scan the Skills page, the skill catalog in the system prompt and the
 ``skill`` tool all read. Nothing in ``qai.chat`` knows extensions exist.
 
 Scan root: ``<data>/extensions/<name>/extension.json``; per-extension data:
 ``<data>/extensions-data/<name>/``. The extension API is defined in design
-doc §10.0; this module only supplies the app services it exposes (secret
+doc §4; this module only supplies the app services it exposes (secret
 store, live proxy URL, live TLS-verification setting).
 
 Tools -- ``tools[].group`` (``read``/``edit``/``command``) makes the tool join
@@ -28,9 +28,9 @@ the lifespan's background ``connect_all``) and their names always contain
 tool name cannot contain (rejected by the manifest validator), so the two
 never collide.
 
-Skills -- ``<ext>/<skills.dir>/<id>/SKILL.md`` (design doc §4.2):
+Skills -- ``<ext>/<skills.dir>/<id>/SKILL.md`` (design doc §5.2, §9.3):
 
-* order is user > built-in > extension (as in QAIModelBuilder): the
+* order is user > built-in > extension: the
   extension roots are appended to ``user_prefs.skill_discovery`` through
   :func:`extension_skill_roots`, so an app skill always wins;
 * a skill id already used by an app skill or an earlier extension is
