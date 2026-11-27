@@ -1,0 +1,33 @@
+{
+  "manifest_version": 1,
+  "name": "system-info",
+  "version": "1.0.0",
+  "description": {
+    "en": "Look up this computer: CPU, memory, disk space, network interfaces, connections and the ports it exposes.",
+    "zh-CN": "查看本机信息：CPU、内存、硬盘空间、网络连接以及对外开放的接口。",
+    "zh-TW": "檢視本機資訊：CPU、記憶體、硬碟空間、網路連線以及對外開放的介面。"
+  },
+  "entry": "sysinfo",
+  "tools": [
+    { "name": "system_info", "group": "read" }
+  ],
+  "prompts": [
+    { "when": "active", "file": "prompts/active.md" }
+  ],
+  "ui": {
+    "label": { "en": "System Info", "zh-CN": "本机信息", "zh-TW": "本機資訊" },
+    "icon": "🖥",
+    "actions": [
+      {
+        "id": "overview",
+        "label": { "en": "Overview", "zh-CN": "概览", "zh-TW": "總覽" },
+        "description": "Ask the assistant for a summary of this computer"
+      },
+      {
+        "id": "exposed_ports",
+        "label": { "en": "Exposed ports", "zh-CN": "对外端口", "zh-TW": "對外連接埠" },
+        "description": "Ask the assistant which ports this computer exposes to the network"
+      }
+    ]
+  }
+}

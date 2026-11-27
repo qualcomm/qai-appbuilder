@@ -31,6 +31,36 @@ def test_minimal_manifest_without_code() -> None:
     assert dict(m.skills.default_modes) == {}
 
 
+def test_ui_names_may_be_given_per_language_with_a_plain_fallback() -> None:
+    per_lang = {"en": "System Info", "zh-CN": "本机信息", "zh-TW": "本機資訊"}
+    m = _parse(
+        manifest(
+            entry="main.py",
+            ui={
+                "label": per_lang,
+                "actions": [
+                    {"id": "go", "label": {"en": "Go", "zh-CN": "开始"}},
+                    {"id": "plain", "label": "Plain"},
+                ],
+            },
+        )
+    )
+    assert m.ui is not None
+    assert m.ui.label == "System Info"  # `label` stays a plain string
+    assert dict(m.ui.labels) == per_lang
+    go, plain = m.ui.actions
+    assert go.label == "Go" and dict(go.labels) == {"en": "Go", "zh-CN": "开始"}
+    assert plain.label == "Plain"
+    assert dict(plain.labels) == {}  # a plain string: no per-language map
+    assert dict(_parse(manifest(ui={"label": "Weather"})).ui.labels) == {}
+
+
+@pytest.mark.parametrize("bad", [{}, {"en": 3}, 5, ["x"]])
+def test_a_ui_label_must_be_text_or_a_language_map(bad: Any) -> None:
+    with pytest.raises(ManifestError, match="label"):
+        _parse(manifest(ui={"label": bad}))
+
+
 def test_full_manifest() -> None:
     m = _parse(
         manifest(

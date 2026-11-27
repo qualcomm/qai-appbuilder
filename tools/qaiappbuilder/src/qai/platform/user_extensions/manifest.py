@@ -258,6 +258,8 @@ class ActionDeclaration:
     label: str
     description: str = ""
     fields: tuple[SettingDeclaration, ...] = ()
+    #: ``{locale: text}`` when the manifest gave one per language, else empty.
+    labels: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,6 +271,8 @@ class UiDeclaration:
     actions: tuple[ActionDeclaration, ...] = ()
     #: Relative path of the extension's front-end ES module, e.g. ``web/index.js``.
     module: str | None = None
+    #: ``{locale: text}`` when ``label`` was given per language, else empty.
+    labels: Mapping[str, str] = field(default_factory=dict)
 
     @property
     def module_dir(self) -> str | None:
@@ -507,6 +511,7 @@ def _parse_ui(raw: Any) -> UiDeclaration | None:
                 if "description" in entry
                 else "",
                 fields=tuple(fields),
+                labels=_texts(entry["label"]),
             )
         )
     return UiDeclaration(
@@ -514,6 +519,7 @@ def _parse_ui(raw: Any) -> UiDeclaration | None:
         icon=icon,
         actions=tuple(actions),
         module=_parse_ui_module(obj.get("module")),
+        labels=_texts(obj["label"]),
     )
 
 
@@ -831,6 +837,13 @@ def _rel_path(value: Any, *, label: str) -> str:
             f"{label} {value!r} must be a relative path like 'skills' or 'src/main.py'"
         )
     return value.rstrip("/")
+
+
+def _texts(value: Any) -> dict[str, str]:
+    """The per-language texts of an already validated ``{locale: text}`` value."""
+    if not isinstance(value, dict):
+        return {}
+    return {k: v for k, v in value.items() if isinstance(k, str) and isinstance(v, str) and v}
 
 
 def _text(value: Any, *, label: str) -> str:

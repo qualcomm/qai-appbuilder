@@ -108,6 +108,102 @@ describe("ComposerExtensionMenu", () => {
     expect(w.find('[data-testid="default-mode-button"]').exists()).toBe(true);
   });
 
+  it("shows the menu entry, mode tag and buttons in the UI language, with a plain-label fallback", async () => {
+    const localized = {
+      ...ENTRY,
+      name: "sys-info",
+      label: "System Info",
+      labels: { en: "System Info", "zh-CN": "本机信息", "zh-TW": "本機資訊" },
+      actions: [
+        {
+          id: "overview",
+          label: "Overview",
+          labels: { en: "Overview", "zh-CN": "概览", "zh-TW": "總覽" },
+          description: "",
+          fields: [],
+        },
+        { id: "plain", label: "Plain", description: "", fields: [] }, // no per-language texts
+      ],
+    };
+    apiJson.mockImplementation((method: string, path: string) =>
+      method === "GET" && path === "/api/extensions/ui"
+        ? Promise.resolve({ extensions: [localized, ENTRY] })
+        : Promise.reject(new Error(`unexpected ${method} ${path}`)),
+    );
+    const ui = useUiStore();
+    const texts = async (locale: string) => {
+      ui.locale = locale as typeof ui.locale;
+      const w = mountMenu(`tab-${locale}`);
+      await flushPromises();
+      await w.get('[data-testid="ext-menu-btn"]').trigger("click");
+      await flushPromises();
+      // Each item is `<icon><name>`; the name is in the item's last <span>.
+      const menu = ["sys-info", "remote-host"].map((n) =>
+        w.get(`[data-testid="ext-menu-item-${n}"]`).findAll("span").at(-1)!.text(),
+      );
+      await w.get('[data-testid="ext-menu-item-sys-info"]').trigger("click");
+      const tag = w.get('[data-testid="ext-mode-exit"]').text();
+      const buttons = ["overview", "plain"].map((a) => w.get(`[data-testid="ext-action-${a}"]`).text());
+      return { menu, tag, buttons };
+    };
+    const zh = await texts("zh-CN");
+    expect(zh.menu).toEqual(["本机信息", "Remote Host"]); // an extension without labels keeps its plain name
+    expect(zh.tag).toContain("本机信息");
+    expect(zh.buttons).toEqual(["概览", "Plain"]);
+    const en = await texts("en");
+    expect(en.menu[0]).toBe("System Info");
+    expect(en.buttons).toEqual(["Overview", "Plain"]);
+    expect((await texts("zh-TW")).menu[0]).toBe("本機資訊");
+  });
+
+  it("a button without fields runs at once (no empty dialog) and sends its prompt", async () => {
+    const entry = {
+      ...ENTRY,
+      actions: [{ id: "overview", label: "Overview", description: "", fields: [] }],
+    };
+    apiJson.mockImplementation((method: string, path: string) => {
+      if (method === "GET" && path === "/api/extensions/ui") return Promise.resolve({ extensions: [entry] });
+      if (method === "POST" && path === "/api/extensions/remote-host/actions/overview")
+        return Promise.resolve({ ok: true, message: "", prompt: "summarise this computer" });
+      return Promise.reject(new Error(`unexpected ${method} ${path}`));
+    });
+    const w = mountMenu();
+    await flushPromises();
+    await w.get('[data-testid="ext-menu-btn"]').trigger("click");
+    await flushPromises();
+    await w.get('[data-testid="ext-menu-item-remote-host"]').trigger("click");
+    await w.get('[data-testid="ext-action-overview"]').trigger("click");
+    await flushPromises();
+    expect(document.querySelector('[data-testid="ext-action-dialog"]')).toBeNull();
+    expect(w.emitted("send-prompt")).toEqual([["summarise this computer"]]);
+    expect(apiJson).toHaveBeenCalledWith(
+      "POST",
+      "/api/extensions/remote-host/actions/overview",
+      expect.objectContaining({ values: {} }),
+    );
+  });
+
+  it("a failing button without fields shows the error and leaves no dialog behind", async () => {
+    const entry = {
+      ...ENTRY,
+      actions: [{ id: "overview", label: "Overview", description: "", fields: [] }],
+    };
+    apiJson.mockImplementation((method: string, path: string) => {
+      if (method === "GET" && path === "/api/extensions/ui") return Promise.resolve({ extensions: [entry] });
+      return Promise.resolve({ ok: false, message: "boom", prompt: "" });
+    });
+    const w = mountMenu();
+    await flushPromises();
+    await w.get('[data-testid="ext-menu-btn"]').trigger("click");
+    await flushPromises();
+    await w.get('[data-testid="ext-menu-item-remote-host"]').trigger("click");
+    await w.get('[data-testid="ext-action-overview"]').trigger("click");
+    await flushPromises();
+    expect(toast.error).toHaveBeenCalledWith("boom");
+    expect(document.querySelector('[data-testid="ext-action-dialog"]')).toBeNull();
+    expect(w.emitted("send-prompt")).toBeUndefined();
+  });
+
   it("shows the extension panel button with a localized Settings label", async () => {
     const url = `data:text/javascript;charset=utf-8,${encodeURIComponent(`
       export function activate(api) {

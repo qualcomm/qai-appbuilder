@@ -374,6 +374,32 @@ def test_an_extension_mode_is_not_switched_to_the_model_builder(chat: tuple, con
     assert _mode_changes(t) == [], "an extension mode must not be yanked into the model builder"
 
 
+def test_the_system_info_extension_answers_through_the_chat_loop(chat: tuple, conv: Callable, llm: StandInLLM) -> None:
+    """The built-in System Info tool runs in a real turn and its facts reach the model."""
+    _ob, cl = chat
+    ext = {s["name"]: s for s in cl.get("/api/extensions").json()["extensions"]}["system-info"]
+    assert ext["state"] == "loaded" and ext["builtin"] is True and ext["tools"] == ["system_info"]
+    prompt = '[tool system_info {"sections": ["memory", "disk"]}]'
+    t = run_turn(cl, conv(), "t-sysinfo", prompt, seconds=60, active_extensions='["system-info"]')
+    assert t.status == 200 and t.ends == ["completed", "snapshot"]
+    (call,) = t.frames("tool_call")
+    assert call["payload"]["tool_name"] == "system_info"
+    (result,) = t.frames("tool_result")
+    data = json.loads(result["payload"]["result"])
+    assert list(data) == ["memory", "disk"], "only the requested sections come back"
+    assert data["memory"]["total_gb"] > 0 and data["disk"][0]["total_gb"] > 0
+    # The result was handed back to the model, which answered from it.
+    assert t.text.startswith("ECHO: TOOL-RESULT: ") and '"total_gb"' in t.text
+    # The extension's mode text ("call the system_info tool") is sent in extension mode only.
+    first = llm.chat_requests()[0].body["messages"]
+    assert "System Info mode" in json.dumps(first)
+    llm.clear()
+    run_turn(cl, conv(), "t-plain", "[echo] hi")
+    assert "System Info mode" not in json.dumps(llm.chat_requests()[0].body["messages"])
+    tools = [x["function"]["name"] for x in llm.chat_requests()[0].body.get("tools") or []]
+    assert "system_info" in tools, "the tool itself is app-level: available in every mode"
+
+
 # --------------------------------------------------------------------------
 # upstream failures
 # --------------------------------------------------------------------------

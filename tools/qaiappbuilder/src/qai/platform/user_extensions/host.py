@@ -1092,6 +1092,7 @@ class UserExtensionHost:
                 {
                     "name": status.name,
                     "label": manifest.ui.label,
+                    "labels": dict(manifest.ui.labels),
                     "icon": manifest.ui.icon,
                     "description": manifest.description,
                     # Front-end module (route A): a URL under /api/ext/<name>/_ui/,
@@ -1101,6 +1102,7 @@ class UserExtensionHost:
                         {
                             "id": a.id,
                             "label": a.label,
+                            "labels": dict(a.labels),
                             "description": a.description,
                             "fields": [_field_wire(f) for f in a.fields],
                         }

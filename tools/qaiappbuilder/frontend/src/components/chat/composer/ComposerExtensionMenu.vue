@@ -61,6 +61,14 @@ const ui = useUiStore();
 const panelTitle = computed(() =>
   panel.value ? resolveLocalizedText(panel.value.title, ui.locale) : "",
 );
+/** The name to show: the text for the UI language when the manifest gave one per
+ *  language, else the plain `label`. */
+function shown(item: { label: string; labels?: Record<string, string> }): string {
+  const labels = item.labels;
+  return labels && Object.keys(labels).length > 0
+    ? resolveLocalizedText(labels, ui.locale) || item.label
+    : item.label;
+}
 const panelOpen = ref(false);
 watch(current, () => {
   panelOpen.value = false;
@@ -114,13 +122,22 @@ function openAction(a: ExtensionUiAction): void {
     ]),
   );
   fieldErrors.value = {};
+  // Nothing to ask the user: run it at once instead of showing an empty dialog.
+  if (a.fields.length === 0) {
+    void run(a);
+    return;
+  }
   action.value = a;
 }
 
-async function submit(): Promise<void> {
+/** The dialog's submit (the form handler: it takes no argument of its own). */
+function submit(): Promise<void> {
+  return action.value ? run(action.value) : Promise.resolve();
+}
+
+async function run(a: ExtensionUiAction): Promise<void> {
   const ext = current.value;
-  const a = action.value;
-  if (!ext || !a || running.value) return;
+  if (!ext || running.value) return;
   const payload: Record<string, unknown> = {};
   for (const f of a.fields) {
     const v = values.value[f.key];
@@ -171,7 +188,7 @@ async function submit(): Promise<void> {
           v-if="current.icon"
           aria-hidden="true"
         >{{ current.icon }}</span>
-        <span>{{ current.label }}</span>
+        <span>{{ shown(current) }}</span>
         <span
           class="rit-close"
           aria-hidden="true"
@@ -186,11 +203,11 @@ async function submit(): Promise<void> {
         :key="a.id"
         type="button"
         class="rit-btn"
-        :title="a.description || a.label"
+        :title="a.description || shown(a)"
         :data-testid="`ext-action-${a.id}`"
         @click="openAction(a)"
       >
-        <span>{{ a.label }}</span>
+        <span>{{ shown(a) }}</span>
       </button>
       <button
         v-if="panel"
@@ -246,7 +263,7 @@ async function submit(): Promise<void> {
               class="ext-mode__icon"
               aria-hidden="true"
             >{{ e.icon || "🧩" }}</span>
-            <span>{{ e.label }}</span>
+            <span>{{ shown(e) }}</span>
           </button>
           <p
             v-if="modes.entries.value.length === 0"
@@ -311,7 +328,7 @@ async function submit(): Promise<void> {
           @keydown.esc="action = null"
         >
           <h3 class="ext-modal__title">
-            {{ current.label }} — {{ action.label }}
+            {{ shown(current) }} — {{ shown(action) }}
           </h3>
           <p
             v-if="action.description"

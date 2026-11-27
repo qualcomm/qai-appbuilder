@@ -44,6 +44,8 @@ export interface ExtensionUiField {
 export interface ExtensionUiAction {
   id: string;
   label: string;
+  /** One text per UI locale, when the manifest gave them (else absent / empty). */
+  labels?: Record<string, string>;
   description: string;
   fields: ExtensionUiField[];
 }
@@ -51,6 +53,8 @@ export interface ExtensionUiAction {
 export interface ExtensionUiEntry {
   name: string;
   label: string;
+  /** One text per UI locale, when the manifest gave them (else absent / empty). */
+  labels?: Record<string, string>;
   icon: string;
   description: string;
   actions: ExtensionUiAction[];
