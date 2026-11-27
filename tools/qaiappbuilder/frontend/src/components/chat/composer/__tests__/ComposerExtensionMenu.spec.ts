@@ -21,6 +21,9 @@ import {
   clearExtensionMode,
   useExtensionModes,
 } from "@/composables/useExtensionModes";
+import { __resetExtensionFrontendForTests } from "@/composables/useExtensionFrontend";
+import { useUiStore } from "@/stores/ui";
+import { createPinia, setActivePinia } from "pinia";
 import ComposerExtensionMenu from "../ComposerExtensionMenu.vue";
 
 const ENTRY = {
@@ -34,7 +37,14 @@ const ENTRY = {
       label: "Authorize host",
       description: "",
       fields: [
-        { key: "host", type: "text", label: "Host", description: "", required: true, default: null },
+        {
+          key: "host",
+          type: "text",
+          label: "Host",
+          description: "",
+          required: true,
+          default: null,
+        },
         { key: "password", type: "secret", label: "Password", description: "", required: false },
       ],
     },
@@ -65,6 +75,8 @@ function mountMenu(tabId = "tab-1") {
 beforeEach(() => {
   vi.clearAllMocks();
   document.body.innerHTML = "";
+  setActivePinia(createPinia());
+  __resetExtensionFrontendForTests();
   __resetExtensionModesForTests();
   apiJson.mockImplementation((method: string, path: string) =>
     method === "GET" && path === "/api/extensions/ui"
@@ -96,6 +108,34 @@ describe("ComposerExtensionMenu", () => {
     expect(w.find('[data-testid="default-mode-button"]').exists()).toBe(true);
   });
 
+  it("shows the extension panel button with a localized Settings label", async () => {
+    const url = `data:text/javascript;charset=utf-8,${encodeURIComponent(`
+      export function activate(api) {
+        api.panel({
+          title: { en: "Settings", "zh-CN": "设置" },
+          component: api.vue.defineComponent({ render: () => null }),
+        });
+      }`)}`;
+    // The host loads the module the server lists for the extension.
+    apiJson.mockImplementation((method: string, path: string) =>
+      method === "GET" && path === "/api/extensions/ui"
+        ? Promise.resolve({ extensions: [{ ...ENTRY, module: url }] })
+        : Promise.reject(new Error(`unexpected ${method} ${path}`)),
+    );
+    const ui = useUiStore();
+    ui.locale = "zh-CN";
+    const w = mountMenu();
+    await flushPromises();
+    await w.get('[data-testid="ext-menu-btn"]').trigger("click");
+    await flushPromises();
+    await w.get('[data-testid="ext-menu-item-remote-host"]').trigger("click");
+    await flushPromises();
+    expect(w.get('[data-testid="ext-panel-btn"]').text()).toBe("设置");
+    ui.locale = "en";
+    await flushPromises();
+    expect(w.get('[data-testid="ext-panel-btn"]').text()).toBe("Settings");
+  });
+
   it("action dialog posts the values and sends the returned prompt", async () => {
     const w = mountMenu();
     await flushPromises();
@@ -105,7 +145,9 @@ describe("ComposerExtensionMenu", () => {
     await w.get('[data-testid="ext-action-authorize"]').trigger("click");
 
     apiJson.mockResolvedValueOnce({ ok: true, message: "authorized", prompt: "check host h1" });
-    const host = document.querySelector('[data-testid="ext-action-field-host"]') as HTMLInputElement;
+    const host = document.querySelector(
+      '[data-testid="ext-action-field-host"]',
+    ) as HTMLInputElement;
     host.value = "h1";
     host.dispatchEvent(new Event("input"));
     (document.querySelector('[data-testid="ext-action-dialog"]') as HTMLFormElement).dispatchEvent(

@@ -16,6 +16,7 @@ const activate = new Function(
 
 function panel() {
   let component: any;
+  let title: any;
   const locale = Vue.ref("zh-CN");
   const api = {
     vue: Vue,
@@ -24,6 +25,7 @@ function panel() {
     },
     panel: (spec: any) => {
       component = spec.component;
+      title = spec.title;
     },
     toast: { success: vi.fn(), error: vi.fn() },
     fetch: vi.fn(async (path: string) => {
@@ -50,7 +52,7 @@ function panel() {
     setMcpEnabled: vi.fn(async () => ({ enabled: true })),
   };
   activate(api);
-  return { api, locale, wrapper: mount(component) };
+  return { api, locale, title, wrapper: mount(component) };
 }
 
 async function click(wrapper: any, label: string) {
@@ -88,6 +90,12 @@ describe("Qualcomm skills route-A panel", () => {
     await click(wrapper, "一键开启 MCP");
     expect(api.setMcpEnabled).toHaveBeenCalledWith(true);
     expect(api.fetch.mock.calls.some(([path]) => path.includes("reload"))).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("names the composer button Settings in every UI language", () => {
+    const { title, wrapper } = panel();
+    expect(title).toEqual({ en: "Settings", "zh-CN": "设置", "zh-TW": "設定" });
     wrapper.unmount();
   });
 

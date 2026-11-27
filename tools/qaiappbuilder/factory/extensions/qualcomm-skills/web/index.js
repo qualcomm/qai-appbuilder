@@ -33,7 +33,7 @@ export function activate(api) {
   };
 
   api.panel({
-    title: "Qualcomm Skills / Qualcomm 技能包",
+    title: { en: "Settings", "zh-CN": "设置", "zh-TW": "設定" },
     component: {
       name: "QualcommSkillsPanel",
       setup() {

@@ -18,6 +18,7 @@ vi.mock("@/stores/ui", () => ({ useUiStore: () => uiState }));
 import {
   __resetExtensionFrontendForTests,
   loadExtensionFrontend,
+  resolveLocalizedText,
   setExtensionPromptSender,
   syncExtensionFrontends,
   unloadExtensionFrontend,
@@ -90,12 +91,31 @@ describe("loading", () => {
     expect((globalThis as Record<string, unknown>).__d).toBe(1);
   });
 
+  it("api.panel accepts a per-locale title and resolves it with fallbacks", async () => {
+    await loadExtensionFrontend(
+      "l-ext",
+      mod(`export function activate(api) { api.panel({
+        title: { en: "Settings", "zh-CN": "设置" },
+        component: api.vue.defineComponent({ render: () => null }) }); }`),
+    );
+    const title = fe.panelOf("l-ext")!.title;
+    expect(resolveLocalizedText(title, "zh-CN")).toBe("设置");
+    expect(resolveLocalizedText(title, "zh-TW")).toBe("设置");
+    expect(resolveLocalizedText(title, "en")).toBe("Settings");
+    expect(resolveLocalizedText("Fixed", "zh-CN")).toBe("Fixed");
+  });
+
   it("api.panel rejects a malformed spec", async () => {
     await loadExtensionFrontend(
       "e-ext",
       mod("export function activate(api) { api.panel({ title: 3 }); }"),
     );
     expect(fe.errorOf("e-ext")).toContain("panel(");
+    await loadExtensionFrontend(
+      "f-ext",
+      mod("export function activate(api) { api.panel({ title: {}, component: {} }); }"),
+    );
+    expect(fe.errorOf("f-ext")).toContain("panel(");
   });
 });
 

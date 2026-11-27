@@ -28,9 +28,11 @@ import {
   type ExtensionUiAction,
 } from "@/composables/useExtensionModes";
 import {
+  resolveLocalizedText,
   setExtensionPromptSender,
   useExtensionFrontend,
 } from "@/composables/useExtensionFrontend";
+import { useUiStore } from "@/stores/ui";
 
 const props = defineProps<{
   tabId: string | null;
@@ -55,6 +57,10 @@ const current = computed(() => modes.selectedFor(props.tabId));
 const frontend = useExtensionFrontend();
 const panel = computed(() => (current.value ? frontend.panelOf(current.value.name) : null));
 const panelError = computed(() => (current.value ? frontend.errorOf(current.value.name) : ""));
+const ui = useUiStore();
+const panelTitle = computed(() =>
+  panel.value ? resolveLocalizedText(panel.value.title, ui.locale) : "",
+);
 const panelOpen = ref(false);
 watch(current, () => {
   panelOpen.value = false;
@@ -190,11 +196,11 @@ async function submit(): Promise<void> {
         v-if="panel"
         type="button"
         class="rit-btn"
-        :title="panel.title"
+        :title="panelTitle"
         data-testid="ext-panel-btn"
         @click="panelOpen = true"
       >
-        <span>{{ panel.title }}</span>
+        <span>{{ panelTitle }}</span>
       </button>
       <span
         v-if="panelError"
@@ -275,7 +281,7 @@ async function submit(): Promise<void> {
           @keydown.esc="panelOpen = false"
         >
           <h3 class="ext-modal__title">
-            {{ panel.title }}
+            {{ panelTitle }}
           </h3>
           <!-- The extension's component, built with the host's Vue. -->
           <component :is="panel.component" />

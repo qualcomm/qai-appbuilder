@@ -43,9 +43,12 @@ import { apiBytes, apiJson } from "@/api/http";
 import { useToast } from "@/composables/useToast";
 import { useUiStore } from "@/stores/ui";
 
+/** A fixed label or one label per UI locale (`en`, `zh-CN`, `zh-TW`). */
+export type LocalizedText = string | Readonly<Record<string, string>>;
+
 export interface ExtensionPanelSpec {
-  /** Shown in the panel header. */
-  title: string;
+  /** Shown in the panel header and on the composer button. */
+  title: LocalizedText;
   /** A component built with the host Vue's render functions. */
   component: Component;
 }
@@ -75,6 +78,31 @@ const HOST_VUE = Object.freeze({
   withModifiers: Vue.withModifiers,
   withKeys: Vue.withKeys,
 });
+
+function isLocalizedText(value: unknown): value is LocalizedText {
+  if (typeof value === "string") return value.trim() !== "";
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    Object.values(value).some((v) => typeof v === "string" && v.trim() !== "")
+  );
+}
+
+/** Resolve an extension label for the active UI locale. */
+export function resolveLocalizedText(value: LocalizedText, locale: string): string {
+  if (typeof value === "string") return value;
+  const pick = (key: string): string | undefined => {
+    const text = value[key];
+    return typeof text === "string" && text.trim() !== "" ? text : undefined;
+  };
+  return (
+    pick(locale) ??
+    (locale.startsWith("zh") ? (pick("zh-CN") ?? pick("zh-TW")) : undefined) ??
+    pick("en") ??
+    Object.values(value).find((text) => typeof text === "string" && text.trim() !== "") ??
+    ""
+  );
+}
 
 const loaded = reactive(new Map<string, Loaded>());
 const errors = reactive(new Map<string, string>());
@@ -125,7 +153,7 @@ function buildApi(name: string, entry: Loaded) {
       },
     }),
     panel(spec: ExtensionPanelSpec): void {
-      if (!spec || typeof spec.title !== "string" || !spec.component) {
+      if (!spec || !isLocalizedText(spec.title) || !spec.component) {
         throw new Error("panel({ title, component }) needs a title and a component");
       }
       entry.panel = { title: spec.title, component: markRaw(spec.component) };
