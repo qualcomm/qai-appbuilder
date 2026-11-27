@@ -1075,7 +1075,7 @@ export function useChatTransport(
         disabledSkills: sessionOverride.disabledSkills,
         // The extension whose mode is selected in this tab (its "active"
         // prompt fragments join the turn's context).
-        activeExtensions: activeExtensionsFor(tab?.id),
+        activeExtensions: toolMode === null ? activeExtensionsFor(tab?.id) : [],
         // UI language so the backend localizes its feature-mode system-prompt
         // framing to the language the user selected (additive; §3.1).
         locale: uiStore.locale,
@@ -1483,7 +1483,8 @@ export function useChatTransport(
         `disabled_skills=${encodeURIComponent(JSON.stringify(sessionOverride.disabledSkills))}`,
       );
     }
-    const activeExtensions = activeExtensionsFor(tabId);
+    // Exclusive with built-in modes: never both on one turn.
+    const activeExtensions = toolMode === null ? activeExtensionsFor(tabId) : [];
     if (activeExtensions.length > 0) {
       qs.push(`active_extensions=${encodeURIComponent(JSON.stringify(activeExtensions))}`);
     }

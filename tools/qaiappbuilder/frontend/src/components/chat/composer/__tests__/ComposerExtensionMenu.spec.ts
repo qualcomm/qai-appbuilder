@@ -18,6 +18,7 @@ import enExtensions from "@/locales/en/extensions";
 import {
   __resetExtensionModesForTests,
   activeExtensionsFor,
+  clearExtensionMode,
   useExtensionModes,
 } from "@/composables/useExtensionModes";
 import ComposerExtensionMenu from "../ComposerExtensionMenu.vue";
@@ -131,6 +132,19 @@ describe("ComposerExtensionMenu", () => {
     expect(toast.error).toHaveBeenCalledWith("RuntimeError: no route");
     expect(document.querySelector('[data-testid="ext-action-dialog"]')).not.toBeNull();
     expect(w.emitted("send-prompt")).toBeUndefined();
+  });
+
+  it("picking an extension emits entered; clearExtensionMode leaves the mode", async () => {
+    const w = mountMenu();
+    await flushPromises();
+    await w.get('[data-testid="ext-menu-btn"]').trigger("click");
+    await flushPromises();
+    await w.get('[data-testid="ext-menu-item-remote-host"]').trigger("click");
+    expect(w.emitted("entered")).toEqual([["remote-host"]]); // parent leaves built-in modes
+    clearExtensionMode("tab-1"); // what the tabs store does when a built-in mode is entered
+    await flushPromises();
+    expect(activeExtensionsFor("tab-1")).toEqual([]);
+    expect(w.find('[data-testid="ext-menu-btn"]').exists()).toBe(true);
   });
 
   it("a selected extension that disappears ends its mode", async () => {

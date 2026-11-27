@@ -102,6 +102,7 @@ const ModeFrameGomaster = IS_INTERNAL
   : null;
 import ComposerModeButtons from "./composer/ComposerModeButtons.vue";
 import ComposerExtensionMenu from "./composer/ComposerExtensionMenu.vue";
+import { clearExtensionMode } from "@/composables/useExtensionModes";
 import ActiveRunsButton from "./composer/ActiveRunsButton.vue";
 import ComposerPendingImages from "./composer/ComposerPendingImages.vue";
 import ComposerLightbox from "./composer/ComposerLightbox.vue";
@@ -1284,6 +1285,7 @@ function setToolModeFromKey(modeStr: string): void {
   // Unknown future mode: mirror only to the global UI store.
   const next = ui.activeToolMode === modeStr ? null : (modeStr as ToolMode);
   ui.setActiveToolMode(next);
+  if (next !== null) clearExtensionMode(tab.id); // built-in and extension modes are exclusive
 }
 
 function exitMode(): void {
@@ -1970,6 +1972,7 @@ const {
             :tab-id="store.activeTab?.id ?? null"
             :conversation-id="store.activeTab?.conversationId ?? null"
             @send-prompt="sendExtensionPrompt"
+            @entered="exitMode"
           />
 
           <!-- Active-mode sub-toolbars — only one renders at a time. -->

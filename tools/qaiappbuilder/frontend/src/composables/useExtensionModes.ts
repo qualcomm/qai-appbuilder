@@ -12,6 +12,12 @@
  *   conversation view, design doc §3.2) and does NOT switch or clear the
  *   conversation. It is kept in memory only: reloading the page leaves the
  *   mode, like closing it.
+ * - Built-in tool modes (App Builder, Model Builder, Coding, ...) and an
+ *   extension mode are mutually exclusive per tab: entering a built-in mode
+ *   leaves the extension mode (`clearExtensionMode`, called by the tabs
+ *   store), and selecting an extension leaves the built-in mode (the menu
+ *   only shows when no built-in mode is active; `activeExtensionsFor` sends
+ *   nothing while one is).
  * - `activeExtensionsFor(tabId)` is what the transport sends with each turn
  *   (`active_extensions`), so the backend adds that extension's "active"
  *   prompt fragments to the turn's context.
@@ -81,6 +87,12 @@ function select(tabId: string, name: string): void {
 }
 
 function clear(tabId: string): void {
+  selected.delete(tabId);
+}
+
+/** Leave the tab's extension mode (a built-in mode was entered: the two are
+ *  mutually exclusive). Called by the chat tabs store. */
+export function clearExtensionMode(tabId: string): void {
   selected.delete(tabId);
 }
 

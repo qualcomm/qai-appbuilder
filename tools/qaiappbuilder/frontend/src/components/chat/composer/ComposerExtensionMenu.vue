@@ -32,7 +32,11 @@ const props = defineProps<{
   tabId: string | null;
   conversationId: string | null;
 }>();
-const emit = defineEmits<{ "send-prompt": [prompt: string] }>();
+const emit = defineEmits<{
+  "send-prompt": [prompt: string];
+  /** An extension mode was entered: the parent leaves any built-in mode. */
+  entered: [name: string];
+}>();
 
 const { t } = useI18n();
 const router = useRouter();
@@ -51,6 +55,7 @@ async function toggleMenu(): Promise<void> {
 function pick(name: string): void {
   if (props.tabId) modes.select(props.tabId, name);
   open.value = false;
+  emit("entered", name);
 }
 
 function exitMode(): void {

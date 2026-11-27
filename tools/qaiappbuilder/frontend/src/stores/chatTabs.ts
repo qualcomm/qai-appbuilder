@@ -161,6 +161,7 @@ import { fetchNewestPage, fetchOlderPage } from "./chatTabs/historyLoader";
 // import will not move module into another chunk"). One static import instead.
 import { mapHistoryItems } from "./chatTabs/historyMapper";
 import { forgetChatScroll } from "@/composables/chat/useChatScrollMemory";
+import { clearExtensionMode } from "@/composables/useExtensionModes";
 // App-level per-tab transport manager (singleton). Used ONLY as a read-only
 // truth-source in `refreshFromSnapshot` to tell whether a sub-agent tab's
 // current `streaming` status is driven by a LIVE take-over turn on the main
@@ -1659,6 +1660,10 @@ export const useChatTabsStore = defineStore("chatTabs", {
      */
     setActiveMode(tabId: TabId, mode: ToolModeKey | null): void {
       this._patchTab(tabId, { activeMode: mode });
+      // Built-in modes and user-extension modes are mutually exclusive:
+      // entering a built-in mode (from any path: toolbar, App Builder
+      // bridge, stream frames) leaves the tab's extension mode.
+      if (mode !== null) clearExtensionMode(tabId);
     },
 
     /** Shallow-merge tool params for a tab (per-mode control changes). */
