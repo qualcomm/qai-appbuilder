@@ -482,7 +482,7 @@ class Packages:
 
     # -- install / remove -----------------------------------------------------
 
-    def install(  # noqa: PLR0912, PLR0915 - transactional pip install and rollback
+    def install(  # noqa: PLR0915 - transactional pip install and rollback
         self, token: str, *, allow_network: bool = True
     ) -> dict[str, Any]:
         """Install a staged package: ``pip install --target`` into its own
@@ -509,31 +509,19 @@ class Packages:
             raise PackageError(
                 "qcskills.dependencies", "network permission is needed for: " + ", ".join(missing)
             )
-        cmd = [
-            self._python,
-            "-m",
-            "pip",
-            "install",
-            "--no-input",
-            "--disable-pip-version-check",
-            "--no-deps",
-            "--target",
-            str(tmp / "site"),
-            str(wheel_path),
-        ]
-        if not allow_network:
-            cmd.append("--no-index")
         proxy = self._proxy_url()
-        if proxy and allow_network:
-            cmd += ["--proxy", proxy]
         try:
-            proc = self._runner(cmd, PIP_TIMEOUT_S)
-        except subprocess.TimeoutExpired:
-            shutil.rmtree(tmp, ignore_errors=True)
-            raise PackageError("qcskills.pip_failed", "pip timed out") from None
-        if proc.returncode != 0:
-            shutil.rmtree(tmp, ignore_errors=True)
-            raise PackageError("qcskills.pip_failed", _pip_error(proc, proxy))
+            # Not through pip: a bundle's skill files can exceed Windows' 260-character
+            # path limit, and pip fails while staging them in its temp directory.
+            _extract_wheel(wheel_path, tmp / "site")
+        except PackageError:
+            self._rm(tmp)
+            raise
+        except (OSError, zipfile.BadZipFile) as exc:
+            self._rm(tmp)
+            raise PackageError(
+                "qcskills.install_failed", f"cannot install the wheel: {exc}"
+            ) from None
         if missing:
             dep_cmd = [
                 self._python,
@@ -552,12 +540,12 @@ class Packages:
             try:
                 deps = self._runner(dep_cmd, PIP_TIMEOUT_S)
             except (subprocess.TimeoutExpired, OSError) as exc:
-                shutil.rmtree(tmp, ignore_errors=True)
+                self._rm(tmp)
                 raise PackageError(
                     "qcskills.pip_failed", f"dependency installation failed: {type(exc).__name__}"
                 ) from None
             if deps.returncode != 0:
-                shutil.rmtree(tmp, ignore_errors=True)
+                self._rm(tmp)
                 raise PackageError("qcskills.pip_failed", _pip_error(deps, proxy))
         (tmp / "README.md").write_text(readme, encoding="utf-8")
         meta = {
@@ -581,13 +569,13 @@ class Packages:
             for old in [p for p in self.installed() if p["name"] == info.name]:
                 old_dir = self._package_dir(old["id"])
                 backup = self.packages_dir / f".backup-{token}-{len(backups)}"
-                old_dir.rename(backup)
+                _rename(old_dir, backup)
                 backups.append((old_dir, backup))
-            tmp.rename(target)
+            _rename(tmp, target)
         except OSError:
             for original, backup in reversed(backups):
-                backup.rename(original)
-            shutil.rmtree(tmp, ignore_errors=True)
+                _rename(backup, original)
+            self._rm(tmp)
             raise
         for _, backup in backups:
             self._rm(backup)
@@ -673,6 +661,46 @@ class Packages:
                 time.sleep(0.25)
             else:
                 return
+
+
+def _rename(src: Path, dst: Path) -> None:
+    """Rename a directory, retrying while a scanner briefly holds a new file (Windows)."""
+    for attempt in range(_RM_ATTEMPTS):
+        try:
+            src.rename(dst)
+        except PermissionError:
+            if attempt == _RM_ATTEMPTS - 1:
+                raise
+            time.sleep(0.25)
+        else:
+            return
+
+
+def _extended(path: Path) -> str:
+    text = str(path.resolve())
+    return "\\\\?\\" + text if os.name == "nt" and not text.startswith("\\\\?\\") else text
+
+
+def _extract_wheel(wheel: Path, site: Path) -> None:
+    """Unpack a pure-Python wheel into ``site`` (what ``pip --no-deps --target``
+    does for one), safely and without a path-length limit on Windows."""
+    budget = _Budget()
+    with zipfile.ZipFile(wheel) as zf:
+        for info in zf.infolist():
+            rel = _safe_name(info.filename)
+            if rel is None or info.is_dir():
+                continue
+            if stat.S_ISLNK(info.external_attr >> 16):
+                raise PackageError(
+                    "qcskills.unsafe_archive", f"{info.filename!r} is a symbolic link"
+                )
+            budget.add_file()
+            dest = site.joinpath(*rel.parts)
+            Path(_extended(dest.parent)).mkdir(parents=True, exist_ok=True)
+            with zf.open(info) as src, open(_extended(dest), "wb") as out:
+                while chunk := src.read(1 << 16):
+                    budget.add_bytes(len(chunk))
+                    out.write(chunk)
 
 
 def _server_name(dist_name: str) -> str:

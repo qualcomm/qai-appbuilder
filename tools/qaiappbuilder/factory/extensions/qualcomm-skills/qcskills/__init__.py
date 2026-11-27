@@ -40,7 +40,14 @@ _LOCK = threading.Lock()
 
 
 def _error(exc: PackageError, status: int = 400) -> RouteResponse:
-    return RouteResponse(body={"code": exc.code, "message": str(exc)}, status=status)
+    return _problem(exc.code, str(exc), status)
+
+
+def _problem(code: str, message: str, status: int) -> RouteResponse:
+    # The app's front end only shows a message from the standard error envelope.
+    return RouteResponse(
+        body={"type": "ExtensionRouteError", "code": code, "message": message}, status=status
+    )
 
 
 def activate(ctx: ExtensionContext) -> None:
@@ -58,7 +65,7 @@ def activate(ctx: ExtensionContext) -> None:
 
     def stage(req: RouteRequest) -> Any:
         if not req.raw_body:
-            return RouteResponse(body={"code": "qcskills.empty", "message": "no file"}, status=400)
+            return _problem("qcskills.empty", "no file", 400)
         filename = (req.query.get("filename") or "upload.zip").replace("\\", "/").rsplit("/", 1)[-1]
         try:
             preview = store.stage(req.raw_body, filename)
@@ -93,10 +100,7 @@ def activate(ctx: ExtensionContext) -> None:
             except PackageError as exc:
                 return _error(exc, 404)
             except PermissionError as exc:
-                return RouteResponse(
-                    body={"code": "qcskills.busy", "message": f"files are in use: {exc}"},
-                    status=409,
-                )
+                return _problem("qcskills.busy", f"files are in use: {exc}", 409)
         return {"removed": req.params["package_id"], "reload": True}
 
     def readme(req: RouteRequest) -> Any:

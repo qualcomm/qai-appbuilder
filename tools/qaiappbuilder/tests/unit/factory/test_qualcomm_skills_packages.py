@@ -42,11 +42,14 @@ def wheel_bytes(
     requires: tuple[str, ...] = ("mcp<2.0,>=1.2.0",),
     requires_python: str = ">=3.10",
     skills: int = 3,
+    extra: dict[str, bytes] | None = None,
 ) -> bytes:
     dist = name.replace("_", "-")
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w") as zf:
         zf.writestr(f"{name}/__init__.py", "")
+        for member, data in (extra or {}).items():
+            zf.writestr(member, data)
         if server is not None:
             zf.writestr(f"{name}/server.py", server)
         for i in range(skills):
@@ -239,13 +242,10 @@ def test_requires_python_is_checked() -> None:
 # -- install / list / remove -----------------------------------------------------------
 
 
-def test_install_runs_pip_into_the_package_dir_and_lists_it(store) -> None:
+def test_install_extracts_into_the_package_dir_and_lists_it(store) -> None:
     preview = store.stage(delivery(requires=()), "HS00-1.zip")
     meta = store.install(preview["token"])
-    (cmd,) = store.pip.calls
-    assert cmd[:4] == ["PY", "-m", "pip", "install"]
-    target = Path(cmd[cmd.index("--target") + 1])
-    assert target.parent.parent == store.packages_dir and "--no-index" not in cmd
+    assert store.pip.calls == []  # no dependencies: pip is not needed
     pkg_dir = store.packages_dir / meta["id"]
     assert (pkg_dir / "site" / "demo_board_mcp" / "server.py").is_file()
     assert (pkg_dir / "README.md").read_text(encoding="utf-8").startswith("# demo-board-mcp")
@@ -262,18 +262,28 @@ def test_install_runs_pip_into_the_package_dir_and_lists_it(store) -> None:
     )
 
 
-def test_offline_install_and_proxy(tmp_path: Path) -> None:
+def test_offline_install_and_proxy(tmp_path: Path, monkeypatch) -> None:
     pip = FakePip()
     store = pk.Packages(
         tmp_path, python="PY", runner=pip, proxy_url=lambda: "http://u:p@proxy:8080"
     )
     store.install(store.stage(delivery(requires=()))["token"], allow_network=False)
-    assert "--no-index" in pip.calls[0] and "--proxy" not in pip.calls[0]
-    store.install(store.stage(delivery(requires=()))["token"])
-    assert pip.calls[1][pip.calls[1].index("--proxy") + 1] == "http://u:p@proxy:8080"
+    assert pip.calls == []
+    monkeypatch.setattr(
+        pk.md, "version", lambda _name: (_ for _ in ()).throw(pk.md.PackageNotFoundError())
+    )
+    with pytest.raises(pk.PackageError) as exc:
+        store.install(store.stage(delivery(version="1.3"))["token"], allow_network=False)
+    assert exc.value.code == "qcskills.dependencies" and pip.calls == []
+    store.install(store.stage(delivery(version="1.4"))["token"])
+    (cmd,) = pip.calls
+    assert "--only-binary=:all:" in cmd and cmd[cmd.index("--proxy") + 1] == "http://u:p@proxy:8080"
 
 
-def test_pip_failure_leaves_nothing_and_hides_the_proxy(tmp_path: Path) -> None:
+def test_pip_failure_leaves_nothing_and_hides_the_proxy(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        pk.md, "version", lambda _name: (_ for _ in ()).throw(pk.md.PackageNotFoundError())
+    )
     pip = FakePip(
         returncode=1,
         stderr="ERROR: Could not find a version that satisfies PyMuPDF\nvia http://u:p@proxy:8080",
@@ -368,12 +378,26 @@ def test_nested_wheel_keeps_basename_and_short_path(store):
     assert len(wheel_path.relative_to(work / "unpacked").parts) == 3
     assert len(wheel_path.parent.name) == 8
     assert preview["wheel"] == basename
-    store.install(preview["token"])
-    assert next(arg for arg in store.pip.calls[0] if arg.endswith(".whl")) == str(wheel_path)
+    meta = store.install(preview["token"])
+    assert (store.packages_dir / meta["id"] / "site" / "demo_board_mcp" / "server.py").is_file()
 
 
-@pytest.mark.parametrize("failure_phase", ["wheel", "dependencies"])
-def test_pip_failure_preserves_previous_version(store, monkeypatch, failure_phase):
+@pytest.mark.skipif(os.name != "nt", reason="Windows path limit")
+def test_install_wheel_with_paths_over_windows_max_path(store):
+    long_dir = "/".join(["skill-directory-" * 3] * 4)
+    name = f"demo_board_mcp/_skills_bundle/{long_dir}/scripts/test_script.py"
+    wheel = wheel_bytes(requires=(), extra={name: b"print('ok')"})
+    preview = store.stage(
+        zipped({"inner.zip": zipped({"demo_board_mcp-1.2-py3-none-any.whl": wheel})})
+    )
+    meta = store.install(preview["token"])
+    installed = store.packages_dir / meta["id"] / "site" / Path(name)
+    assert len(str(installed)) > 260
+    assert Path("\\\\?\\" + str(installed.resolve())).read_bytes() == b"print('ok')"
+    store._rm(store.packages_dir / meta["id"])
+
+
+def test_pip_failure_preserves_previous_version(store, monkeypatch):
     old = store.install(store.stage(delivery(version="1.2", requires=()))["token"])
     old_dir = store.packages_dir / old["id"]
     old_server = (old_dir / "site" / "demo_board_mcp" / "server.py").read_bytes()
@@ -382,8 +406,7 @@ def test_pip_failure_preserves_previous_version(store, monkeypatch, failure_phas
     pip = store.pip
 
     def failing_runner(cmd, timeout):
-        is_wheel = any(arg.endswith(".whl") for arg in cmd)
-        pip.returncode = int(is_wheel == (failure_phase == "wheel"))
+        pip.returncode = 1
         pip.stderr = "ERROR: synthetic pip failure"
         return pip(cmd, timeout)
 

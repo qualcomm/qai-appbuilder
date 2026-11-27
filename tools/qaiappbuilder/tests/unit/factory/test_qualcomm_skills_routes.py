@@ -122,11 +122,11 @@ def _status(env):
     return next(s for s in response.json()["extensions"] if s["name"] == NAME)
 
 
-def _stage(env, **wheel_kwargs):
+def _stage(env, requires=(), **wheel_kwargs):
     response = env.client.post(
         f"{BASE}/packages/stage",
         params={"filename": r"C:\deliveries\HS00-1.zip"},
-        content=delivery(requires=(), **wheel_kwargs),
+        content=delivery(requires=requires, **wheel_kwargs),
         headers={"Content-Type": "application/zip"},
     )
     assert response.status_code == 200, response.text
@@ -202,8 +202,7 @@ def test_install_automatically_reloads_and_registers_dynamic_mcp(env) -> None:
     assert env.client.get(f"{BASE}/packages").json() == {"packages": [meta]}
     readme = env.client.get(f"{BASE}/packages/{meta['id']}/readme")
     assert readme.status_code == 200 and readme.json()["readme"].startswith("# demo-board-mcp")
-    (cmd,) = env.pip.calls
-    assert "--no-index" in cmd and "--no-deps" in cmd and "--proxy" not in cmd
+    assert env.pip.calls == []  # the wheel itself is unpacked directly
     assert not env.config_path.exists()  # contributed config is not persisted as user-owned
     assert extension_skill_roots(env.container) == []
     assert _status(env)["skills"] == []  # wheel skills are discovered through MCP, not a scan
@@ -256,13 +255,15 @@ def test_builtin_can_be_disabled_and_enabled_with_package_data_kept(env) -> None
 
 def test_failed_install_restores_existing_mcp_via_runtime_reload(env) -> None:
     meta = _install(env)
-    staged = _stage(env, version="1.3")
+    staged = _stage(env, version="1.3", requires=("demo-dependency>=2",))
     env.pip.returncode = 1
     env.pip.stderr = "ERROR: synthetic failure (no real pip or network)"
     response = env.client.post(
-        f"{BASE}/packages/install", json={"token": staged["token"], "allow_network": False}
+        f"{BASE}/packages/install", json={"token": staged["token"], "allow_network": True}
     )
     assert response.status_code == 400 and response.json()["code"] == "qcskills.pip_failed"
+    # The browser client only surfaces errors in the app's standard envelope.
+    assert response.json()["type"] == "ExtensionRouteError" and response.json()["message"]
     assert _status(env)["state"] == "loaded" and _status(env)["mcp_servers"] == [SERVER]
     assert [s.config.name for s in env.client.portal.call(env.registry.list_servers)] == [SERVER]
     assert env.client.get(f"{BASE}/packages").json() == {"packages": [meta]}
