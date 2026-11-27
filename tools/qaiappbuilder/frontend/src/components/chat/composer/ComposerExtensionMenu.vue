@@ -150,7 +150,7 @@ async function submit(): Promise<void> {
 <template>
   <div
     ref="root"
-    class="ext-mode"
+    class="rit-left ext-mode"
     data-testid="ext-mode"
   >
     <template v-if="current">
@@ -167,7 +167,7 @@ async function submit(): Promise<void> {
         >{{ current.icon }}</span>
         <span>{{ current.label }}</span>
         <span
-          class="ext-mode__x"
+          class="rit-close"
           aria-hidden="true"
         >✕</span>
       </button>
@@ -204,6 +204,9 @@ async function submit(): Promise<void> {
       >⚠ {{ t("extensions.mode.frontendFailed") }}</span>
     </template>
     <template v-else>
+      <!-- Default mode buttons are part of this same left-hand group and
+           disappear while an extension mode is selected. -->
+      <slot />
       <button
         type="button"
         class="rit-btn"
@@ -385,9 +388,11 @@ async function submit(): Promise<void> {
 </template>
 
 <style>
-.ext-mode { position: relative; display: inline-flex; align-items: center; gap: 4px; }
-.ext-mode__tag { display: inline-flex; align-items: center; gap: 4px; }
-.ext-mode__x { opacity: 0.7; margin-left: 2px; }
+.ext-mode { position: relative; flex: 1; min-width: 0; flex-wrap: wrap; }
+/* Flatten the default button component into the same flex flow, so narrow
+   windows wrap entries instead of pushing the send controls off-screen. */
+.ext-mode > .rit-left { display: contents; }
+/* The shared .rit-mode-badge and .rit-close rules also style built-in modes. */
 .ext-mode__err { color: var(--error); font-size: var(--text-xs); }
 .ext-modal--panel { width: min(760px, 94vw); }
 .ext-mode__menu {

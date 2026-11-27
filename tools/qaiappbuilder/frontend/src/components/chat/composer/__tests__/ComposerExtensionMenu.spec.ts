@@ -54,6 +54,7 @@ function mountMenu(tabId = "tab-1") {
   });
   const w = mount(ComposerExtensionMenu, {
     props: { tabId, conversationId: "conv-1" },
+    slots: { default: '<button data-testid="default-mode-button">Model Builder</button>' },
     global: { plugins: [i18n] },
     attachTo: document.body,
   });
@@ -76,11 +77,15 @@ describe("ComposerExtensionMenu", () => {
   it("menu -> pick -> mode tag + action buttons; exit leaves the mode", async () => {
     const w = mountMenu();
     await flushPromises();
+    expect(w.find('[data-testid="default-mode-button"]').exists()).toBe(true);
+    expect(w.get('[data-testid="ext-mode"]').classes()).toContain("rit-left");
     await w.get('[data-testid="ext-menu-btn"]').trigger("click");
     await flushPromises();
     await w.get('[data-testid="ext-menu-item-remote-host"]').trigger("click");
 
     expect(w.get('[data-testid="ext-mode-exit"]').text()).toContain("Remote Host");
+    expect(w.find('[data-testid="default-mode-button"]').exists()).toBe(false);
+    expect(w.find('[data-testid="ext-mode-exit"] .rit-close').exists()).toBe(true);
     expect(w.find('[data-testid="ext-action-authorize"]').exists()).toBe(true);
     expect(activeExtensionsFor("tab-1")).toEqual(["remote-host"]);
     expect(activeExtensionsFor("tab-2")).toEqual([]); // per tab
@@ -88,6 +93,7 @@ describe("ComposerExtensionMenu", () => {
     await w.get('[data-testid="ext-mode-exit"]').trigger("click");
     expect(activeExtensionsFor("tab-1")).toEqual([]);
     expect(w.find('[data-testid="ext-menu-btn"]').exists()).toBe(true);
+    expect(w.find('[data-testid="default-mode-button"]').exists()).toBe(true);
   });
 
   it("action dialog posts the values and sends the returned prompt", async () => {

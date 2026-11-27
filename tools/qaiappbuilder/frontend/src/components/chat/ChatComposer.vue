@@ -1955,25 +1955,24 @@ const {
         </div>
 
         <div class="rit-toolbar">
-          <!-- Default toolbar (no active mode) — attach + data-driven mode
-               buttons (ARCH-1 split into ComposerModeButtons). -->
-          <ComposerModeButtons
-            v-if="effectiveMode === null"
-            :modules="visibleToolbarModules"
-            :effective-mode="effectiveMode"
-            @attach="openFilePicker"
-            @pick-mode="setToolModeFromKey"
-            @ssh="showSshPanel = true"
-          />
-          <!-- User extensions: "Extension ▾" menu / active extension mode tag
-               + its action buttons (independent of the built-in tool modes). -->
+          <!-- One left-hand group: the default buttons and Extension entry
+               stay together. Selecting an extension replaces the default
+               buttons with its mode badge/actions, like a built-in mode. -->
           <ComposerExtensionMenu
             v-if="effectiveMode === null"
             :tab-id="store.activeTab?.id ?? null"
             :conversation-id="store.activeTab?.conversationId ?? null"
             @send-prompt="sendExtensionPrompt"
             @entered="exitMode"
-          />
+          >
+            <ComposerModeButtons
+              :modules="visibleToolbarModules"
+              :effective-mode="effectiveMode"
+              @attach="openFilePicker"
+              @pick-mode="setToolModeFromKey"
+              @ssh="showSshPanel = true"
+            />
+          </ComposerExtensionMenu>
 
           <!-- Active-mode sub-toolbars — only one renders at a time. -->
           <ModeFrameModelBuilder
