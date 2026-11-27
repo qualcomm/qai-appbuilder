@@ -35,10 +35,13 @@ export interface ExtensionStatus {
   prompts: Record<string, number>;
   /** App-wide names of the extension's running MCP servers. */
   mcp_servers: string[];
+  /** Ships with the app (factory/extensions): can be disabled, not uninstalled. */
+  builtin?: boolean;
 }
 
 export interface ExtensionListResponse {
   directory: string;
+  builtin_directory?: string;
   extensions: ExtensionStatus[];
 }
 

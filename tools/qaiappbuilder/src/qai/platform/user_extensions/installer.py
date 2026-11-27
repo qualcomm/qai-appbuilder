@@ -107,6 +107,8 @@ class StagedExtension:
                 }
                 for s in m.mcp_servers
             ],
+            # The code may start more MCP servers at run time.
+            "dynamic_mcp_servers": m.dynamic_mcp_servers,
             "installed_version": self.installed_version,
             "replaces": self.installed_version is not None or not self.installed_valid,
             "files": self.files,

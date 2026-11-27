@@ -23,12 +23,14 @@ runtime). Everything app-wide still applies because these are ordinary
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
+from starlette.concurrency import run_in_threadpool
 
 from qai.platform.logging import get_logger
 from qai.platform.user_extensions import RouteRequest, RouteResponse, call_handler
@@ -40,7 +42,6 @@ __all__ = ["build_router"]
 
 _LOG = get_logger("interfaces.http.extension_routes")
 _METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]
-_MAX_BODY = 10 * 1024 * 1024
 #: Never handed to extension code: the app's own credentials.
 _HIDDEN_HEADERS = frozenset({"cookie", "authorization", "x-csrf-token", "proxy-authorization"})
 
@@ -78,6 +79,24 @@ def _error(status: int, code: str, message: str, **extra: Any) -> JSONResponse:
 
 def build_router(*, container: Container) -> APIRouter:
     router = APIRouter(prefix="/api/ext", tags=["extensions"])
+    runtime_lock = asyncio.Lock()
+
+    async def invoke(
+        manager: Any, extension: str, handler: Any, req: RouteRequest, reload: bool
+    ) -> Any:
+        if not reload:
+            return await call_handler(handler, req)
+        # Stop contributed subprocesses before any package files are changed.
+        # Retain the handler locally; reload in finally also restores services
+        # after an installation error. No client-side follow-up is required.
+        async with runtime_lock:
+            await run_in_threadpool(manager.unload, extension)
+            await manager.sync_runtime()
+            try:
+                return await call_handler(handler, req)
+            finally:
+                await run_in_threadpool(manager.reload, extension)
+                await manager.sync_runtime()
 
     @router.api_route("/{extension}/{path:path}", methods=_METHODS)
     async def dispatch(  # noqa: PLR0911 - one exit per HTTP outcome
@@ -103,13 +122,18 @@ def build_router(*, container: Container) -> APIRouter:
             return _error(
                 404, "extensions.route_not_found", f"no route {method} /api/ext/{extension}/{path}"
             )
-        handler, params = found
+        handler, params, decl = found
 
-        raw = await request.body()
-        if len(raw) > _MAX_BODY:
-            return _error(413, "extensions.body_too_large", "request body is too large")
+        raw = await _read_body(request, decl.max_body_mb * 1024 * 1024)
+        if raw is None:
+            return _error(
+                413,
+                "extensions.body_too_large",
+                f"request body is larger than {decl.max_body_mb} MB",
+            )
+        content_type = request.headers.get("content-type", "")
         body: Any = None
-        if raw:
+        if raw and ("json" in content_type or not content_type):
             try:
                 body = json.loads(raw)
             except (ValueError, UnicodeDecodeError):
@@ -123,9 +147,11 @@ def build_router(*, container: Container) -> APIRouter:
             headers={
                 k.lower(): v for k, v in request.headers.items() if k.lower() not in _HIDDEN_HEADERS
             },
+            raw_body=raw,
+            content_type=content_type,
         )
         try:
-            result = await call_handler(handler, req)
+            result = await invoke(manager, extension, handler, req, decl.reload_runtime)
         except Exception as exc:  # noqa: BLE001 - extension code; never crash the server
             _LOG.warning(
                 "user_extensions.route_failed", extension=extension, path=path, exc_info=True
@@ -134,6 +160,25 @@ def build_router(*, container: Container) -> APIRouter:
         return _to_response(result, extension=extension, path=path)
 
     return router
+
+
+async def _read_body(request: Request, limit: int) -> bytes | None:
+    """The body, or ``None`` when it exceeds ``limit`` bytes.
+
+    Checks ``Content-Length`` first and counts while streaming, so an
+    oversize upload is refused without being read into memory.
+    """
+    declared = request.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > limit:
+        return None
+    chunks: list[bytes] = []
+    size = 0
+    async for chunk in request.stream():
+        size += len(chunk)
+        if size > limit:
+            return None
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _serve_ui_file(  # noqa: PLR0911 - one exit per HTTP outcome

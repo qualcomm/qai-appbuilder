@@ -7,6 +7,8 @@
 // zh-CN / zh-TW mirror the en key structure exactly (tsc + parity test).
 
 const extensions = {
+  builtin: "Built-in",
+  builtinHint: "Ships with the app: you can disable it, not uninstall it.",
   title: "Extensions",
   subtitle: "Add your own tools, skills, prompts and MCP servers. Extensions run with the same rights as the app: install only ones you trust.",
   directory: "Folder:",

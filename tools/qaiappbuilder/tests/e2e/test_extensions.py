@@ -106,7 +106,9 @@ def test_the_extension_is_loaded_at_start(be: tuple) -> None:
     ob, cl = be
     body = cl.get("/api/extensions").json()
     assert body["directory"] == str(ob.data_dir / "extensions")
-    (ext,) = body["extensions"]
+    (ext,) = [e for e in body["extensions"] if not e.get("builtin")]
+    builtin = next(e for e in body["extensions"] if e["name"] == "qualcomm-skills")
+    assert builtin["builtin"] is True and builtin["state"] == "loaded"
     assert (ext["name"], ext["state"], ext["tools"], ext["error"]) == (
         "e2e-ext",
         "loaded",
@@ -138,7 +140,7 @@ def test_an_edit_takes_effect_after_reloading_that_extension(be: tuple, llm: Sta
 def test_a_new_extension_appears_after_reloading_all(be: tuple, llm: StandInLLM) -> None:
     ob, cl = be
     _write(ob.data_dir, "late-ext", reply="late", tool="late_ext_hello")
-    names = [e["name"] for e in cl.post("/api/extensions/reload").json()["extensions"]]
+    names = [e["name"] for e in cl.post("/api/extensions/reload").json()["extensions"] if not e.get("builtin")]
     assert names == ["e2e-ext", "late-ext"]
     assert _result(_call(cl, llm, "t-late", "late_ext_hello"))["result"] == "late:e2e"
 

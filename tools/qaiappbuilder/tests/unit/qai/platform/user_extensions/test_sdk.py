@@ -40,6 +40,7 @@ CTX_MEMBERS = {
     "register_tool",
     "register_action",
     "register_route",
+    "register_mcp_server",
     "on_unload",
 }
 

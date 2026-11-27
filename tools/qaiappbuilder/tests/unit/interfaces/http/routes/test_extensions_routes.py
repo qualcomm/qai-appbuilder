@@ -7,12 +7,14 @@
 
 from __future__ import annotations
 
+import io
 import json
 import shutil
 import sys
 import textwrap
 import threading
 import time
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -107,6 +109,7 @@ def test_list(env) -> None:
             "warnings": [],
             "prompts": {},
             "mcp_servers": [],
+            "builtin": False,
         }
     ]
 
@@ -368,3 +371,68 @@ def test_invalid_settings_are_400_with_field_errors(env) -> None:
 
 def test_settings_of_unknown_extension_is_404(env) -> None:
     assert env.client.get("/api/extensions/nope/settings").status_code == 404
+
+
+# -- built-in extensions (factory/extensions) ------------------------------------
+
+
+@pytest.fixture
+def builtin_env(tmp_path: Path):
+    """A container with a repo root: <repo>/factory/extensions holds a built-in."""
+    snapshot = dict(tool_groups.TOOL_GROUP_MEMBERS)
+    repo, data = tmp_path / "repo", tmp_path / "data"
+    _write_ext(repo / "factory", "core-ext", reply="builtin", group="read")
+    tools = RegistryBackedToolInvocation()
+    container = SimpleNamespace(
+        data_paths=SimpleNamespace(root=data), repo_root=repo, user_extensions=None
+    )
+    manager = wire_user_extensions_into_chat(chat=SimpleNamespace(tools=tools), container=container)
+    assert manager is not None
+    app = FastAPI()
+    register_error_handlers(app)
+    app.include_router(extensions.build_router(container=container))
+    yield SimpleNamespace(client=TestClient(app), manager=manager, repo=repo, data=data)
+    manager.unload_all()
+    tool_groups.TOOL_GROUP_MEMBERS.clear()
+    tool_groups.TOOL_GROUP_MEMBERS.update(snapshot)
+    set_contributed_default_modes(None)
+    for mod in [m for m in sys.modules if m.startswith("qai_user_ext_")]:
+        sys.modules.pop(mod, None)
+
+
+def test_builtin_is_listed_marked_and_cannot_be_uninstalled(builtin_env) -> None:
+    listing = builtin_env.client.get("/api/extensions").json()
+    (core,) = listing["extensions"]
+    assert core["name"] == "core-ext" and core["builtin"] is True and core["state"] == "loaded"
+    assert listing["builtin_directory"].endswith(str(Path("factory") / "extensions"))
+
+    r = builtin_env.client.delete("/api/extensions/core-ext?purge_data=true")
+    assert r.status_code == 409 and r.json()["code"] == "extensions.builtin"
+    assert (builtin_env.repo / "factory" / "extensions" / "core-ext").is_dir()
+    # still loaded: the refusal happened before anything was stopped
+    assert builtin_env.client.get("/api/extensions").json()["extensions"][0]["state"] == "loaded"
+
+
+def test_builtin_can_be_disabled_and_enabled(builtin_env) -> None:
+    assert builtin_env.client.post("/api/extensions/core-ext/disable").json()["state"] == "disabled"
+    assert builtin_env.client.post("/api/extensions/core-ext/enable").json()["state"] == "loaded"
+
+
+def test_installing_over_a_builtin_name_is_refused(builtin_env) -> None:
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(
+            "core-ext/extension.json",
+            json.dumps(
+                {"manifest_version": 1, "name": "core-ext", "version": "9", "description": "x"}
+            ),
+        )
+    summary = builtin_env.client.post(
+        "/api/extensions/install/upload", files={"file": ("x.zip", buf.getvalue())}
+    ).json()
+    r = builtin_env.client.post(
+        f"/api/extensions/install/{summary['token']}", json={"replace": True}
+    )
+    assert r.status_code == 409 and r.json()["code"] == "extensions.builtin"
+    assert not (builtin_env.data / "extensions" / "core-ext").exists()

@@ -1,0 +1,52 @@
+{
+  "manifest_version": 1,
+  "name": "qualcomm-skills",
+  "version": "1.0.0",
+  "description": {
+    "en": "Import Qualcomm external skill packages (a ZIP with a README and an MCP wheel) and use them through their MCP servers.",
+    "zh-CN": "导入高通外部技能包（含 README 和 MCP wheel 的 ZIP），通过它们的 MCP 服务使用技能。",
+    "zh-TW": "匯入高通外部技能包（含 README 與 MCP wheel 的 ZIP），透過其 MCP 服務使用技能。"
+  },
+  "entry": "qcskills",
+  "dynamic_mcp_servers": true,
+  "ui": {
+    "label": "Qualcomm Skills",
+    "icon": "🐉",
+    "module": "web/index.js"
+  },
+  "prompts": [
+    {
+      "when": "active",
+      "file": "prompts/active.md"
+    }
+  ],
+  "routes": [
+    {
+      "method": "GET",
+      "path": "packages"
+    },
+    {
+      "method": "POST",
+      "path": "packages/stage",
+      "max_body_mb": 500
+    },
+    {
+      "method": "DELETE",
+      "path": "packages/stage/{token}"
+    },
+    {
+      "method": "POST",
+      "path": "packages/install",
+      "reload_runtime": true
+    },
+    {
+      "method": "DELETE",
+      "path": "packages/{package_id}",
+      "reload_runtime": true
+    },
+    {
+      "method": "GET",
+      "path": "packages/{package_id}/readme"
+    }
+  ]
+}

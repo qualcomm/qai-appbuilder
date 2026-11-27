@@ -65,6 +65,7 @@ dependencies = [
   # MCP SDK: capped below 2.0 -- mcp 2.x removed ``mcp.server.fastmcp`` which
   # the MCP client/installer (chat/adapters/mcp_client.py) relies on.
   "mcp>=1.19,<2.0",
+  "packaging>=24.0",  # Qualcomm skill wheel requirement/version checks
 
   # data / serialization
   "pydantic>=2.7,<3.0",

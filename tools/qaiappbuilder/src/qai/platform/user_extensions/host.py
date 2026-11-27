@@ -40,7 +40,7 @@ import shutil
 import sys
 import time
 import tomllib
-from collections.abc import Awaitable, Callable, Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import MappingProxyType, ModuleType
@@ -48,6 +48,7 @@ from typing import Any, Final, Literal, Protocol
 
 from .manifest import (
     DEFAULT_SKILLS_DIR,
+    MCP_TRANSPORTS,
     PROMPT_MAX_CHARS,
     ExtensionManifest,
     ManifestError,
@@ -61,6 +62,7 @@ __all__ = [
     "ActionCall",
     "ActionResult",
     "ActionValidationError",
+    "BuiltinExtensionError",
     "ExtensionContext",
     "ExtensionError",
     "ExtensionSecrets",
@@ -83,6 +85,11 @@ __all__ = [
 ]
 
 logger = logging.getLogger("qai.platform.user_extensions")
+
+#: Same rule as a manifest ``mcp_servers[].name`` (the app name is ``<ext>-<name>``).
+_MCP_NAME_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+_MCP_NAME_MAX: Final[int] = 64
+_MCP_TIMEOUT_MAX: Final[float] = 600.0
 
 #: ``<ext>/config.toml``: the extension's own read-only defaults.
 CONFIG_FILENAME: Final[str] = "config.toml"
@@ -189,7 +196,9 @@ class RouteRequest:
 
     ``params``: ``{name}`` path parameters. ``query``: query string (last value
     per key). ``body``: the decoded JSON body (``None`` when empty / not JSON).
-    ``headers``: lower-cased request headers, without cookies / authorization.
+    ``raw_body``: the body bytes as sent (an upload, a file); ``content_type``
+    its type. ``headers``: lower-cased request headers, without cookies /
+    authorization.
     """
 
     method: str
@@ -198,6 +207,8 @@ class RouteRequest:
     query: dict[str, str]
     body: Any
     headers: dict[str, str]
+    raw_body: bytes = b""
+    content_type: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,6 +268,9 @@ class ExtensionStatus:
     prompts: dict[str, int] = field(default_factory=dict)
     #: App-wide names (``<extension>-<server>``) of its resolved MCP servers.
     mcp_servers: tuple[str, ...] = ()
+    #: Shipped with the app (``factory/extensions``): can be disabled, never
+    #: uninstalled, and its name always wins over a user extension's.
+    builtin: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -377,6 +391,7 @@ class ExtensionContext:
         self._pending: dict[str, _PendingTool] = {}
         self._actions: dict[str, Callable[[ActionCall], Any]] = {}
         self._routes: dict[tuple[str, str], Callable[[RouteRequest], Any]] = {}
+        self._dynamic_mcp: dict[str, ResolvedMcpServer] = {}
         self._unload: list[Callable[[], None]] = []
         self._config: Mapping[str, Any] | None = None
         self._active = True
@@ -544,6 +559,66 @@ class ExtensionContext:
             raise ExtensionError(f"register_route({method!r}, {path!r}): handler is not callable")
         self._routes[(method, path)] = handler
 
+    def register_mcp_server(
+        self,
+        name: str,
+        *,
+        command: str | None = None,
+        args: Sequence[str] = (),
+        env: Mapping[str, str] | None = None,
+        cwd: str | None = None,
+        url: str | None = None,
+        headers: Mapping[str, str] | None = None,
+        transport: str = "stdio",
+        timeout_s: float = 30.0,
+        secret_env: Sequence[str] = (),
+    ) -> None:
+        """Add an MCP server decided at run time (the manifest must say
+        ``"dynamic_mcp_servers": true``).
+
+        Same rules as a ``mcp_servers[]`` entry, but values are literal (no
+        ``${...}`` placeholders: the code knows the paths). The app-wide name
+        is ``<extension>-<name>``; it is shown read-only in the MCP panel and
+        goes away when the extension is unloaded. ``secret_env``: env keys whose
+        values are credentials (masked wherever the config is shown).
+        """
+        self._require_active("register_mcp_server")
+        where = f"register_mcp_server({name!r})"
+        if not self._manifest.dynamic_mcp_servers:
+            raise ExtensionError(f'{where}: the manifest must declare "dynamic_mcp_servers": true')
+        if not isinstance(name, str) or len(name) > _MCP_NAME_MAX or not _MCP_NAME_RE.match(name):
+            raise ExtensionError(f"{where}: name must match ^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
+        if name in self._dynamic_mcp or any(d.name == name for d in self._manifest.mcp_servers):
+            raise ExtensionError(f"{where}: registered twice (or declared in mcp_servers)")
+        if transport not in MCP_TRANSPORTS:
+            raise ExtensionError(f"{where}: transport must be one of {sorted(MCP_TRANSPORTS)}")
+        if transport == "stdio":
+            if not isinstance(command, str) or not command.strip() or url is not None or headers:
+                raise ExtensionError(f"{where}: stdio needs command (and no url / headers)")
+        elif not isinstance(url, str) or not url.strip() or command is not None or args or env:
+            raise ExtensionError(f"{where}: {transport} needs url (and no command / args / env)")
+        if (
+            not isinstance(timeout_s, (int, float))
+            or isinstance(timeout_s, bool)
+            or not (0 < timeout_s <= _MCP_TIMEOUT_MAX)
+        ):
+            raise ExtensionError(f"{where}: timeout_s must be in (0, 600]")
+        env_map = {str(k): str(v) for k, v in (env or {}).items()}
+        hidden = tuple(k for k in secret_env if k in env_map)
+        self._dynamic_mcp[name] = ResolvedMcpServer(
+            name=f"{self._manifest.name}-{name}",
+            extension=self._manifest.name,
+            transport=transport,
+            command=command,
+            args=tuple(str(a) for a in args),
+            env=env_map,
+            cwd=cwd,
+            url=url,
+            headers={str(k): str(v) for k, v in (headers or {}).items()},
+            timeout_s=float(timeout_s),
+            secret_env_keys=hidden,
+        )
+
     def on_unload(self, callback: Callable[[], None]) -> None:
         """Run ``callback`` when the extension is unloaded or fails to load (newest first)."""
         self._require_active("on_unload")
@@ -566,6 +641,7 @@ class ExtensionContext:
         self._pending.clear()
         self._actions.clear()
         self._routes.clear()
+        self._dynamic_mcp.clear()
         callbacks, self._unload = self._unload, []
         for callback in reversed(callbacks):
             try:
@@ -580,6 +656,11 @@ class ExtensionContext:
 
 class UnknownExtensionError(LookupError):
     """No extension directory (and no loaded extension) has this name."""
+
+
+class BuiltinExtensionError(PermissionError):
+    """The extension ships with the app: it can be disabled, not uninstalled
+    or replaced."""
 
 
 #: ``on_tool_added(name, group)`` / ``on_tool_removed(name)``: let the
@@ -606,6 +687,7 @@ class UserExtensionHost:
         sink: ToolSink,
         *,
         data_root: Path,
+        builtin_root: Path | None = None,
         taken_skill_ids: Callable[[], frozenset[str]] | None = None,
         reserved_tool_names: frozenset[str] = frozenset(),
         on_tool_added: ToolAddedHook | None = None,
@@ -629,8 +711,13 @@ class UserExtensionHost:
         ``is_disabled(name)``: the user's switch, read on every load; a
         disabled extension is recorded with state ``disabled`` and nothing of
         it (code, tools, skills) is loaded.
+
+        ``builtin_root``: the app's own extensions (``factory/extensions``),
+        loaded first and read in place (never copied). A user extension with a
+        built-in's name is refused; built-ins cannot be uninstalled.
         """
         self._scan_root = scan_root
+        self._builtin_root = builtin_root
         self._sink = sink
         self._data_root = data_root
         self._taken_skill_ids = taken_skill_ids or frozenset
@@ -659,7 +746,27 @@ class UserExtensionHost:
 
     @property
     def scan_root(self) -> Path:
+        """The user extensions' directory (installs and uninstalls happen here)."""
         return self._scan_root
+
+    @property
+    def builtin_root(self) -> Path | None:
+        return self._builtin_root
+
+    def builtin_names(self) -> frozenset[str]:
+        """Names of the built-in extensions on disk (enabled or not)."""
+        if self._builtin_root is None:
+            return frozenset()
+        return frozenset(p.name for p in discover_extension_dirs(self._builtin_root))
+
+    def is_builtin(self, name: str) -> bool:
+        return name in self.builtin_names()
+
+    def _all_dirs(self) -> list[Path]:
+        """Built-in directories first, then user ones; a user directory whose
+        name a built-in uses is still listed (it is refused when loaded)."""
+        builtin = discover_extension_dirs(self._builtin_root) if self._builtin_root else []
+        return builtin + discover_extension_dirs(self._scan_root)
 
     @property
     def statuses(self) -> tuple[ExtensionStatus, ...]:
@@ -698,7 +805,7 @@ class UserExtensionHost:
         :class:`UnknownExtensionError` when there is no such directory;
         :class:`ManifestError` when its manifest is invalid.
         """
-        for ext_dir in discover_extension_dirs(self._scan_root):
+        for ext_dir in self._all_dirs():  # built-in first: it owns the name
             if ext_dir.name == name:
                 return load_manifest(ext_dir)
         raise UnknownExtensionError(name)
@@ -725,10 +832,15 @@ class UserExtensionHost:
     def load_all(self) -> tuple[ExtensionStatus, ...]:
         """Load every extension directory not loaded yet (sorted by name).
 
-        A directory whose previous attempt failed is tried again.
+        A directory whose previous attempt failed is tried again. Built-in
+        extensions come first, so a user extension can never take their name.
         """
-        for ext_dir in discover_extension_dirs(self._scan_root):
+        builtin = self.builtin_names()
+        for ext_dir in self._all_dirs():
             if self._loaded_from(ext_dir):
+                continue
+            if ext_dir.parent == self._scan_root and ext_dir.name in builtin:
+                logger.warning("user_extensions.name_taken_by_builtin dir=%s (ignored)", ext_dir)
                 continue
             self._statuses.pop(ext_dir.name, None)  # a previous failure
             self._record(self.load(ext_dir))
@@ -759,9 +871,12 @@ class UserExtensionHost:
 
         ``purge_data`` also deletes ``<data>/extensions-data/<name>`` and every
         secret in its namespace. Raises :class:`UnknownExtensionError` when
-        there is no such directory. The directory must sit directly in the
-        scan root (a link pointing elsewhere is unlinked, not followed).
+        there is no such directory, :class:`BuiltinExtensionError` for a
+        built-in one. The directory must sit directly in the scan root (a link
+        pointing elsewhere is unlinked, not followed).
         """
+        if self.is_builtin(name):
+            raise BuiltinExtensionError(name)
         ext_dir = self._scan_root / name
         if not ext_dir.exists() and not ext_dir.is_symlink() and name not in self._statuses:
             raise UnknownExtensionError(name)
@@ -813,7 +928,7 @@ class UserExtensionHost:
         return any(s.root == ext_dir and s.state != "failed" for s in list(self._statuses.values()))
 
     def _ext_dir(self, name: str) -> Path:
-        for ext_dir in discover_extension_dirs(self._scan_root):
+        for ext_dir in self._all_dirs():  # built-in first: it owns the name
             if ext_dir.name == name:
                 return ext_dir
         # Not on disk any more, but still loaded: reload == unload.
@@ -842,19 +957,22 @@ class UserExtensionHost:
         A host-side failure after tools were committed (e.g. the skill scan)
         unloads the extension again and is reported in its status.
         """
+        builtin = self._builtin_root is not None and ext_dir.parent == self._builtin_root
         try:
-            return self._load(ext_dir)
+            status = self._load(ext_dir)
         except KeyboardInterrupt:
             raise
         except BaseException as exc:
             logger.warning("user_extensions.load_failed dir=%s", ext_dir, exc_info=True)
             self.unload(ext_dir.name)
-            return ExtensionStatus(
+            status = ExtensionStatus(
                 name=ext_dir.name,
                 root=ext_dir,
                 state="failed",
                 error=f"host error: {type(exc).__name__}: {exc}",
             )
+        status.builtin = builtin
+        return status
 
     def _load(self, ext_dir: Path) -> ExtensionStatus:  # noqa: PLR0911, PLR0912, PLR0915 - one exit per outcome
         if not ext_dir.is_dir():
@@ -1036,23 +1154,24 @@ class UserExtensionHost:
 
     def route_handler(
         self, name: str, method: str, path: str
-    ) -> tuple[Callable[[RouteRequest], Any], dict[str, str]] | None:
-        """``(handler, path params)`` for a request to a loaded extension's
-        route; literal routes win over parameterised ones. ``None`` if none."""
+    ) -> tuple[Callable[[RouteRequest], Any], dict[str, str], Any] | None:
+        """``(handler, path params, declaration)`` for a request to a loaded
+        extension's route; literal routes win over parameterised ones.
+        ``None`` if none."""
         status = self._statuses.get(name)
         ctx = self._contexts.get(name)
         if status is None or status.state != "loaded" or ctx is None:
             return None
-        matches: list[tuple[int, Callable[[RouteRequest], Any], dict[str, str]]] = []
+        matches: list[tuple[int, Callable[[RouteRequest], Any], dict[str, str], Any]] = []
         for decl in ctx._manifest.routes:
             handler = ctx._routes.get((decl.method, decl.path))
             params = decl.match(method, path) if handler is not None else None
             if handler is not None and params is not None:
-                matches.append((len(params), handler, params))
+                matches.append((len(params), handler, params, decl))
         if not matches:
             return None
         matches.sort(key=lambda m: m[0])
-        return matches[0][1], matches[0][2]
+        return matches[0][1], matches[0][2], matches[0][3]
 
     def route_methods(self, name: str, path: str) -> set[str]:
         """Methods with a handler at ``path`` (for a 405 + ``Allow``)."""
@@ -1106,6 +1225,10 @@ class UserExtensionHost:
                 resolved.append(self._resolve_mcp(manifest, decl))
             except ExtensionError as exc:
                 status.warnings.append(f"mcp server {decl.name!r} not started: {exc}")
+        # Servers the code added at run time (ctx.register_mcp_server).
+        ctx = self._contexts.get(manifest.name)
+        if ctx is not None:
+            resolved.extend(ctx._dynamic_mcp[k] for k in sorted(ctx._dynamic_mcp))
         if resolved:
             self._mcp[manifest.name] = tuple(resolved)
         else:

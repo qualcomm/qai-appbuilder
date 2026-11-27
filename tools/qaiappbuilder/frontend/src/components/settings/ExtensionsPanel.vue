@@ -383,6 +383,12 @@ onMounted(refresh);
                 class="ext-badge"
               >v{{ ext.version }}</span>
               <span
+                v-if="ext.builtin"
+                class="ext-badge ext-badge--builtin"
+                :data-testid="`ext-builtin-${ext.name}`"
+                :title="t('extensions.builtinHint')"
+              >{{ t("extensions.builtin") }}</span>
+              <span
                 class="ext-badge"
                 :class="`ext-badge--${ext.state}`"
               >{{ stateLabel(ext) }}</span>
@@ -461,6 +467,7 @@ onMounted(refresh);
             {{ busy === ext.name ? t("extensions.action.working") : t("extensions.action.reload") }}
           </button>
           <button
+            v-if="!ext.builtin"
             type="button"
             class="btn btn-ghost btn-sm ext-danger"
             :disabled="!!busy"
@@ -768,6 +775,7 @@ onMounted(refresh);
 .ext-dot--err { background: var(--error); }
 .ext-badge { font-size: var(--text-xs); padding: 0 var(--space-2); border: 1px solid var(--border); border-radius: var(--radius-sm, 4px); color: var(--text-secondary); }
 .ext-badge--failed { color: var(--error); border-color: var(--error); }
+.ext-badge--builtin { color: var(--accent); border-color: var(--accent); }
 .ext-chip { display: inline-block; margin: 0 var(--space-1) var(--space-1) 0; padding: 0 var(--space-2); border-radius: var(--radius-sm, 4px); background: var(--bg-tertiary, var(--bg-primary)); font-size: var(--text-xs); }
 .ext-check { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
 </style>

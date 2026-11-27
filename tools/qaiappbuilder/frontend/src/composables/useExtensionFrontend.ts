@@ -17,6 +17,9 @@
  *                         Use render functions (no template compiler).
  *   api.fetch(path, init) fetch `/api/ext/<name>/<path>` (the extension's own HTTP
  *                         routes) with the session + CSRF handled by the host
+ *   api.upload(path, file) POST raw ZIP bytes to an extension route
+ *   api.mcpStatus()       read the global MCP status
+ *   api.setMcpEnabled(on) update the global MCP enabled switch
  *   api.settings.get()    the user's non-secret settings (`GET .../settings`)
  *   api.panel(spec)       register the extension's panel (`{title, component}`)
  *   api.toast.success|error(text)
@@ -35,7 +38,7 @@
 import * as Vue from "vue";
 import { markRaw, reactive, type Component } from "vue";
 
-import { apiJson } from "@/api/http";
+import { apiBytes, apiJson } from "@/api/http";
 import { useToast } from "@/composables/useToast";
 
 export interface ExtensionPanelSpec {
@@ -89,9 +92,22 @@ function buildApi(name: string, entry: Loaded) {
     async fetch(path: string, init: { method?: string; body?: unknown } = {}): Promise<unknown> {
       const clean = path.replace(/^\/+/, "");
       if (clean.split("/").includes("..")) throw new Error("path must stay inside the extension");
-      const method = (init.method ?? "GET").toUpperCase() as "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+      const method = (init.method ?? "GET").toUpperCase() as
+        | "GET"
+        | "POST"
+        | "PUT"
+        | "PATCH"
+        | "DELETE";
       return apiJson(method, base + clean, init.body);
     },
+    async upload(path: string, file: Blob): Promise<unknown> {
+      const clean = path.replace(/^\/+/, "");
+      if (clean.split("/").includes("..")) throw new Error("path must stay inside the extension");
+      return apiBytes(base + clean, file);
+    },
+    mcpStatus: (): Promise<unknown> => apiJson("GET", "/api/chat/mcp/servers"),
+    setMcpEnabled: (enabled: boolean): Promise<unknown> =>
+      apiJson("PATCH", "/api/chat/mcp/enabled", { enabled }),
     settings: Object.freeze({
       get: async (): Promise<Record<string, unknown>> => {
         const r = await apiJson<{ settings: { key: string; type: string; value?: unknown }[] }>(

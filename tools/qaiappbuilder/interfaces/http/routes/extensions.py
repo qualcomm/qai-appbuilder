@@ -61,6 +61,7 @@ from qai.platform.errors import (
 from qai.platform.logging import get_logger
 from qai.platform.user_extensions import (
     ActionValidationError,
+    BuiltinExtensionError,
     ExtensionStatus,
     InstallError,
     ManifestError,
@@ -112,6 +113,7 @@ def status_to_wire(status: ExtensionStatus) -> dict[str, Any]:
         "warnings": list(status.warnings),
         "prompts": dict(status.prompts),
         "mcp_servers": list(status.mcp_servers),
+        "builtin": status.builtin,
     }
 
 
@@ -131,6 +133,7 @@ def build_router(*, container: Container) -> APIRouter:  # noqa: PLR0915 - one c
     def _listing(manager: UserExtensionManager) -> dict[str, Any]:
         return {
             "directory": str(manager.host.scan_root),
+            "builtin_directory": str(manager.host.builtin_root or ""),
             "extensions": [status_to_wire(s) for s in manager.statuses],
         }
 
@@ -152,6 +155,11 @@ def build_router(*, container: Container) -> APIRouter:  # noqa: PLR0915 - one c
             result = await run_in_threadpool(fn, *args, **kwargs)
         except UnknownExtensionError:
             raise NotFoundError("extensions.not_found", "extension", name) from None
+        except BuiltinExtensionError:
+            raise ConflictError(
+                "extensions.builtin",
+                f"{name} ships with the app: it can be disabled, not uninstalled or replaced",
+            ) from None
         except ManifestError as exc:
             raise ValidationError("extensions.invalid_manifest", str(exc)) from None
         except SettingsValidationError as exc:
@@ -262,6 +270,11 @@ def build_router(*, container: Container) -> APIRouter:  # noqa: PLR0915 - one c
     @router.delete("/{name}", status_code=204)
     async def remove(name: str, purge_data: bool = False) -> Response:
         manager = _manager()
+        if manager.host.is_builtin(name):  # refuse before stopping anything
+            raise ConflictError(
+                "extensions.builtin",
+                f"{name} ships with the app: it can be disabled, not uninstalled",
+            )
         # Stop its MCP server processes BEFORE the directory is deleted (a
         # running process can keep Windows from deleting files it uses).
         await _run(name, manager.unload, name)

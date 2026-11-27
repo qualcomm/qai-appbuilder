@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 import textwrap
@@ -200,3 +201,89 @@ def test_undeclared_route_fails_the_load(env) -> None:
     status = env.manager.reload("demo-ext")
     assert status.state == "failed" and "not declared in the manifest's routes" in status.error
     assert env.client.get("/api/ext/demo-ext/status").status_code == 404
+
+
+# -- raw bodies and per-route size limits ------------------------------------------
+
+
+def _upload_env(tmp_path: Path, max_body_mb: Any = 1):
+    ext = tmp_path / "extensions" / "up-ext"
+    ext.mkdir(parents=True)
+    route: dict[str, Any] = {"method": "POST", "path": "upload"}
+    if max_body_mb is not None:
+        route["max_body_mb"] = max_body_mb
+    (ext / "extension.json").write_text(
+        json.dumps(
+            {**_manifest(name="up-ext"), "routes": [route, {"method": "POST", "path": "small"}]}
+        ),
+        encoding="utf-8",
+    )
+    (ext / "main.py").write_text(
+        textwrap.dedent(
+            """
+            import hashlib
+
+            def activate(ctx):
+                def upload(req):
+                    return {"size": len(req.raw_body), "sha": hashlib.sha256(req.raw_body).hexdigest(),
+                            "type": req.content_type, "json": req.body}
+                ctx.register_route("POST", "upload", upload)
+                ctx.register_route("POST", "small", lambda req: {"size": len(req.raw_body)})
+            """
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_raw_body_and_content_type_reach_the_handler(tmp_path: Path) -> None:
+
+    _upload_env(tmp_path)
+    client, manager = _client(tmp_path)
+    try:
+        data = bytes(range(256)) * 1000  # binary, not JSON
+        r = client.post(
+            "/api/ext/up-ext/upload", content=data, headers={"Content-Type": "application/zip"}
+        )
+        assert r.status_code == 200, r.text
+        got = r.json()
+        assert got["size"] == len(data) and got["sha"] == hashlib.sha256(data).hexdigest()
+        assert got["type"] == "application/zip" and got["json"] is None
+        # JSON still decoded into body, raw bytes still there
+        j = client.post("/api/ext/up-ext/upload", json={"a": 1}).json()
+        assert j["json"] == {"a": 1} and j["size"] > 0
+    finally:
+        manager.unload_all()
+
+
+def test_route_body_limit_is_per_route(tmp_path: Path) -> None:
+    _upload_env(tmp_path, max_body_mb=2)
+    client, manager = _client(tmp_path)
+    try:
+        mb = 1024 * 1024
+        assert client.post("/api/ext/up-ext/upload", content=b"x" * (mb + 10)).status_code == 200
+        r = client.post("/api/ext/up-ext/upload", content=b"x" * (2 * mb + 1))
+        assert r.status_code == 413 and "2 MB" in r.json()["message"]
+        # the other route keeps the 10 MB default
+        assert client.post("/api/ext/up-ext/small", content=b"x" * (3 * mb)).status_code == 200
+        assert client.post("/api/ext/up-ext/small", content=b"x" * (10 * mb + 1)).status_code == 413
+    finally:
+        manager.unload_all()
+
+
+@pytest.mark.parametrize("bad", [0, 1025, True, "5", 1.5])
+def test_bad_max_body_mb(bad: Any) -> None:
+    with pytest.raises(ManifestError, match="max_body_mb"):
+        parse_manifest(
+            _manifest(routes=[{"method": "POST", "path": "u", "max_body_mb": bad}]),
+            root=Path("/x/demo-ext"),
+        )
+
+
+def _client(tmp_path: Path):
+    container = SimpleNamespace(data_paths=SimpleNamespace(root=tmp_path), user_extensions=None)
+    manager = wire_user_extensions_into_chat(
+        chat=SimpleNamespace(tools=RegistryBackedToolInvocation()), container=container
+    )
+    app = FastAPI()
+    app.include_router(extension_routes.build_router(container=container))
+    return TestClient(app), manager

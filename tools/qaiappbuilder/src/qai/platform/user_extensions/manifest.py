@@ -104,11 +104,15 @@ _TOP_KEYS: Final[frozenset[str]] = frozenset(
         "prompts",
         "settings",
         "mcp_servers",
+        "dynamic_mcp_servers",
         "ui",
         "routes",
     }
 )
-_ROUTE_KEYS: Final[frozenset[str]] = frozenset({"method", "path"})
+_ROUTE_KEYS: Final[frozenset[str]] = frozenset({"method", "path", "max_body_mb", "reload_runtime"})
+#: Default / ceiling of one request body for an extension route (MB).
+ROUTE_BODY_DEFAULT_MB: Final[int] = 10
+ROUTE_BODY_MAX_MB: Final[int] = 1024
 ROUTE_METHODS: Final[frozenset[str]] = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
 #: ``status``, ``hosts/{host_id}``: lowercase segments, ``{param}`` captures one segment.
 _ROUTE_SEGMENT_RE: Final[re.Pattern[str]] = re.compile(
@@ -219,6 +223,9 @@ class RouteDeclaration:
 
     method: str
     path: str
+    #: Largest request body this route accepts (an upload route raises it).
+    max_body_mb: int = ROUTE_BODY_DEFAULT_MB
+    reload_runtime: bool = False
 
     @property
     def segments(self) -> tuple[str, ...]:
@@ -318,6 +325,9 @@ class ExtensionManifest:
     mcp_servers: tuple[McpServerDeclaration, ...] = ()
     ui: UiDeclaration | None = None
     routes: tuple[RouteDeclaration, ...] = ()
+    #: The extension's code may add MCP servers at run time
+    #: (``ctx.register_mcp_server``); shown at install so the user knows.
+    dynamic_mcp_servers: bool = False
 
     def route(self, method: str, path: str) -> RouteDeclaration | None:
         return next((r for r in self.routes if r.method == method and r.path == path), None)
@@ -382,10 +392,23 @@ def parse_manifest(raw: Any, *, root: Path) -> ExtensionManifest:
         settings=(settings := _parse_settings(obj.get("settings"))),
         mcp_servers=_parse_mcp_servers(obj.get("mcp_servers"), settings),
         routes=_parse_routes(obj.get("routes"), has_entry=entry is not None),
+        dynamic_mcp_servers=_parse_dynamic_mcp(obj.get("dynamic_mcp_servers"), entry),
     )
 
 
-def _parse_routes(raw: Any, *, has_entry: bool) -> tuple[RouteDeclaration, ...]:
+def _parse_dynamic_mcp(raw: Any, entry: str | None) -> bool:
+    if raw is None:
+        return False
+    if not isinstance(raw, bool):
+        raise ManifestError("dynamic_mcp_servers must be true or false")
+    if raw and entry is None:
+        raise ManifestError("dynamic_mcp_servers requires entry (the code that registers them)")
+    return raw
+
+
+def _parse_routes(  # noqa: PLR0912 - validate each independent route field
+    raw: Any, *, has_entry: bool
+) -> tuple[RouteDeclaration, ...]:
     if raw is None:
         return ()
     if not isinstance(raw, list):
@@ -416,7 +439,19 @@ def _parse_routes(raw: Any, *, has_entry: bool) -> tuple[RouteDeclaration, ...]:
         names = [s[1:-1] for s in segments if s.startswith("{")]
         if len(names) != len(set(names)):
             raise ManifestError(f"{where}.path {path!r} repeats a parameter name")
-        decl = RouteDeclaration(method=method, path=path)
+        max_mb = entry.get("max_body_mb", ROUTE_BODY_DEFAULT_MB)
+        if (
+            isinstance(max_mb, bool)
+            or not isinstance(max_mb, int)
+            or not 1 <= max_mb <= ROUTE_BODY_MAX_MB
+        ):
+            raise ManifestError(f"{where}.max_body_mb must be an integer 1..{ROUTE_BODY_MAX_MB}")
+        reload_runtime = entry.get("reload_runtime", False)
+        if not isinstance(reload_runtime, bool):
+            raise ManifestError(f"{where}.reload_runtime must be a boolean")
+        decl = RouteDeclaration(
+            method=method, path=path, max_body_mb=max_mb, reload_runtime=reload_runtime
+        )
         shape = tuple("{}" if s.startswith("{") else s for s in segments)
         for other in out:
             if (

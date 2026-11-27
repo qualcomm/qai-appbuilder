@@ -61,6 +61,7 @@ from qai.platform.skills import (
 )
 from qai.platform.user_extensions import (
     STATE_FILENAME,
+    BuiltinExtensionError,
     ExtensionInstaller,
     ExtensionStateStore,
     ExtensionStatus,
@@ -74,11 +75,13 @@ from qai.platform.user_extensions import (
 from ._global_proxy import build_global_proxy_provider, build_ssl_verify_provider
 
 __all__ = [
+    "BUILTIN_EXTENSIONS_DIR",
     "EXTENSIONS_DIRNAME",
     "RESERVED_TOOL_NAMES",
     "RegistryToolSink",
     "UserExtensionManager",
     "build_user_extension_host",
+    "builtin_extensions_root",
     "extension_skill_roots",
     "prompt_addenda_for",
     "sync_extension_mcp",
@@ -90,6 +93,8 @@ _T = TypeVar("_T")
 
 #: ``<data>/extensions``.
 EXTENSIONS_DIRNAME = "extensions"
+#: ``<repo_root>/factory/extensions``: built-in extensions (design doc 4.16).
+BUILTIN_EXTENSIONS_DIR = Path("factory") / "extensions"
 #: ``SkillInfo.source`` prefix for extension-provided skills.
 SKILL_SOURCE_PREFIX = "extension:"
 #: ``McpServerStatus.source`` prefix for extension-provided MCP servers.
@@ -130,6 +135,7 @@ def build_user_extension_host(
     *,
     tools: Any,
     data_root: Path,
+    builtin_root: Path | None = None,
     app_skill_dirs: list[Path] | None = None,
     state: ExtensionStateStore | None = None,
     secret_store: Any = None,
@@ -148,6 +154,7 @@ def build_user_extension_host(
         data_root / EXTENSIONS_DIRNAME,
         RegistryToolSink(tools),
         data_root=data_root,
+        builtin_root=builtin_root,
         taken_skill_ids=_taken_skill_ids,
         reserved_tool_names=RESERVED_TOOL_NAMES,
         on_tool_added=_join_group,
@@ -266,6 +273,8 @@ class UserExtensionManager:
         def op() -> ExtensionStatus:
             installer = self.installer
             name = installer.staged(token).manifest.name
+            if self._host.is_builtin(name):
+                raise BuiltinExtensionError(name)
             if replace:
                 self._host.unload(name)
             installer.commit(token, replace=replace)
@@ -359,6 +368,7 @@ def wire_user_extensions_into_chat(*, chat: Any, container: Any) -> UserExtensio
         host = build_user_extension_host(
             tools=tools,
             data_root=data_root,
+            builtin_root=builtin_extensions_root(container),
             app_skill_dirs=_app_skill_dirs(container),
             state=state,
             secret_store=getattr(container, "secret_store", None),
@@ -382,6 +392,16 @@ def wire_user_extensions_into_chat(*, chat: Any, container: Any) -> UserExtensio
     with contextlib.suppress(Exception):
         container.user_extensions = manager
     return manager
+
+
+def builtin_extensions_root(container: Any) -> Path | None:
+    """``<repo_root>/factory/extensions``: the extensions shipped with the app
+    (read in place, packaged with ``factory/``). ``None`` when the container
+    has no repo root (stripped-down test containers)."""
+    repo_root = getattr(container, "repo_root", None)
+    if repo_root is None:
+        return None
+    return Path(repo_root) / BUILTIN_EXTENSIONS_DIR
 
 
 async def sync_extension_mcp(container: Any) -> None:

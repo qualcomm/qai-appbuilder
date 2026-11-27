@@ -7,6 +7,8 @@
 // zh-CN / zh-TW mirror the en key structure exactly (tsc + parity test).
 
 const extensions = {
+  builtin: "內建",
+  builtinHint: "隨應用程式提供：可以停用，無法解除安裝。",
   title: "擴充",
   subtitle: "加入你自己的工具、技能、提示詞和 MCP 伺服器。擴充與應用程式同權限執行：只安裝可信的擴充。",
   directory: "目錄：",

@@ -10,8 +10,9 @@
  *   apiRaw(method, path, opts?) → Response
  *   apiBlob(method, path, opts?) → Blob
  *   apiUpload<TRes>(path, formData, opts?) → TRes
+ *   apiBytes<TRes>(path, blob, opts?) → TRes
  *
- * All four:
+ * All five:
  *   - prepend `apiBaseUrl()` to relative paths so dev (Vite proxy) and
  *     prod (same-origin) both work without per-call wiring;
  *   - inject the `X-QAI-CSRF` header on state-mutating methods when the
@@ -57,14 +58,7 @@ export type QueryValue =
   | ReadonlyArray<string | number | boolean>;
 
 /** HTTP methods we generate convenience signatures for. */
-export type ApiMethod =
-  | "GET"
-  | "HEAD"
-  | "POST"
-  | "PUT"
-  | "PATCH"
-  | "DELETE"
-  | "OPTIONS";
+export type ApiMethod = "GET" | "HEAD" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS";
 
 // ---------------------------------------------------------------------------
 // URL / header construction
@@ -77,10 +71,7 @@ export type ApiMethod =
  * point at non-default origins explicitly when needed (still subject to
  * the host:port lint rule, which exempts `vite.config.ts` only).
  */
-export function buildApiUrl(
-  path: string,
-  query: ApiRequestOptions["query"],
-): string {
+export function buildApiUrl(path: string, query: ApiRequestOptions["query"]): string {
   let url: string;
   if (/^https?:\/\//i.test(path) || path.startsWith("//")) {
     url = path;
@@ -168,7 +159,7 @@ export function setAuthRequiredHandler(handler: (() => void) | null): void {
 // ---------------------------------------------------------------------------
 // Auth readiness gate — suppresses the 401 flood on initial page load.
 // ---------------------------------------------------------------------------
-// Business API requests (apiJson, apiRaw, apiBlob, apiUpload) wait for this
+// Business API requests (apiJson, apiRaw, apiBlob, apiUpload, apiBytes) wait for this
 // gate before firing. Without it, the SPA dispatches dozens of requests the
 // instant it mounts (conversations, models, config…), all of which 401 before
 // the user has a chance to sign in — flooding the console with errors and
@@ -412,15 +403,34 @@ export async function apiUpload<TRes = unknown>(
   formData: FormData,
   opts: ApiRequestOptions = {},
 ): Promise<TRes> {
+  return postUpload<TRes>(path, formData, null, opts);
+}
+
+/** POST raw ZIP bytes (no multipart envelope), with a JSON response. */
+export async function apiBytes<TRes = unknown>(
+  path: string,
+  blob: Blob,
+  opts: ApiRequestOptions = {},
+): Promise<TRes> {
+  return postUpload<TRes>(path, blob, "application/zip", opts);
+}
+
+/** Shared upload auth, CSRF, transport and response/error handling. */
+async function postUpload<TRes>(
+  path: string,
+  body: FormData | Blob,
+  contentType: string | null,
+  opts: ApiRequestOptions,
+): Promise<TRes> {
   await waitForAuth(path);
   const method: ApiMethod = "POST";
   const url = buildApiUrl(path, opts.query);
-  // Pass `null` for content-type so the browser sets it with the boundary.
-  const headers = buildHeaders(method, opts.headers, null, true);
-  // Belt-and-braces: if the caller pre-set Content-Type, drop it — the
-  // boundary would be wrong.
-  if (headers.has("Content-Type")) {
+  const headers = buildHeaders(method, opts.headers, contentType, true);
+  // Multipart needs the browser's boundary; raw ZIP always uses application/zip.
+  if (contentType === null) {
     headers.delete("Content-Type");
+  } else {
+    headers.set("Content-Type", contentType);
   }
   let response: Response;
   try {
@@ -429,7 +439,7 @@ export async function apiUpload<TRes = unknown>(
       headers,
       credentials: opts.credentials ?? "same-origin",
       signal: opts.signal,
-      body: formData,
+      body,
     });
   } catch (cause) {
     throw await parseAndInterceptApiError(cause);
