@@ -19,6 +19,9 @@
   no extension code.
 * ``POST /api/extensions/install/folder`` -- ``{"path": "..."}``: the same
   for a local folder (the backend runs on the user's machine).
+* ``POST /api/extensions/install/folder-upload`` -- multipart: parallel
+  ``files`` + ``paths`` fields, a folder picked in the browser (works when
+  the browser is not on the backend's machine).
 * ``POST /api/extensions/install/{token}`` -- ``{"replace": bool}``: install
   the staged extension and load it; ``409 extensions.exists`` when one with
   that name is installed and ``replace`` is false.
@@ -48,9 +51,10 @@ import io
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, File, Response, UploadFile
+from fastapi import APIRouter, File, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 from starlette.concurrency import run_in_threadpool
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from qai.platform.errors import (
     ConflictError,
@@ -69,6 +73,7 @@ from qai.platform.user_extensions import (
     UnknownExtensionError,
     run_action,
 )
+from qai.platform.user_extensions.installer import MAX_FILES
 
 _LOG = get_logger("interfaces.http.extensions")
 
@@ -219,6 +224,25 @@ def build_router(*, container: Container) -> APIRouter:  # noqa: PLR0915 - one c
                 "extensions.too_large", f"the archive is larger than {_MAX_UPLOAD_BYTES} bytes"
             )
         summary: dict[str, Any] = await _run("upload", manager.stage_zip, io.BytesIO(data))
+        return summary
+
+    @router.post("/install/folder-upload")
+    async def install_folder_upload(request: Request) -> dict[str, Any]:
+        manager = _manager()
+        # Parallel lists: ``files`` (content) and ``paths`` (path inside the picked folder).
+        form = await request.form(max_files=MAX_FILES + 1, max_fields=MAX_FILES + 16)
+        # ``request.form()`` yields Starlette's class (FastAPI's UploadFile is a subclass of it).
+        uploads = [f for f in form.getlist("files") if isinstance(f, StarletteUploadFile)]
+        paths = [str(p) for p in form.getlist("paths")]
+        try:
+            if not uploads or len(uploads) != len(paths):
+                raise ValidationError(
+                    "extensions.bad_folder_upload", "the folder upload is empty or inconsistent"
+                )
+            entries = [(path, up.file) for path, up in zip(paths, uploads, strict=True)]
+            summary: dict[str, Any] = await _run("folder", manager.stage_files, entries)
+        finally:
+            await form.close()
         return summary
 
     @router.post("/install/folder")

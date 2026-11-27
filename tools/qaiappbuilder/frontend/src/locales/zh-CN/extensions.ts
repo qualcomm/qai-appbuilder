@@ -12,7 +12,6 @@ const extensions = {
   title: "扩展",
   subtitle: "添加你自己的工具、技能、提示词和 MCP 服务器。扩展与应用同权限运行：只安装可信的扩展。",
   directory: "目录：",
-  folderPlaceholder: "扩展文件夹路径（包含 extension.json）",
   empty: {
     title: "还没有安装扩展。",
     hint: "添加 .zip 或文件夹，或直接放进上面的目录后点「全部重新加载」。",
@@ -46,7 +45,6 @@ const extensions = {
     addZip: "添加 .zip…",
     addFolder: "添加文件夹…",
     reloadAll: "全部重新加载",
-    next: "下一步",
     details: "详情",
     less: "收起",
     settings: "配置",

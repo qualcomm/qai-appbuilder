@@ -34,7 +34,7 @@ import stat
 import time
 import zipfile
 import zlib
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import IO, Any, Final
@@ -175,6 +175,22 @@ class ExtensionInstaller:
         try:
             files, total = _copy_tree(src, work / "raw")
             return self._finish(token, work, work / "raw", files=files, total=total)
+        except BaseException:
+            _rmtree(work)
+            raise
+
+    def stage_files(self, entries: Iterable[tuple[str, IO[bytes]]]) -> StagedExtension:
+        """Stage a folder the browser picked: ``(relative path, content)`` pairs.
+
+        Same rules as an archive: unsafe paths are refused, ``__pycache__`` /
+        ``.git`` are skipped, the file count and total size are capped.
+        """
+        token, work = self._new_work_dir()
+        raw = work / "raw"
+        raw.mkdir()
+        try:
+            files, total = _write_entries(entries, raw)
+            return self._finish(token, work, _find_root(raw), files=files, total=total)
         except BaseException:
             _rmtree(work)
             raise
@@ -346,6 +362,34 @@ def _safe_extract(zf: zipfile.ZipFile, dest: Path) -> tuple[int, int]:
                     )
                 out.write(chunk)
         files += 1
+    return files, total
+
+
+_SKIPPED_DIRS: Final[frozenset[str]] = frozenset({"__pycache__", ".git"})
+
+
+def _write_entries(entries: Iterable[tuple[str, IO[bytes]]], dest: Path) -> tuple[int, int]:
+    files = total = 0
+    dest_resolved = dest.resolve()
+    for name, content in entries:
+        rel = _safe_member(name)
+        if rel is None or _SKIPPED_DIRS.intersection(rel.parts):
+            continue
+        target = dest.joinpath(*rel.parts)
+        if not target.resolve().is_relative_to(dest_resolved):
+            raise InstallError("extensions.unsafe_folder", f"{name!r} escapes the folder")
+        files += 1
+        if files > MAX_FILES:
+            raise InstallError("extensions.too_many_files", f"more than {MAX_FILES} files")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("wb") as out:
+            while chunk := content.read(1 << 16):
+                total += len(chunk)
+                if total > MAX_TOTAL_BYTES:
+                    raise InstallError(
+                        "extensions.too_large", f"more than {MAX_TOTAL_BYTES} bytes"
+                    )
+                out.write(chunk)
     return files, total
 
 

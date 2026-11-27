@@ -131,6 +131,18 @@ export function stageExtensionZip(file: File): Promise<InstallSummary> {
   return apiUpload<InstallSummary>(`${BASE}/install/upload`, form);
 }
 
+/** A folder chosen with the browser's directory picker (`webkitdirectory`). */
+export function stageExtensionFolderFiles(files: readonly File[]): Promise<InstallSummary> {
+  const form = new FormData();
+  for (const file of files) {
+    // `webkitRelativePath` is `<picked folder>/<path inside>`; drop the picked folder's name.
+    const rel = file.webkitRelativePath || file.name;
+    form.append("files", file, file.name);
+    form.append("paths", rel.split("/").slice(1).join("/") || file.name);
+  }
+  return apiUpload<InstallSummary>(`${BASE}/install/folder-upload`, form);
+}
+
 export function stageExtensionFolder(path: string): Promise<InstallSummary> {
   return apiJson<InstallSummary, { path: string }>("POST", `${BASE}/install/folder`, { path });
 }

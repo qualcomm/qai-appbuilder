@@ -12,7 +12,6 @@ const extensions = {
   title: "擴充",
   subtitle: "加入你自己的工具、技能、提示詞和 MCP 伺服器。擴充與應用程式同權限執行：只安裝可信的擴充。",
   directory: "目錄：",
-  folderPlaceholder: "擴充資料夾路徑（包含 extension.json）",
   empty: {
     title: "尚未安裝擴充。",
     hint: "加入 .zip 或資料夾，或直接放進上方目錄後按「全部重新載入」。",
@@ -46,7 +45,6 @@ const extensions = {
     addZip: "加入 .zip…",
     addFolder: "加入資料夾…",
     reloadAll: "全部重新載入",
-    next: "下一步",
     details: "詳細",
     less: "收合",
     settings: "設定",

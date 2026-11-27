@@ -418,6 +418,56 @@ def test_builtin_can_be_disabled_and_enabled(builtin_env) -> None:
     assert builtin_env.client.post("/api/extensions/core-ext/enable").json()["state"] == "loaded"
 
 
+def _folder_form(files: dict[str, str]) -> list[tuple[str, tuple[str, bytes] | str]]:
+    form: list[tuple[str, tuple[str, bytes] | str]] = []
+    for path, content in files.items():
+        form.append(("files", (path.rsplit("/", 1)[-1], content.encode())))
+    return form
+
+
+def test_folder_upload_stages_then_installs_a_browser_picked_folder(builtin_env) -> None:
+    manifest = {"manifest_version": 1, "name": "picked-ext", "version": "1.0.0", "description": "x"}
+    files = {"extension.json": json.dumps(manifest), "notes/readme.txt": "hi"}
+    r = builtin_env.client.post(
+        "/api/extensions/install/folder-upload",
+        files=_folder_form(files),
+        data={"paths": list(files)},
+    )
+    assert r.status_code == 200, r.text
+    summary = r.json()
+    assert summary["name"] == "picked-ext" and summary["files"] == 2
+    assert not (builtin_env.data / "extensions" / "picked-ext").exists()  # staged only
+    done = builtin_env.client.post(
+        f"/api/extensions/install/{summary['token']}", json={"replace": False}
+    )
+    assert done.status_code == 200 and done.json()["state"] == "loaded"
+    assert (builtin_env.data / "extensions" / "picked-ext" / "notes" / "readme.txt").is_file()
+
+
+def test_folder_upload_refuses_bad_requests(builtin_env) -> None:
+    post = builtin_env.client.post
+    empty = post("/api/extensions/install/folder-upload", data={"paths": []})
+    assert empty.status_code == 400 and empty.json()["code"] == "extensions.bad_folder_upload"
+    mismatch = post(
+        "/api/extensions/install/folder-upload",
+        files=_folder_form({"extension.json": "{}"}),
+        data={"paths": ["extension.json", "extra"]},
+    )
+    assert mismatch.status_code == 400 and mismatch.json()["code"] == "extensions.bad_folder_upload"
+    escape = post(
+        "/api/extensions/install/folder-upload",
+        files=_folder_form({"extension.json": "{}", "evil.py": "x"}),
+        data={"paths": ["extension.json", "../evil.py"]},
+    )
+    assert escape.status_code == 400 and escape.json()["code"] == "extensions.unsafe_archive"
+    nomanifest = post(
+        "/api/extensions/install/folder-upload",
+        files=_folder_form({"main.py": "x"}),
+        data={"paths": ["main.py"]},
+    )
+    assert nomanifest.status_code == 400 and nomanifest.json()["code"] == "extensions.no_manifest"
+
+
 def test_installing_over_a_builtin_name_is_refused(builtin_env) -> None:
 
     buf = io.BytesIO()

@@ -197,6 +197,63 @@ def test_stage_folder_copies_without_links_and_caches(root: Path, tmp_path: Path
     assert (src / "main.py").exists()  # the source is left alone
 
 
+def _entries(files: dict[str, str | bytes]) -> list[tuple[str, io.BytesIO]]:
+    return [(n, io.BytesIO(c.encode() if isinstance(c, str) else c)) for n, c in files.items()]
+
+
+def test_stage_files_from_a_browser_picked_folder(root: Path) -> None:
+    files = {
+        **_ext_files(),
+        "__pycache__/main.cpython-313.pyc": b"x",
+        "sub/__pycache__/m.pyc": b"x",
+        ".git/config": b"x",
+    }
+    installer = ExtensionInstaller(root)
+    staged = installer.stage_files(_entries(files))
+    assert staged.manifest.name == "demo-ext" and staged.files == 3
+    assert staged.skills == ("demo-skill",)
+    installer.commit(staged.token)
+    assert (root / "demo-ext" / "main.py").is_file()
+    assert not (root / "demo-ext" / "__pycache__").exists()
+    assert not (root / "demo-ext" / ".git").exists()
+    assert not any(p.name == "raw" for p in installer.staging_root.rglob("*"))
+
+
+@pytest.mark.parametrize(
+    ("name", "code"),
+    [
+        ("../evil.py", "extensions.unsafe_archive"),
+        ("a/../../evil.py", "extensions.unsafe_archive"),
+        ("C:/evil.py", "extensions.unsafe_archive"),
+        ("/abs/evil.py", "extensions.unsafe_archive"),
+    ],
+)
+def test_stage_files_refuses_unsafe_paths(root: Path, name: str, code: str) -> None:
+    installer = ExtensionInstaller(root)
+    with pytest.raises(InstallError) as exc:
+        installer.stage_files(_entries({**_ext_files(), name: b"x"}))
+    assert exc.value.code == code
+    assert not any(installer.staging_root.iterdir())  # nothing left behind
+    assert not (root.parent / "evil.py").exists()
+
+
+def test_stage_files_limits_and_missing_manifest(root: Path, monkeypatch) -> None:
+    installer = ExtensionInstaller(root)
+    with pytest.raises(InstallError) as exc:
+        installer.stage_files(_entries({"main.py": "x"}))
+    assert exc.value.code == "extensions.no_manifest"
+    monkeypatch.setattr(inst, "MAX_FILES", 2)
+    with pytest.raises(InstallError) as exc:
+        installer.stage_files(_entries(_ext_files()))
+    assert exc.value.code == "extensions.too_many_files"
+    monkeypatch.setattr(inst, "MAX_FILES", 5000)
+    monkeypatch.setattr(inst, "MAX_TOTAL_BYTES", 10)
+    with pytest.raises(InstallError) as exc:
+        installer.stage_files(_entries(_ext_files()))
+    assert exc.value.code == "extensions.too_large"
+    assert not any(installer.staging_root.iterdir())
+
+
 def test_stage_folder_refusals(root: Path, tmp_path: Path) -> None:
     installer = ExtensionInstaller(root)
     with pytest.raises(InstallError) as exc:

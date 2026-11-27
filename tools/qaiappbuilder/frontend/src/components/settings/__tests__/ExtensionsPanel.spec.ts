@@ -18,7 +18,7 @@ vi.mock("@/api/extensions", () => ({
   getExtensionSettings: vi.fn(),
   saveExtensionSettings: vi.fn(),
   stageExtensionZip: vi.fn(),
-  stageExtensionFolder: vi.fn(),
+  stageExtensionFolderFiles: vi.fn(),
   confirmExtensionInstall: vi.fn(),
   discardExtensionInstall: vi.fn(),
 }));
@@ -104,6 +104,35 @@ describe("ExtensionsPanel", () => {
     await flushPromises();
     expect(m.confirmExtensionInstall).toHaveBeenCalledWith("0123456789abcdef", false);
     expect(w.find('[data-testid="ext-card-zip-ext"]').exists()).toBe(true);
+  });
+
+  it("Add folder opens the system folder picker and stages the chosen files", async () => {
+    const summary: InstallSummary = {
+      token: "fedcba9876543210", name: "dir-ext", version: "1.0.0", description: "d",
+      runs_code: false, tools: [], skills: [], prompts: [], settings: [], mcp_servers: [],
+      installed_version: null, replaces: false, files: 2, bytes: 10, warnings: [],
+    };
+    m.stageExtensionFolderFiles.mockResolvedValue(summary);
+    const w = mountPanel();
+    await flushPromises();
+    const input = w.get('[data-testid="ext-folder-input"]');
+    expect(input.attributes("type")).toBe("file");
+    expect(input.attributes()).toHaveProperty("webkitdirectory");
+    expect(w.find('input[type="text"]').exists()).toBe(false); // no typed path box any more
+    const clicked = vi.spyOn(input.element as HTMLInputElement, "click");
+    const addFolder = w.findAll("button").find((b) => b.text().includes("folder"));
+    await addFolder!.trigger("click");
+    expect(clicked).toHaveBeenCalled();
+
+    const files = [new File(["{}"], "extension.json"), new File(["x"], "main.py")];
+    Object.defineProperty(input.element, "files", { value: files, configurable: true });
+    await input.trigger("change");
+    await flushPromises();
+    expect(m.stageExtensionFolderFiles).toHaveBeenCalledWith(files);
+    expect(document.querySelector('[data-testid="ext-install-dialog"]')?.textContent).toContain(
+      "dir-ext",
+    );
+    expect(m.confirmExtensionInstall).not.toHaveBeenCalled();
   });
 
   it("uninstall sends the purge choice", async () => {

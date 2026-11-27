@@ -12,7 +12,6 @@ const extensions = {
   title: "Extensions",
   subtitle: "Add your own tools, skills, prompts and MCP servers. Extensions run with the same rights as the app: install only ones you trust.",
   directory: "Folder:",
-  folderPlaceholder: "Path to an extension folder (contains extension.json)",
   empty: {
     title: "No extensions installed.",
     hint: "Add a .zip or a folder, or put one into the folder above and click Reload all.",
@@ -46,7 +45,6 @@ const extensions = {
     addZip: "Add .zip…",
     addFolder: "Add folder…",
     reloadAll: "Reload all",
-    next: "Next",
     details: "Details",
     less: "Less",
     settings: "Settings",

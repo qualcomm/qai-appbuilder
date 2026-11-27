@@ -255,6 +255,10 @@ class UserExtensionManager:
         """Unpack + validate an archive; returns the capability summary. Runs no code."""
         return self.installer.stage_zip(archive).summary()
 
+    def stage_files(self, entries: Any) -> dict[str, Any]:
+        """Validate a folder the browser uploaded as files. Runs no code."""
+        return self.installer.stage_files(entries).summary()
+
     def stage_folder(self, folder: Path) -> dict[str, Any]:
         """Copy + validate a local folder; returns the capability summary. Runs no code."""
         return self.installer.stage_folder(folder).summary()

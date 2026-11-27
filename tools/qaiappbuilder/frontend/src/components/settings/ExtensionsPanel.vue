@@ -28,7 +28,7 @@ import {
   reloadExtension,
   saveExtensionSettings,
   setExtensionEnabled,
-  stageExtensionFolder,
+  stageExtensionFolderFiles,
   stageExtensionZip,
   uninstallExtension,
   type ExtensionSetting,
@@ -214,8 +214,7 @@ function toggleClearSecret(key: string): void {
 
 // ── Add (stage -> confirm) ───────────────────────────────────────────────
 const fileInput = ref<HTMLInputElement | null>(null);
-const showFolder = ref(false);
-const folderPath = ref("");
+const folderInput = ref<HTMLInputElement | null>(null);
 const staged = ref<InstallSummary | null>(null);
 
 async function onPickZip(event: Event): Promise<void> {
@@ -227,15 +226,13 @@ async function onPickZip(event: Event): Promise<void> {
   if (summary) staged.value = summary;
 }
 
-async function onStageFolder(): Promise<void> {
-  const path = folderPath.value.trim();
-  if (!path) return;
-  const summary = await run("+", () => stageExtensionFolder(path));
-  if (summary) {
-    staged.value = summary;
-    showFolder.value = false;
-    folderPath.value = "";
-  }
+async function onPickFolder(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const files = Array.from(input.files ?? []);
+  input.value = "";
+  if (files.length === 0) return;
+  const summary = await run("+", () => stageExtensionFolderFiles(files));
+  if (summary) staged.value = summary;
 }
 
 async function confirmInstall(): Promise<void> {
@@ -304,11 +301,20 @@ onMounted(refresh);
         >
           {{ t("extensions.action.addZip") }}
         </button>
+        <input
+          ref="folderInput"
+          type="file"
+          webkitdirectory
+          multiple
+          class="ext-hidden"
+          data-testid="ext-folder-input"
+          @change="onPickFolder"
+        />
         <button
           type="button"
           class="btn btn-ghost btn-sm"
           :disabled="!!busy"
-          @click="showFolder = !showFolder"
+          @click="folderInput?.click()"
         >
           {{ t("extensions.action.addFolder") }}
         </button>
@@ -322,26 +328,6 @@ onMounted(refresh);
         </button>
       </div>
     </header>
-
-    <form
-      v-if="showFolder"
-      class="ext-folder"
-      @submit.prevent="onStageFolder"
-    >
-      <input
-        v-model="folderPath"
-        class="input"
-        :placeholder="t('extensions.folderPlaceholder')"
-        data-testid="ext-folder-input"
-      />
-      <button
-        type="submit"
-        class="btn btn-primary btn-sm"
-        :disabled="!folderPath.trim() || !!busy"
-      >
-        {{ t("extensions.action.next") }}
-      </button>
-    </form>
 
     <p
       v-if="loading && extensions.length === 0"
@@ -754,8 +740,6 @@ onMounted(refresh);
 .ext-panel__actions { display: flex; gap: var(--space-2); align-items: flex-start; flex-wrap: wrap; }
 .ext-panel__empty { padding: var(--space-6); text-align: center; border: 1px dashed var(--border); border-radius: var(--radius-md, 8px); }
 .ext-hidden { display: none; }
-.ext-folder { display: flex; gap: var(--space-2); }
-.ext-folder .input { flex: 1; }
 .ext-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
 .ext-card { display: flex; justify-content: space-between; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-md, 8px); background: var(--bg-secondary); flex-wrap: wrap; }
 .ext-card--off { opacity: 0.65; }
