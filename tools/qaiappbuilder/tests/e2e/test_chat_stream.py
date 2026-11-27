@@ -351,6 +351,29 @@ def test_the_tool_mode_query_changes_the_system_prompt(chat: tuple, conv: Callab
     assert plain != code and len(code) < len(plain), "the code mode builds a different (shorter) prompt"
 
 
+# A prompt that the keyword detector reads as a model-conversion task (QAIRT / QNN / quantize).
+_MODEL_BUILD_TEXT = "[echo] QAIRT development environment setup requirements"
+
+
+def _mode_changes(t: Turn) -> list[str]:
+    return [f["payload"].get("mode") for f in t.frames("tool_mode_changed")]
+
+
+def test_without_any_mode_a_model_build_prompt_still_switches_the_toolbar(chat: tuple, conv: Callable) -> None:
+    """Unchanged behaviour: in NO mode, the detector may promote the turn to the model builder."""
+    _ob, cl = chat
+    t = run_turn(cl, conv(), "t-det", _MODEL_BUILD_TEXT)
+    assert t.status == 200 and _mode_changes(t) == ["model_build"]
+
+
+def test_an_extension_mode_is_not_switched_to_the_model_builder(chat: tuple, conv: Callable) -> None:
+    """An extension chosen by the user (e.g. Qualcomm Skills) is authoritative, like a built-in mode."""
+    _ob, cl = chat
+    t = run_turn(cl, conv(), "t-ext", _MODEL_BUILD_TEXT, active_extensions='["qualcomm-skills"]')
+    assert t.status == 200 and t.text.startswith("ECHO:")
+    assert _mode_changes(t) == [], "an extension mode must not be yanked into the model builder"
+
+
 # --------------------------------------------------------------------------
 # upstream failures
 # --------------------------------------------------------------------------

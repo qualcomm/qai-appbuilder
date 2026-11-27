@@ -4468,9 +4468,21 @@ class StreamChatUseCase:
         #      tool_mode_changed → UI yanked into 模型构建器). Consistent with
         #      the ``_self_contained`` gate at the agentic-loop level.
         #
+        #  (3) The user selected a user-extension mode (Composer "Extension" menu;
+        #      sent as ``active_extensions`` with an empty ``tool_mode``). That is a
+        #      mode the user chose too, exclusive with the built-in ones, so it is
+        #      authoritative as well: e.g. in Qualcomm Skills, asking about "QAIRT
+        #      setup" must not yank the toolbar into 模型构建器 (which would also
+        #      drop the extension's mode on the front end).
+        #
         # Ordinary cloud/local chat with NO active mode is unaffected —
         # auto-detect still runs and can flip the toolbar exactly as before.
-        if requested_tool_mode or _is_self_contained_agent(request.model_hint):
+        _extension_mode_selected = bool((request.extra or {}).get("active_extensions"))
+        if (
+            requested_tool_mode
+            or _extension_mode_selected
+            or _is_self_contained_agent(request.model_hint)
+        ):
             effective_mode = requested_tool_mode
         else:
             effective_mode = self._detect_effective_mode(

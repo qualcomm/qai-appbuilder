@@ -1592,7 +1592,11 @@ class RichSystemPromptBuilder(SystemPromptBuilderPort):
         # ``_MODEL_BUILD_FALLBACK`` text already instructs the model to read
         # the model-builder SKILL.md on demand when the request truly needs it.
         auto_detected = False
-        if not effective_mode and self.auto_detect_model_build:
+        # A selected user-extension mode (``active_extensions``) is a mode the
+        # user chose, exclusive with the built-in ones: never auto-classify it
+        # (e.g. "QAIRT setup" inside Qualcomm Skills is not a model-build turn).
+        extension_mode = bool(extra.get("active_extensions"))
+        if not effective_mode and self.auto_detect_model_build and not extension_mode:
             latest = extra.get("latest_user_message")
             if isinstance(latest, str):
                 detected = _auto_detect_tool_mode(latest)
