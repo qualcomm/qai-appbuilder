@@ -207,55 +207,57 @@ async function submit(): Promise<void> {
       <!-- Default mode buttons are part of this same left-hand group and
            disappear while an extension mode is selected. -->
       <slot />
-      <button
-        type="button"
-        class="rit-btn"
-        :class="{ 'rit-btn--active': open }"
-        data-testid="ext-menu-btn"
-        :aria-expanded="open"
-        @click="toggleMenu"
-      >
-        <span aria-hidden="true">🧩</span>
-        <span>{{ t("extensions.mode.button") }}</span>
-        <span aria-hidden="true">▾</span>
-      </button>
-      <div
-        v-if="open"
-        class="ext-mode__menu"
-        role="menu"
-        data-testid="ext-menu"
-      >
-        <button
-          v-for="e in modes.entries.value"
-          :key="e.name"
-          type="button"
-          role="menuitem"
-          class="ext-mode__item"
-          :title="e.description"
-          :data-testid="`ext-menu-item-${e.name}`"
-          @click="pick(e.name)"
-        >
-          <span
-            class="ext-mode__icon"
-            aria-hidden="true"
-          >{{ e.icon || "🧩" }}</span>
-          <span>{{ e.label }}</span>
-        </button>
-        <p
-          v-if="modes.entries.value.length === 0"
-          class="ext-mode__empty"
-        >
-          {{ t("extensions.mode.none") }}
-        </p>
-        <hr class="ext-mode__sep" />
+      <div class="ext-mode__anchor">
         <button
           type="button"
-          role="menuitem"
-          class="ext-mode__item"
-          @click="openSettings"
+          class="rit-btn"
+          :class="{ 'rit-btn--active': open }"
+          data-testid="ext-menu-btn"
+          :aria-expanded="open"
+          @click="toggleMenu"
         >
-          {{ t("extensions.mode.settings") }}
+          <span aria-hidden="true">🧩</span>
+          <span>{{ t("extensions.mode.button") }}</span>
+          <span aria-hidden="true">▾</span>
         </button>
+        <div
+          v-if="open"
+          class="ext-mode__menu"
+          role="menu"
+          data-testid="ext-menu"
+        >
+          <button
+            v-for="e in modes.entries.value"
+            :key="e.name"
+            type="button"
+            role="menuitem"
+            class="ext-mode__item"
+            :title="e.description"
+            :data-testid="`ext-menu-item-${e.name}`"
+            @click="pick(e.name)"
+          >
+            <span
+              class="ext-mode__icon"
+              aria-hidden="true"
+            >{{ e.icon || "🧩" }}</span>
+            <span>{{ e.label }}</span>
+          </button>
+          <p
+            v-if="modes.entries.value.length === 0"
+            class="ext-mode__empty"
+          >
+            {{ t("extensions.mode.none") }}
+          </p>
+          <hr class="ext-mode__sep" />
+          <button
+            type="button"
+            role="menuitem"
+            class="ext-mode__item"
+            @click="openSettings"
+          >
+            {{ t("extensions.mode.settings") }}
+          </button>
+        </div>
       </div>
     </template>
 
@@ -389,6 +391,8 @@ async function submit(): Promise<void> {
 
 <style>
 .ext-mode { position: relative; flex: 1; min-width: 0; flex-wrap: wrap; }
+/* Anchor the popover to its button, not the entire left-hand toolbar. */
+.ext-mode__anchor { position: relative; display: inline-flex; flex-shrink: 0; }
 /* Flatten the default button component into the same flex flow, so narrow
    windows wrap entries instead of pushing the send controls off-screen. */
 .ext-mode > .rit-left { display: contents; }
