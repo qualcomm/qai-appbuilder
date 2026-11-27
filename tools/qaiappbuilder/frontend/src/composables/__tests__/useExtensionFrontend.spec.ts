@@ -11,7 +11,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const apiJson = vi.fn();
 vi.mock("@/api/http", () => ({ apiJson: (...a: unknown[]) => apiJson(...a) }));
 const toast = { success: vi.fn(), error: vi.fn() };
+const uiState = { locale: "en" };
 vi.mock("@/composables/useToast", () => ({ useToast: () => toast }));
+vi.mock("@/stores/ui", () => ({ useUiStore: () => uiState }));
 
 import {
   __resetExtensionFrontendForTests,
@@ -33,6 +35,7 @@ const fe = useExtensionFrontend();
 
 beforeEach(() => {
   vi.clearAllMocks();
+  uiState.locale = "en";
   __resetExtensionFrontendForTests();
 });
 
@@ -59,13 +62,19 @@ describe("loading", () => {
     expect(fe.errorOf("a-ext")).toContain("no activate()");
     expect(fe.isLoaded("a-ext")).toBe(false);
 
-    await loadExtensionFrontend("b-ext", mod("export function activate() { throw new Error('boom'); }"));
+    await loadExtensionFrontend(
+      "b-ext",
+      mod("export function activate() { throw new Error('boom'); }"),
+    );
     expect(fe.errorOf("b-ext")).toBe("boom");
     expect(fe.panelOf("b-ext")).toBeNull();
   });
 
-  it("a bare `import \"vue\"` is the documented mistake and is reported", async () => {
-    await loadExtensionFrontend("c-ext", mod('import { h } from "vue"; export function activate() {}'));
+  it('a bare `import "vue"` is the documented mistake and is reported', async () => {
+    await loadExtensionFrontend(
+      "c-ext",
+      mod('import { h } from "vue"; export function activate() {}'),
+    );
     expect(fe.errorOf("c-ext")).not.toBe("");
     expect(fe.isLoaded("c-ext")).toBe(false);
   });
@@ -74,13 +83,18 @@ describe("loading", () => {
     (globalThis as Record<string, unknown>).__d = 0;
     await loadExtensionFrontend(
       "d-ext",
-      mod("export function activate(api) { api.onDispose(() => { globalThis.__d++; }); throw new Error('x'); }"),
+      mod(
+        "export function activate(api) { api.onDispose(() => { globalThis.__d++; }); throw new Error('x'); }",
+      ),
     );
     expect((globalThis as Record<string, unknown>).__d).toBe(1);
   });
 
   it("api.panel rejects a malformed spec", async () => {
-    await loadExtensionFrontend("e-ext", mod("export function activate(api) { api.panel({ title: 3 }); }"));
+    await loadExtensionFrontend(
+      "e-ext",
+      mod("export function activate(api) { api.panel({ title: 3 }); }"),
+    );
     expect(fe.errorOf("e-ext")).toContain("panel(");
   });
 });
@@ -116,9 +130,17 @@ describe("reload / unload", () => {
   });
 
   it("sync loads what the server lists and drops what went away", async () => {
-    const a = mod("export function activate(api) { api.panel({ title: 'A', component: api.vue.defineComponent({ render: () => null }) }); }");
-    const b = mod("export function activate(api) { api.panel({ title: 'B', component: api.vue.defineComponent({ render: () => null }) }); }");
-    await syncExtensionFrontends([{ name: "a-ext", module: a }, { name: "b-ext", module: b }, { name: "n-ext", module: null }]);
+    const a = mod(
+      "export function activate(api) { api.panel({ title: 'A', component: api.vue.defineComponent({ render: () => null }) }); }",
+    );
+    const b = mod(
+      "export function activate(api) { api.panel({ title: 'B', component: api.vue.defineComponent({ render: () => null }) }); }",
+    );
+    await syncExtensionFrontends([
+      { name: "a-ext", module: a },
+      { name: "b-ext", module: b },
+      { name: "n-ext", module: null },
+    ]);
     expect(fe.isLoaded("a-ext") && fe.isLoaded("b-ext")).toBe(true);
     expect(fe.isLoaded("n-ext")).toBe(false);
 
@@ -130,7 +152,10 @@ describe("reload / unload", () => {
 
 describe("the api handed to the module", () => {
   async function api<T>(body: string): Promise<T> {
-    await loadExtensionFrontend("x-ext", mod(`export async function activate(api) { globalThis.__api = api; ${body} }`));
+    await loadExtensionFrontend(
+      "x-ext",
+      mod(`export async function activate(api) { globalThis.__api = api; ${body} }`),
+    );
     return (globalThis as Record<string, unknown>).__api as T;
   }
 
@@ -154,14 +179,18 @@ describe("the api handed to the module", () => {
     expect(await a.settings.get()).toEqual({ endpoint: "https://a" });
   });
 
-  it("toast, sendPrompt and the frozen host vue", async () => {
+  it("exposes the active locale, toast, sendPrompt and the frozen host vue", async () => {
     const send = vi.fn();
     setExtensionPromptSender(send);
     const a = await api<{
+      locale: string;
       toast: { success: (t: string) => void; error: (t: string) => void };
       sendPrompt: (t: string) => void;
       vue: Record<string, unknown>;
     }>("");
+    expect(a.locale).toBe("en");
+    uiState.locale = "zh-TW";
+    expect(a.locale).toBe("zh-TW");
     a.toast.success("ok");
     a.toast.error("bad");
     a.sendPrompt("hello");
@@ -169,7 +198,10 @@ describe("the api handed to the module", () => {
     expect(toast.success).toHaveBeenCalledWith("ok");
     expect(toast.error).toHaveBeenCalledWith("bad");
     expect(send.mock.calls).toEqual([["hello"]]);
-    expect(Object.isFrozen(a.vue) && typeof a.vue.h === "function" && typeof a.vue.ref === "function").toBe(true);
+    expect(
+      Object.isFrozen(a.vue) && typeof a.vue.h === "function" && typeof a.vue.ref === "function",
+    ).toBe(true);
+    expect(Object.isFrozen(a)).toBe(true);
     expect(() => {
       "use strict";
       (a as unknown as Record<string, unknown>).name = "other";

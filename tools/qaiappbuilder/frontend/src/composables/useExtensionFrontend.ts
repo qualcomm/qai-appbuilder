@@ -11,6 +11,7 @@
  * hands it `api` -- the extension's whole view of the host:
  *
  *   api.name              the extension's name
+ *   api.locale            the active UI locale (`en`, `zh-CN`, or `zh-TW`)
  *   api.vue               the HOST's Vue (h, ref, computed, ...). The module must NOT
  *                         `import "vue"`: a bare specifier does not resolve in the
  *                         browser, and a second Vue copy would break reactivity.
@@ -40,6 +41,7 @@ import { markRaw, reactive, type Component } from "vue";
 
 import { apiBytes, apiJson } from "@/api/http";
 import { useToast } from "@/composables/useToast";
+import { useUiStore } from "@/stores/ui";
 
 export interface ExtensionPanelSpec {
   /** Shown in the panel header. */
@@ -88,6 +90,9 @@ function buildApi(name: string, entry: Loaded) {
   const base = `/api/ext/${encodeURIComponent(name)}/`;
   return Object.freeze({
     name,
+    get locale() {
+      return useUiStore().locale;
+    },
     vue: HOST_VUE,
     async fetch(path: string, init: { method?: string; body?: unknown } = {}): Promise<unknown> {
       const clean = path.replace(/^\/+/, "");

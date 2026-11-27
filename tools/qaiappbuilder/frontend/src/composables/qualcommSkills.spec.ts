@@ -16,8 +16,12 @@ const activate = new Function(
 
 function panel() {
   let component: any;
+  const locale = Vue.ref("zh-CN");
   const api = {
     vue: Vue,
+    get locale() {
+      return locale.value;
+    },
     panel: (spec: any) => {
       component = spec.component;
     },
@@ -46,7 +50,7 @@ function panel() {
     setMcpEnabled: vi.fn(async () => ({ enabled: true })),
   };
   activate(api);
-  return { api, wrapper: mount(component) };
+  return { api, locale, wrapper: mount(component) };
 }
 
 async function click(wrapper: any, label: string) {
@@ -69,7 +73,9 @@ describe("Qualcomm skills route-A panel", () => {
     await flushPromises();
     expect(api.upload).toHaveBeenCalledWith("packages/stage?filename=outer%20file.zip", file);
     expect(wrapper.text()).toContain("inner.zip");
-    expect(wrapper.text()).toContain("缺少依赖 missing");
+    expect(wrapper.text()).toContain("依赖安装包");
+    expect(wrapper.text()).toContain("缺少依赖");
+    expect(wrapper.find('[aria-label="安装预览"]').exists()).toBe(true);
     expect(wrapper.get("pre").text()).toBe("<img src=x onerror=unsafe()>");
     expect(wrapper.find("img").exists()).toBe(false);
     expect(api.fetch).not.toHaveBeenCalledWith("packages/install", expect.anything());
@@ -82,6 +88,54 @@ describe("Qualcomm skills route-A panel", () => {
     await click(wrapper, "一键开启 MCP");
     expect(api.setMcpEnabled).toHaveBeenCalledWith(true);
     expect(api.fetch.mock.calls.some(([path]) => path.includes("reload"))).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("renders the preview in the active language and switches when locale changes", async () => {
+    const { locale, wrapper } = panel();
+    await flushPromises();
+    const input = wrapper.get('input[type="file"]');
+    Object.defineProperty(input.element, "files", {
+      value: [new File(["zip"], "demo.zip")],
+      configurable: true,
+    });
+    await input.trigger("change");
+    await flushPromises();
+    expect(wrapper.text()).toContain("依赖安装包");
+    expect(wrapper.text()).toContain("安装预览");
+    locale.value = "en";
+    await Vue.nextTick();
+    expect(wrapper.text()).toContain("Installation preview");
+    expect(wrapper.text()).toContain("Required packages");
+    expect(wrapper.find('[aria-label="Installation preview"]').exists()).toBe(true);
+    expect(wrapper.get("details").get("summary").text()).toBe("README (plain text)");
+    wrapper.unmount();
+  });
+
+  it("collapses preview README by default and cancels without installing", async () => {
+    const { api, wrapper } = panel();
+    await flushPromises();
+    const input = wrapper.get('input[type="file"]');
+    Object.defineProperty(input.element, "files", {
+      value: [new File(["zip"], "demo.zip")],
+      configurable: true,
+    });
+    await input.trigger("change");
+    await flushPromises();
+    const details = wrapper.get("details");
+    expect((details.element as HTMLDetailsElement).open).toBe(false);
+    expect(details.get("summary").text()).toBe("README（纯文本）");
+    // Native details toggling is handled by the browser, not jsdom.
+    (details.element as HTMLDetailsElement).open = true;
+    await wrapper.get('input[type="checkbox"]').setValue(true);
+    expect((wrapper.get("details").element as HTMLDetailsElement).open).toBe(true);
+    await click(wrapper, "取消");
+    expect(wrapper.find('[aria-label="安装预览"]').exists()).toBe(false);
+    expect(api.fetch).not.toHaveBeenCalledWith("packages/install", expect.anything());
+    await input.trigger("change");
+    await flushPromises();
+    expect((wrapper.get("details").element as HTMLDetailsElement).open).toBe(false);
+    expect((wrapper.get('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(false);
     wrapper.unmount();
   });
 

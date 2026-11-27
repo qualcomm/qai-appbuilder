@@ -3,7 +3,11 @@
 
 // Route A: use the host's Vue instance; no bare imports or template compiler.
 export function activate(api) {
-  const { h, ref, onMounted } = api.vue;
+  const { h, ref, computed, onMounted } = api.vue;
+  const isEnglish = computed(() =>
+    String(api.locale || "zh-CN").startsWith("en"),
+  );
+  const tr = (zh, en) => (isEnglish.value ? en : zh);
   const list = (value) => (Array.isArray(value) ? value : []);
   const text = (value) => (value == null ? "—" : String(value));
   const message = (error) =>
@@ -29,7 +33,7 @@ export function activate(api) {
   };
 
   api.panel({
-    title: "Qualcomm 技能包",
+    title: "Qualcomm Skills / Qualcomm 技能包",
     component: {
       name: "QualcommSkillsPanel",
       setup() {
@@ -64,10 +68,15 @@ export function activate(api) {
             mcpEnabled.value =
               typeof status?.enabled === "boolean" ? status.enabled : null;
             mcpError.value =
-              mcpEnabled.value === null ? "无法确认 MCP 总开关状态。" : "";
+              mcpEnabled.value === null
+                ? tr(
+                    "无法确认 MCP 总开关状态。",
+                    "Unable to determine the global MCP status.",
+                  )
+                : "";
           } catch (err) {
             mcpEnabled.value = null;
-            mcpError.value = `读取 MCP 状态失败：${message(err)}`;
+            mcpError.value = `${tr("读取 MCP 状态失败：", "Failed to read MCP status: ")}${message(err)}`;
           }
         }
 
@@ -78,7 +87,7 @@ export function activate(api) {
         }
 
         async function refresh() {
-          await run("刷新", async () => {
+          await run(tr("刷新", "Refresh"), async () => {
             await Promise.all([refreshPackages(), refreshMcp()]);
           });
         }
@@ -90,17 +99,25 @@ export function activate(api) {
           staged.value = null;
           allowNetwork.value = false;
           if (!/\.zip$/i.test(file.name) || file.size === 0) {
-            error.value = "请选择非空 ZIP 文件。";
+            error.value = tr(
+              "请选择非空 ZIP 文件。",
+              "Please select a non-empty ZIP file.",
+            );
             api.toast.error(error.value);
             return;
           }
-          await run("上传并解析", async () => {
+          await run(tr("上传并解析", "Upload and inspect"), async () => {
             const response = await api.upload(
               `packages/stage?filename=${encodeURIComponent(file.name)}`,
               file,
             );
             if (!response?.preview || !response?.token)
-              throw new Error("服务端未返回有效预览，请重新上传。");
+              throw new Error(
+                tr(
+                  "服务端未返回有效预览，请重新上传。",
+                  "The server returned no valid preview. Please upload again.",
+                ),
+              );
             staged.value = { preview: response.preview, token: response.token };
           });
         }
@@ -108,7 +125,7 @@ export function activate(api) {
         async function install() {
           const current = staged.value;
           if (!current || current.preview.python_ok === false) return;
-          await run("安装", async () => {
+          await run(tr("安装", "Install"), async () => {
             const response = await api.fetch("packages/install", {
               method: "POST",
               body: { token: current.token, allow_network: allowNetwork.value },
@@ -126,26 +143,36 @@ export function activate(api) {
                 installed,
               ];
             }
-            api.toast.success("技能包已安装；后端已同步 MCP，无需重新加载。");
+            api.toast.success(
+              tr(
+                "技能包已安装；后端已同步 MCP，无需重新加载。",
+                "Skill package installed; MCP was synced by the backend.",
+              ),
+            );
             await Promise.all([refreshPackages(), refreshMcp()]);
           });
         }
 
         async function remove(item) {
-          await run("删除", async () => {
+          await run(tr("删除", "Delete"), async () => {
             await api.fetch(`packages/${encodeURIComponent(item.id)}`, {
               method: "DELETE",
             });
             packages.value = packages.value.filter((pkg) => pkg.id !== item.id);
             deleteId.value = null;
             if (readme.value?.id === item.id) readme.value = null;
-            api.toast.success("技能包已删除；后端已同步 MCP。");
+            api.toast.success(
+              tr(
+                "技能包已删除；后端已同步 MCP。",
+                "Skill package deleted; MCP was synced by the backend.",
+              ),
+            );
             await Promise.all([refreshPackages(), refreshMcp()]);
           });
         }
 
         async function showReadme(item) {
-          await run("读取 README", async () => {
+          await run(tr("读取 README", "Read README"), async () => {
             const response = await api.fetch(
               `packages/${encodeURIComponent(item.id)}/readme`,
             );
@@ -154,7 +181,10 @@ export function activate(api) {
               typeof response === "string" ? response : response?.readme;
             if (typeof content !== "string")
               throw new Error(
-                "README 接口需返回 JSON {readme}；可先在上传预览中查看。",
+                tr(
+                  "README 接口需返回 JSON {readme}；可先在上传预览中查看。",
+                  "The README endpoint must return JSON {readme}. You can view it in the upload preview.",
+                ),
               );
             readme.value = {
               id: item.id,
@@ -165,11 +195,13 @@ export function activate(api) {
         }
 
         async function enableMcp() {
-          await run("开启 MCP", async () => {
+          await run(tr("开启 MCP", "Enable MCP"), async () => {
             await api.setMcpEnabled(true);
             mcpEnabled.value = true;
             mcpError.value = "";
-            api.toast.success("MCP 总开关已开启。");
+            api.toast.success(
+              tr("MCP 总开关已开启。", "Global MCP access is enabled."),
+            );
             await refreshMcp();
           });
         }
@@ -191,12 +223,12 @@ export function activate(api) {
           );
         const field = (label, value) =>
           h("div", { style: { margin: "4px 0", overflowWrap: "anywhere" } }, [
-            h("strong", `${label}：`),
+            h("strong", `${label}${isEnglish.value ? ": " : "："}`),
             text(value),
           ]);
         const requirements = (label, values) =>
           h("div", [
-            h("strong", `${label}：`),
+            h("strong", `${label}${isEnglish.value ? ": " : "："}`),
             list(values).length
               ? h(
                   "ul",
@@ -204,81 +236,119 @@ export function activate(api) {
                     h("li", { key: index }, text(value)),
                   ),
                 )
-              : "无",
+              : tr("无", "None"),
           ]);
 
         function previewPanel() {
           if (!staged.value) return null;
           const p = staged.value.preview;
-          return h("section", { style: box, "aria-label": "安装预览" }, [
-            h("h3", "安装预览"),
-            field("名称", p.name),
-            field("版本", p.version),
-            field("技能数量", p.skill_count),
-            field("Python 要求", p.requires_python || "未指定"),
-            requirements("依赖 requires", p.requires),
-            requirements("缺少依赖 missing", p.missing),
-            h(
-              "strong",
-              `ZIP 嵌套层级（${list(p.nesting).length} 层，外 → 内）：`,
-            ),
-            list(p.nesting).length
-              ? h(
-                  "ol",
-                  list(p.nesting).map((name, index) =>
-                    h("li", { key: index }, text(name)),
+          return h(
+            "section",
+            {
+              style: box,
+              "aria-label": tr("安装预览", "Installation preview"),
+            },
+            [
+              h("h3", tr("安装预览", "Installation preview")),
+              field(tr("名称", "Name"), p.name),
+              field(tr("版本", "Version"), p.version),
+              field(tr("技能数量", "Number of skills"), p.skill_count),
+              field(
+                tr("Python 要求", "Python requirement"),
+                p.requires_python || tr("未指定", "Not specified"),
+              ),
+              requirements(tr("依赖安装包", "Required packages"), p.requires),
+              requirements(tr("缺少依赖", "Missing dependencies"), p.missing),
+              h(
+                "strong",
+                tr(
+                  `ZIP 嵌套层级（${list(p.nesting).length} 层，外 → 内）：`,
+                  `ZIP nesting (${list(p.nesting).length} level${list(p.nesting).length === 1 ? "" : "s"}, outer → inner):`,
+                ),
+              ),
+              list(p.nesting).length
+                ? h(
+                    "ol",
+                    list(p.nesting).map((name, index) =>
+                      h("li", { key: index }, text(name)),
+                    ),
+                  )
+                : h("p", tr("未提供", "Not provided")),
+              list(p.replaces).length
+                ? field(
+                    tr("将替换已装版本", "Installed versions to replace"),
+                    p.replaces.join(isEnglish.value ? ", " : "、"),
+                  )
+                : null,
+              h(
+                "details",
+                { key: staged.value.token, style: { margin: "16px 0" } },
+                [
+                  h(
+                    "summary",
+                    { style: { cursor: "pointer", fontWeight: "bold" } },
+                    tr("README（纯文本）", "README (plain text)"),
                   ),
-                )
-              : h("p", "未提供"),
-            list(p.replaces).length
-              ? field("将替换已装版本", p.replaces.join("、"))
-              : null,
-            h("h4", "README（纯文本）"),
-            h(
-              "pre",
-              { style: preStyle },
-              typeof p.readme === "string" && p.readme
-                ? p.readme
-                : "此包未提供 README。",
-            ),
-            h(
-              "p",
-              "安装将运行包及其依赖的代码。请确认来源可信后继续。安装成功后，后端自动同步 MCP。",
-            ),
-            list(p.missing).length
-              ? h(
-                  "p",
-                  "缺少依赖；离线安装可能失败。如需下载，请明确允许联网（使用应用配置的代理）。",
-                )
-              : null,
-            h("label", { style: row }, [
-              h("input", {
-                type: "checkbox",
-                checked: allowNetwork.value,
-                disabled: Boolean(busy.value),
-                onChange: (event) => {
-                  allowNetwork.value = event.target.checked;
-                },
-              }),
-              "允许联网下载依赖（默认关闭）",
-            ]),
-            p.python_ok === false
-              ? h(
-                  "p",
-                  { role: "alert" },
-                  "当前 Python 版本不满足要求，不能安装。",
-                )
-              : null,
-            h("div", { style: { ...row, marginTop: "12px" } }, [
-              button("确认安装", install, {
-                disabled: Boolean(busy.value) || p.python_ok === false,
-              }),
-              button("取消预览", () => {
-                staged.value = null;
-                allowNetwork.value = false;
-              }),
-            ]),
-          ]);
+                  h(
+                    "pre",
+                    { style: preStyle },
+                    typeof p.readme === "string" && p.readme
+                      ? p.readme
+                      : tr("此包未提供 README。", "No README was provided."),
+                  ),
+                ],
+              ),
+              h(
+                "p",
+                tr(
+                  "安装将运行包及其依赖的代码。请确认来源可信后继续。安装成功后，后端自动同步 MCP。",
+                  "Installation will run code from this package and its dependencies. Continue only if you trust the source. MCP will be synced by the backend after installation.",
+                ),
+              ),
+              list(p.missing).length
+                ? h(
+                    "p",
+                    tr(
+                      "缺少依赖；离线安装可能失败。如需下载，请明确允许联网（使用应用配置的代理）。",
+                      "Dependencies are missing; offline installation may fail. To download them, explicitly allow network access (the app's configured proxy will be used).",
+                    ),
+                  )
+                : null,
+              h("label", { style: row }, [
+                h("input", {
+                  type: "checkbox",
+                  checked: allowNetwork.value,
+                  disabled: Boolean(busy.value),
+                  onChange: (event) => {
+                    allowNetwork.value = event.target.checked;
+                  },
+                }),
+                tr(
+                  "允许联网下载依赖（默认关闭）",
+                  "Allow network access to download dependencies (off by default)",
+                ),
+              ]),
+              p.python_ok === false
+                ? h(
+                    "p",
+                    { role: "alert" },
+                    tr(
+                      "当前 Python 版本不满足要求，不能安装。",
+                      "The current Python version does not meet the requirement; installation is unavailable.",
+                    ),
+                  )
+                : null,
+              h("div", { style: { ...row, marginTop: "12px" } }, [
+                button(tr("确认安装", "Install"), install, {
+                  disabled: Boolean(busy.value) || p.python_ok === false,
+                }),
+                button(tr("取消", "Cancel"), () => {
+                  staged.value = null;
+                  allowNetwork.value = false;
+                }),
+              ]),
+            ],
+          );
         }
 
         onMounted(refresh);
@@ -291,41 +361,75 @@ export function activate(api) {
             },
             [
               h("section", { style: box }, [
-                h("h3", "上传 Qualcomm 技能包"),
+                h(
+                  "h3",
+                  tr("上传 Qualcomm 技能包", "Upload Qualcomm skill package"),
+                ),
                 h(
                   "p",
-                  "选择 ZIP 文件（支持嵌套 ZIP）。先解析预览，确认后才安装。",
+                  tr(
+                    "选择 ZIP 文件（支持嵌套 ZIP）。先解析预览，确认后才安装。",
+                    "Choose a ZIP file (nested ZIPs are supported). It will be inspected first; installation starts only after confirmation.",
+                  ),
                 ),
                 h("input", {
                   type: "file",
                   accept: ".zip,application/zip",
                   disabled: Boolean(busy.value),
-                  "aria-label": "上传 ZIP 技能包",
+                  "aria-label": tr(
+                    "上传 ZIP 技能包",
+                    "Upload ZIP skill package",
+                  ),
                   onChange: upload,
                 }),
               ]),
-              h("section", { style: box, "aria-label": "MCP 总开关" }, [
-                h(
-                  "p",
-                  mcpEnabled.value === true
-                    ? "MCP 总开关已开启。"
-                    : mcpEnabled.value === false
-                      ? "MCP 总开关已关闭：已安装技能不会提供给模型。"
-                      : "MCP 总开关状态未知。",
-                ),
-                mcpError.value
-                  ? h("p", { role: "alert" }, mcpError.value)
-                  : null,
-                mcpEnabled.value !== true
-                  ? button("一键开启 MCP", enableMcp)
-                  : null,
-                h(
-                  "p",
-                  "技能包安装 / 删除由后端同步 MCP，前端无需主动 reload。",
-                ),
-              ]),
+              h(
+                "section",
+                {
+                  style: box,
+                  "aria-label": tr("MCP 总开关", "Global MCP toggle"),
+                },
+                [
+                  h(
+                    "p",
+                    mcpEnabled.value === true
+                      ? tr(
+                          "MCP 总开关已开启。",
+                          "Global MCP access is enabled.",
+                        )
+                      : mcpEnabled.value === false
+                        ? tr(
+                            "MCP 总开关已关闭：已安装技能不会提供给模型。",
+                            "Global MCP access is disabled; installed skills are unavailable to the model.",
+                          )
+                        : tr(
+                            "MCP 总开关状态未知。",
+                            "Global MCP status is unknown.",
+                          ),
+                  ),
+                  mcpError.value
+                    ? h("p", { role: "alert" }, mcpError.value)
+                    : null,
+                  mcpEnabled.value !== true
+                    ? button(tr("一键开启 MCP", "Enable MCP"), enableMcp)
+                    : null,
+                  h(
+                    "p",
+                    tr(
+                      "技能包安装 / 删除由后端同步 MCP，前端无需主动 reload。",
+                      "MCP is synced by the backend when skill packages are installed or deleted; no manual reload is needed.",
+                    ),
+                  ),
+                ],
+              ),
               busy.value
-                ? h("p", { role: "status" }, `${busy.value}中，请稍候…`)
+                ? h(
+                    "p",
+                    { role: "status" },
+                    isEnglish.value
+                      ? `${busy.value} in progress…`
+                      : `${busy.value}中，请稍候…`,
+                  )
                 : null,
               error.value
                 ? h(
@@ -340,24 +444,37 @@ export function activate(api) {
               previewPanel(),
               h("section", { style: box }, [
                 h("div", { style: row }, [
-                  h("h3", "已安装技能包"),
-                  button("刷新列表与状态", refresh),
+                  h("h3", tr("已安装技能包", "Installed skill packages")),
+                  button(
+                    tr("刷新列表与状态", "Refresh list and status"),
+                    refresh,
+                  ),
                 ]),
                 !packages.value.length
                   ? h(
                       "p",
-                      loaded.value ? "暂无已安装技能包。" : "尚未加载列表。",
+                      loaded.value
+                        ? tr(
+                            "暂无已安装技能包。",
+                            "No skill packages installed.",
+                          )
+                        : tr(
+                            "尚未加载列表。",
+                            "The package list has not loaded yet.",
+                          ),
                     )
                   : null,
                 ...packages.value.map((item) =>
                   h("article", { key: item.id, style: box }, [
-                    field("名称", item.name),
-                    field("版本", item.version),
-                    field("技能数量", item.skill_count),
-                    item.summary ? field("说明", item.summary) : null,
+                    field(tr("名称", "Name"), item.name),
+                    field(tr("版本", "Version"), item.version),
+                    field(tr("技能数量", "Number of skills"), item.skill_count),
+                    item.summary
+                      ? field(tr("说明", "Description"), item.summary)
+                      : null,
                     h("div", { style: row }, [
                       button("README", () => showReadme(item)),
-                      button("删除", () => {
+                      button(tr("删除", "Delete"), () => {
                         deleteId.value = item.id;
                       }),
                     ]),
@@ -365,11 +482,15 @@ export function activate(api) {
                       ? h("div", { style: { marginTop: "8px" } }, [
                           h(
                             "p",
-                            `确认删除 ${text(item.name)} ${text(item.version)}？该包的技能将不再可用。`,
+                            isEnglish.value
+                              ? `Delete ${text(item.name)} ${text(item.version)}? Its skills will no longer be available.`
+                              : `确认删除 ${text(item.name)} ${text(item.version)}？该包的技能将不再可用。`,
                           ),
                           h("div", { style: row }, [
-                            button("确认删除", () => remove(item)),
-                            button("取消", () => {
+                            button(tr("确认删除", "Confirm delete"), () =>
+                              remove(item),
+                            ),
+                            button(tr("取消", "Cancel"), () => {
                               deleteId.value = null;
                             }),
                           ]),
@@ -381,18 +502,25 @@ export function activate(api) {
               readme.value
                 ? h(
                     "section",
-                    { style: box, "aria-label": "已安装包 README" },
+                    {
+                      style: box,
+                      "aria-label": tr(
+                        "已安装包 README",
+                        "Installed package README",
+                      ),
+                    },
                     [
                       h("div", { style: row }, [
                         h("h3", `${readme.value.title} — README`),
-                        button("关闭 README", () => {
+                        button(tr("关闭 README", "Close README"), () => {
                           readme.value = null;
                         }),
                       ]),
                       h(
                         "pre",
                         { style: preStyle },
-                        readme.value.content || "此包未提供 README。",
+                        readme.value.content ||
+                          tr("此包未提供 README。", "No README was provided."),
                       ),
                     ],
                   )
