@@ -208,7 +208,7 @@ json ResponseTools::format_tool_calls(const std::string &tool_calls_str)
 
     while (std::getline(iss, line))
     {
-        if (line.empty() || line.find("{\"name\":") != 0)
+        if (line.empty() || line[0] != '{')
             continue;
         try
         {
@@ -220,15 +220,25 @@ json ResponseTools::format_tool_calls(const std::string &tool_calls_str)
                      << "  message: " << line << std::endl;
             continue;
         }
+        if (!call.is_object())
+            continue;
+
+        const json fn = call.contains("function") && call["function"].is_object() ? call["function"] : json::object();
+        json tool_name = call.contains("name") ? call["name"] : fn.value("name", json());
+        if (!tool_name.is_string() && call.contains("function") && call["function"].is_string())
+            tool_name = call["function"];
+        if (!tool_name.is_string())
+            continue;
+        const json args = call.contains("arguments") ? call["arguments"] : fn.value("arguments", json());
 
         std::string args_value;
-        if (call.contains("arguments")) {
-            if (call["arguments"].is_string()) {
+        if (!args.is_null()) {
+            if (args.is_string()) {
 
-                args_value = call["arguments"].get<std::string>();
+                args_value = args.get<std::string>();
             } else {
 
-                args_value = call["arguments"].dump();
+                args_value = args.dump();
             }
         }
 
@@ -236,7 +246,7 @@ json ResponseTools::format_tool_calls(const std::string &tool_calls_str)
                 {"id",       generate_uuid4()},
                 {"type",     "function"},
                 {"function", {
-                                     {"name", call["name"]},
+                                     {"name", tool_name},
                                      {"arguments", args_value}
                              }}
         };
