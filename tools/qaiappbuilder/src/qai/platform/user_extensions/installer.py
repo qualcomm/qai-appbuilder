@@ -91,6 +91,9 @@ class StagedExtension:
             "version": m.version,
             "description": m.description,
             "runs_code": m.entry is not None,
+            # Route A: JavaScript that runs inside the app's own page (same
+            # origin, same session), a stronger grant than backend code alone.
+            "runs_frontend_code": m.ui is not None and m.ui.module is not None,
             "tools": [{"name": t.name, "group": t.group} for t in m.tools],
             "skills": list(self.skills),
             "prompts": [p.when for p in m.prompts],

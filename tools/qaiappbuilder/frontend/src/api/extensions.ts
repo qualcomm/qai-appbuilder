@@ -66,6 +66,8 @@ export interface InstallSummary {
   version: string;
   description: string;
   runs_code: boolean;
+  /** JavaScript that runs inside the app's own page (route A). */
+  runs_frontend_code?: boolean;
   tools: { name: string; group: string | null }[];
   skills: string[];
   prompts: string[];

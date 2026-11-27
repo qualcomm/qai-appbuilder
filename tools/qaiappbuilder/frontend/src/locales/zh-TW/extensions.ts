@@ -57,6 +57,7 @@ const extensions = {
     update: "更新",
   },
   install: {
+    runsFrontendCode: "此擴充還會在應用程式頁面內執行 JavaScript，可使用你目前的登入工作階段。請只安裝完全信任來源的擴充。",
     title: "安裝擴充",
     titleUpdate: "更新擴充",
     replaces: "取代 v{v}",
@@ -88,6 +89,8 @@ const extensions = {
     settingsSaved: "{name} 的設定已儲存",
   },
   mode: {
+    frontendFailed: "擴充介面載入失敗",
+    close: "關閉",
     button: "擴充",
     exit: "離開此擴充模式",
     none: "尚無擴充在這裡提供入口。",

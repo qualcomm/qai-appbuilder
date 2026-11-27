@@ -27,6 +27,7 @@
 import { computed, reactive, ref } from "vue";
 
 import { apiJson } from "@/api/http";
+import { syncExtensionFrontends } from "@/composables/useExtensionFrontend";
 
 export interface ExtensionUiField {
   key: string;
@@ -53,6 +54,8 @@ export interface ExtensionUiEntry {
   icon: string;
   description: string;
   actions: ExtensionUiAction[];
+  /** URL of the extension's front-end ES module (route A), `null` when it has none. */
+  module?: string | null;
 }
 
 export interface ActionRunResult {
@@ -75,8 +78,11 @@ async function refreshEntries(): Promise<void> {
     for (const [tab, name] of [...selected.entries()]) {
       if (!names.has(name)) selected.delete(tab);
     }
+    // Route A: (re)load the front-end modules that changed, drop the ones that went away.
+    await syncExtensionFrontends(r.extensions);
   } catch {
     entries.value = [];
+    await syncExtensionFrontends([]);
   } finally {
     loaded.value = true;
   }

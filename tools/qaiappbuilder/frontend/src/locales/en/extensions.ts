@@ -57,6 +57,7 @@ const extensions = {
     update: "Update",
   },
   install: {
+    runsFrontendCode: "This extension also runs JavaScript inside the app's own page, with your session. Only install it if you fully trust where it came from.",
     title: "Install extension",
     titleUpdate: "Update extension",
     replaces: "replaces v{v}",
@@ -88,6 +89,8 @@ const extensions = {
     settingsSaved: "Settings of {name} saved",
   },
   mode: {
+    frontendFailed: "Extension UI failed to load",
+    close: "Close",
     button: "Extension",
     exit: "Leave this extension mode",
     none: "No extension adds an entry here yet.",

@@ -463,3 +463,38 @@ def test_extension_http_routes_are_served_and_csrf_protected(be: tuple) -> None:
 
     cl.post("/api/extensions/route-ext/disable")
     assert cl.get("/api/ext/route-ext/items/a").status_code == 404
+
+# -- front-end module (route A) -------------------------------------------------------
+
+
+def test_extension_frontend_files_are_served_and_confined(be: tuple) -> None:
+    ob, cl = be
+    ext = ob.data_dir / "extensions" / "web-ext"
+    (ext / "web").mkdir(parents=True)
+    (ext / "web" / "index.js").write_text("export function activate(api) {}\n", encoding="utf-8")
+    (ext / "web" / "page.html").write_text("<script>alert(1)</script>", encoding="utf-8")
+    (ext / "secret.txt").write_text("TOP-SECRET", encoding="utf-8")
+    (ext / "extension.json").write_text(json.dumps({
+        "manifest_version": 1, "name": "web-ext", "version": "2.5.0", "description": "web",
+        "ui": {"label": "Web", "module": "web/index.js"},
+    }), encoding="utf-8")
+    assert cl.post("/api/extensions/web-ext/reload").json()["state"] == "loaded"
+
+    entry = {e["name"]: e for e in cl.get("/api/extensions/ui").json()["extensions"]}["web-ext"]
+    assert entry["module"].startswith("/api/ext/web-ext/_ui/index.js?v=2.5.0-")
+    r = cl.get(entry["module"])
+    assert r.status_code == 200 and r.headers["content-type"].startswith("application/javascript")
+    assert cl.get("/api/ext/web-ext/_ui/page.html").status_code == 404
+    assert cl.get("/api/ext/web-ext/_ui/..%2fsecret.txt").status_code == 404
+    assert cl.get("/api/ext/web-ext/_ui/../secret.txt").status_code == 404
+
+    # The install summary says it runs JavaScript in the app's page.
+    zip_bytes = io.BytesIO()
+    with zipfile.ZipFile(zip_bytes, "w") as zf:
+        zf.writestr("web2-ext/extension.json", json.dumps({
+            "manifest_version": 1, "name": "web2-ext", "version": "1", "description": "w",
+            "ui": {"label": "W2", "module": "web/index.js"}}))
+        zf.writestr("web2-ext/web/index.js", "export function activate() {}")
+    summary = cl.post("/api/extensions/install/upload", files={"file": ("w.zip", zip_bytes.getvalue())}).json()
+    assert summary["runs_frontend_code"] is True and summary["runs_code"] is False
+    cl.delete(f"/api/extensions/install/{summary['token']}")

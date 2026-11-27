@@ -17,7 +17,7 @@
  *   shown, and its optional `prompt` is sent as the next chat message
  *   (`send-prompt` event).
  */
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRouter } from "vue-router";
 
@@ -27,6 +27,10 @@ import {
   useExtensionModes,
   type ExtensionUiAction,
 } from "@/composables/useExtensionModes";
+import {
+  setExtensionPromptSender,
+  useExtensionFrontend,
+} from "@/composables/useExtensionFrontend";
 
 const props = defineProps<{
   tabId: string | null;
@@ -46,6 +50,15 @@ const modes = useExtensionModes();
 const open = ref(false);
 const root = ref<HTMLElement | null>(null);
 const current = computed(() => modes.selectedFor(props.tabId));
+
+// Route A: the selected extension's own front-end panel (if its module made one).
+const frontend = useExtensionFrontend();
+const panel = computed(() => (current.value ? frontend.panelOf(current.value.name) : null));
+const panelError = computed(() => (current.value ? frontend.errorOf(current.value.name) : ""));
+const panelOpen = ref(false);
+watch(current, () => {
+  panelOpen.value = false;
+});
 
 async function toggleMenu(): Promise<void> {
   open.value = !open.value;
@@ -73,8 +86,13 @@ function onDocClick(e: MouseEvent): void {
 onMounted(() => {
   document.addEventListener("mousedown", onDocClick);
   if (!modes.loaded.value) void modes.refreshEntries();
+  // `api.sendPrompt(text)` of an extension's front-end module sends a chat message.
+  setExtensionPromptSender((text) => emit("send-prompt", text));
 });
-onBeforeUnmount(() => document.removeEventListener("mousedown", onDocClick));
+onBeforeUnmount(() => {
+  document.removeEventListener("mousedown", onDocClick);
+  setExtensionPromptSender(null);
+});
 
 // ── Action dialog ─────────────────────────────────────────────────────────
 const action = ref<ExtensionUiAction | null>(null);
@@ -168,6 +186,22 @@ async function submit(): Promise<void> {
       >
         <span>{{ a.label }}</span>
       </button>
+      <button
+        v-if="panel"
+        type="button"
+        class="rit-btn"
+        :title="panel.title"
+        data-testid="ext-panel-btn"
+        @click="panelOpen = true"
+      >
+        <span>{{ panel.title }}</span>
+      </button>
+      <span
+        v-if="panelError"
+        class="ext-mode__err"
+        data-testid="ext-frontend-error"
+        :title="panelError"
+      >⚠ {{ t("extensions.mode.frontendFailed") }}</span>
     </template>
     <template v-else>
       <button
@@ -223,6 +257,35 @@ async function submit(): Promise<void> {
     </template>
 
     <Teleport to="body">
+      <div
+        v-if="panelOpen && panel"
+        class="ext-modal-overlay"
+        @click.self="panelOpen = false"
+      >
+        <div
+          class="ext-modal ext-modal--panel"
+          role="dialog"
+          aria-modal="true"
+          data-testid="ext-panel"
+          @keydown.esc="panelOpen = false"
+        >
+          <h3 class="ext-modal__title">
+            {{ panel.title }}
+          </h3>
+          <!-- The extension's component, built with the host's Vue. -->
+          <component :is="panel.component" />
+          <div class="ext-modal__buttons">
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              data-testid="ext-panel-close"
+              @click="panelOpen = false"
+            >
+              {{ t("extensions.mode.close") }}
+            </button>
+          </div>
+        </div>
+      </div>
       <div
         v-if="action && current"
         class="ext-modal-overlay"
@@ -325,6 +388,8 @@ async function submit(): Promise<void> {
 .ext-mode { position: relative; display: inline-flex; align-items: center; gap: 4px; }
 .ext-mode__tag { display: inline-flex; align-items: center; gap: 4px; }
 .ext-mode__x { opacity: 0.7; margin-left: 2px; }
+.ext-mode__err { color: var(--error); font-size: var(--text-xs); }
+.ext-modal--panel { width: min(760px, 94vw); }
 .ext-mode__menu {
   position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 50; min-width: 220px;
   padding: 4px; border: 1px solid var(--border); border-radius: var(--radius-md, 8px);

@@ -502,6 +502,13 @@ onMounted(refresh);
           >
             {{ t("extensions.install.runsCode") }}
           </p>
+          <p
+            v-if="staged.runs_frontend_code"
+            class="ext-modal__warn"
+            data-testid="ext-install-frontend-warning"
+          >
+            {{ t("extensions.install.runsFrontendCode") }}
+          </p>
           <dl class="ext-modal__caps">
             <template v-if="staged.tools.length">
               <dt>{{ t("extensions.detail.tools") }}</dt>

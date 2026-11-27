@@ -60,6 +60,7 @@ __all__ = [
     "PROMPT_WHEN",
     "ROUTE_METHODS",
     "SETTING_TYPES",
+    "UI_MODULE_SUFFIXES",
     "ActionDeclaration",
     "ExtensionManifest",
     "ManifestError",
@@ -115,7 +116,10 @@ _ROUTE_SEGMENT_RE: Final[re.Pattern[str]] = re.compile(
 )
 _MAX_ROUTES: Final[int] = 32
 _ROUTE_PATH_MAX: Final[int] = 200
-_UI_KEYS: Final[frozenset[str]] = frozenset({"label", "icon", "actions"})
+_UI_KEYS: Final[frozenset[str]] = frozenset({"label", "icon", "actions", "module"})
+#: ``ui.module`` must be an ES module in a SUBDIRECTORY (only that directory is
+#: served to the browser; the extension's Python and config stay private).
+UI_MODULE_SUFFIXES: Final[tuple[str, ...]] = (".js", ".mjs")
 _ACTION_KEYS: Final[frozenset[str]] = frozenset({"id", "label", "description", "fields"})
 _ACTION_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _ICON_MAX: Final[int] = 8
@@ -256,6 +260,18 @@ class UiDeclaration:
     label: str
     icon: str = ""
     actions: tuple[ActionDeclaration, ...] = ()
+    #: Relative path of the extension's front-end ES module, e.g. ``web/index.js``.
+    module: str | None = None
+
+    @property
+    def module_dir(self) -> str | None:
+        """The directory served to the browser (the module's parent), e.g. ``web``."""
+        return self.module.rsplit("/", 1)[0] if self.module else None
+
+    @property
+    def module_file(self) -> str | None:
+        """The module's path inside :attr:`module_dir`, e.g. ``index.js``."""
+        return self.module.rsplit("/", 1)[1] if self.module else None
 
     def action(self, action_id: str) -> ActionDeclaration | None:
         return next((a for a in self.actions if a.id == action_id), None)
@@ -459,8 +475,25 @@ def _parse_ui(raw: Any) -> UiDeclaration | None:
             )
         )
     return UiDeclaration(
-        label=_text(obj["label"], label="ui.label"), icon=icon, actions=tuple(actions)
+        label=_text(obj["label"], label="ui.label"),
+        icon=icon,
+        actions=tuple(actions),
+        module=_parse_ui_module(obj.get("module")),
     )
+
+
+def _parse_ui_module(raw: Any) -> str | None:
+    if raw is None:
+        return None
+    module = _rel_path(raw, label="ui.module")
+    if "/" not in module:
+        raise ManifestError(
+            f"ui.module {module!r} must be inside a subdirectory such as 'web/index.js' "
+            "(only that directory is served to the browser)"
+        )
+    if not module.endswith(UI_MODULE_SUFFIXES):
+        raise ManifestError(f"ui.module {module!r} must be a .js or .mjs file")
+    return module
 
 
 def placeholders_in(value: str) -> list[str]:

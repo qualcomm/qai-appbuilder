@@ -651,6 +651,8 @@ class UserExtensionHost:
         self._tools: dict[str, RegisteredTool] = {}
         self._skill_roots: dict[str, ExtensionSkillRoot] = {}
         self._prompts: dict[str, tuple[PromptFragment, ...]] = {}
+        #: name -> how many times it has been loaded (the cache-busting ``v``).
+        self._load_tokens: dict[str, int] = {}
         self._mcp: dict[str, tuple[ResolvedMcpServer, ...]] = {}
         self._contexts: dict[str, ExtensionContext] = {}
         self._modules: dict[str, list[str]] = {}
@@ -885,6 +887,7 @@ class UserExtensionHost:
             self._commit_skills(manifest, status)
             self._commit_prompts(manifest.name, fragments, status)
             self._commit_mcp(manifest, status)
+            self._load_tokens[manifest.name] = self._load_tokens.get(manifest.name, 0) + 1
             return status
 
         ctx = ExtensionContext(
@@ -944,6 +947,7 @@ class UserExtensionHost:
         self._commit_skills(manifest, status)
         self._commit_prompts(manifest.name, fragments, status)
         self._commit_mcp(manifest, status)
+        self._load_tokens[manifest.name] = self._load_tokens.get(manifest.name, 0) + 1
         return status
 
     # -- UI (modes, action buttons) -----------------------------------------
@@ -972,6 +976,9 @@ class UserExtensionHost:
                     "label": manifest.ui.label,
                     "icon": manifest.ui.icon,
                     "description": manifest.description,
+                    # Front-end module (route A): a URL under /api/ext/<name>/_ui/,
+                    # versioned so a reload makes the browser fetch the new code.
+                    "module": self.ui_module_url(status.name),
                     "actions": [
                         {
                             "id": a.id,
@@ -985,6 +992,47 @@ class UserExtensionHost:
                 }
             )
         return out
+
+    def ui_module_dir(self, name: str) -> Path | None:
+        """The directory of a LOADED extension's front-end module (the only
+        directory of the extension served to the browser), else ``None``.
+
+        Resolved on every call and checked to lie inside the extension, so a
+        link swapped in after loading cannot expose anything else.
+        """
+        status = self._statuses.get(name)
+        if status is None or status.state != "loaded":
+            return None
+        try:
+            manifest = load_manifest(status.root)
+        except ManifestError:
+            return None
+        if manifest.ui is None or manifest.ui.module_dir is None:
+            return None
+        root = manifest.root.resolve()
+        directory = (manifest.root / manifest.ui.module_dir).resolve()
+        if not directory.is_dir() or not directory.is_relative_to(root):
+            return None
+        return directory
+
+    def ui_module_url(self, name: str) -> str | None:
+        """``/api/ext/<name>/_ui/<file>?v=<version>`` for the extension's module.
+
+        ``v`` changes with every load (the browser caches ES modules by URL and
+        cannot unload them), so a reload always fetches the new code.
+        """
+        status = self._statuses.get(name)
+        directory = self.ui_module_dir(name)
+        if status is None or directory is None:
+            return None
+        try:
+            ui = load_manifest(status.root).ui
+        except ManifestError:
+            return None
+        if ui is None or ui.module_file is None or not (directory / ui.module_file).is_file():
+            return None
+        token = self._load_tokens.get(name, 0)
+        return f"/api/ext/{name}/_ui/{ui.module_file}?v={status.version}-{token}"
 
     def route_handler(
         self, name: str, method: str, path: str

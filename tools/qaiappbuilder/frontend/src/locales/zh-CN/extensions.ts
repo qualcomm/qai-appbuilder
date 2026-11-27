@@ -57,6 +57,7 @@ const extensions = {
     update: "更新",
   },
   install: {
+    runsFrontendCode: "该扩展还会在应用页面里运行 JavaScript，能使用你当前的登录会话。请只安装完全信任来源的扩展。",
     title: "安装扩展",
     titleUpdate: "更新扩展",
     replaces: "替换 v{v}",
@@ -88,6 +89,8 @@ const extensions = {
     settingsSaved: "{name} 的配置已保存",
   },
   mode: {
+    frontendFailed: "扩展界面加载失败",
+    close: "关闭",
     button: "扩展",
     exit: "退出该扩展模式",
     none: "还没有扩展在这里提供入口。",
