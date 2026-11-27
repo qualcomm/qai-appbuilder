@@ -419,3 +419,47 @@ def test_ui_menu_and_action_route(be: tuple) -> None:
     cl.post("/api/extensions/ui-ext/disable")
     assert "ui-ext" not in {e["name"] for e in cl.get("/api/extensions/ui").json()["extensions"]}
     assert cl.post("/api/extensions/ui-ext/actions/greet", json={"values": {"who": "x"}}).status_code == 404
+
+# -- HTTP routes ---------------------------------------------------------------------
+
+
+def test_extension_http_routes_are_served_and_csrf_protected(be: tuple) -> None:
+    ob, cl = be
+    ext = ob.data_dir / "extensions" / "route-ext"
+    ext.mkdir(parents=True)
+    (ext / "extension.json").write_text(json.dumps({
+        "manifest_version": 1, "name": "route-ext", "version": "1", "description": "routes", "entry": "main.py",
+        "routes": [{"method": "GET", "path": "items/{item_id}"}, {"method": "POST", "path": "items"}],
+    }), encoding="utf-8")
+    (ext / "main.py").write_text(textwrap.dedent("""
+        import json
+        from qai.ext import RouteResponse
+
+        def activate(ctx):
+            store = ctx.data_dir / "items.json"
+            def load():
+                return json.loads(store.read_text()) if store.exists() else {}
+            def add(req):
+                items = load(); items[req.body["id"]] = req.body; store.write_text(json.dumps(items))
+                return RouteResponse(body=req.body, status=201)
+            def get(req):
+                item = load().get(req.params["item_id"])
+                return item if item else RouteResponse(body={"error": "not found"}, status=404)
+            ctx.register_route("POST", "items", add)
+            ctx.register_route("GET", "items/{item_id}", get)
+    """), encoding="utf-8")
+    assert cl.post("/api/extensions/route-ext/reload").json()["state"] == "loaded"
+
+    r = cl.post("/api/ext/route-ext/items", json={"id": "a", "v": 1})
+    assert r.status_code == 201, r.text
+    assert cl.get("/api/ext/route-ext/items/a").json() == {"id": "a", "v": 1}
+    assert cl.get("/api/ext/route-ext/items/zz").status_code == 404
+
+    # Same protections as every /api route: a POST without the CSRF token is refused.
+    with httpx.Client(base_url=ob.base_url, timeout=10.0) as bare:
+        bare.get("/api/system/health")
+        assert bare.post("/api/ext/route-ext/items", json={"id": "b"}).status_code == 403
+    assert cl.get("/api/ext/route-ext/items/b").status_code == 404
+
+    cl.post("/api/extensions/route-ext/disable")
+    assert cl.get("/api/ext/route-ext/items/a").status_code == 404

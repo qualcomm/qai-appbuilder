@@ -31,6 +31,8 @@ from qai.platform.user_extensions.host import (
     ExtensionContext,
     ExtensionError,
     ExtensionSecrets,
+    RouteRequest,
+    RouteResponse,
     ToolCall,
 )
 
@@ -40,5 +42,7 @@ __all__ = [
     "ExtensionContext",
     "ExtensionError",
     "ExtensionSecrets",
+    "RouteRequest",
+    "RouteResponse",
     "ToolCall",
 ]

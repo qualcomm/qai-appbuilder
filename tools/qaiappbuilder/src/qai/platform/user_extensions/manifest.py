@@ -58,12 +58,14 @@ __all__ = [
     "MCP_TRANSPORTS",
     "PROMPT_MAX_CHARS",
     "PROMPT_WHEN",
+    "ROUTE_METHODS",
     "SETTING_TYPES",
     "ActionDeclaration",
     "ExtensionManifest",
     "ManifestError",
     "McpServerDeclaration",
     "PromptDeclaration",
+    "RouteDeclaration",
     "SettingDeclaration",
     "SkillsDeclaration",
     "ToolDeclaration",
@@ -102,8 +104,17 @@ _TOP_KEYS: Final[frozenset[str]] = frozenset(
         "settings",
         "mcp_servers",
         "ui",
+        "routes",
     }
 )
+_ROUTE_KEYS: Final[frozenset[str]] = frozenset({"method", "path"})
+ROUTE_METHODS: Final[frozenset[str]] = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
+#: ``status``, ``hosts/{host_id}``: lowercase segments, ``{param}`` captures one segment.
+_ROUTE_SEGMENT_RE: Final[re.Pattern[str]] = re.compile(
+    r"^([a-z0-9][a-z0-9_.-]*|\{[a-z][a-z0-9_]*\})$"
+)
+_MAX_ROUTES: Final[int] = 32
+_ROUTE_PATH_MAX: Final[int] = 200
 _UI_KEYS: Final[frozenset[str]] = frozenset({"label", "icon", "actions"})
 _ACTION_KEYS: Final[frozenset[str]] = frozenset({"id", "label", "description", "fields"})
 _ACTION_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -199,6 +210,35 @@ class SettingDeclaration:
 
 
 @dataclass(frozen=True, slots=True)
+class RouteDeclaration:
+    """One ``routes[]`` entry, served at ``/api/ext/<extension>/<path>``."""
+
+    method: str
+    path: str
+
+    @property
+    def segments(self) -> tuple[str, ...]:
+        return tuple(self.path.split("/"))
+
+    def match(self, method: str, path: str) -> dict[str, str] | None:
+        """Path parameters when ``method path`` matches this route, else ``None``."""
+        if method != self.method:
+            return None
+        parts = path.strip("/").split("/") if path.strip("/") else []
+        if len(parts) != len(self.segments):
+            return None
+        params: dict[str, str] = {}
+        for seg, part in zip(self.segments, parts, strict=True):
+            if seg.startswith("{"):
+                if not part:
+                    return None
+                params[seg[1:-1]] = part
+            elif seg != part:
+                return None
+        return params
+
+
+@dataclass(frozen=True, slots=True)
 class ActionDeclaration:
     """One ``ui.actions[]`` entry: a button in the extension's mode; clicking
     it opens a dialog with ``fields`` (same types as ``settings[]``)."""
@@ -261,6 +301,10 @@ class ExtensionManifest:
     settings: tuple[SettingDeclaration, ...] = ()
     mcp_servers: tuple[McpServerDeclaration, ...] = ()
     ui: UiDeclaration | None = None
+    routes: tuple[RouteDeclaration, ...] = ()
+
+    def route(self, method: str, path: str) -> RouteDeclaration | None:
+        return next((r for r in self.routes if r.method == method and r.path == path), None)
 
     @property
     def tool_names(self) -> frozenset[str]:
@@ -321,7 +365,53 @@ def parse_manifest(raw: Any, *, root: Path) -> ExtensionManifest:
         prompts=_parse_prompts(obj.get("prompts")),
         settings=(settings := _parse_settings(obj.get("settings"))),
         mcp_servers=_parse_mcp_servers(obj.get("mcp_servers"), settings),
+        routes=_parse_routes(obj.get("routes"), has_entry=entry is not None),
     )
+
+
+def _parse_routes(raw: Any, *, has_entry: bool) -> tuple[RouteDeclaration, ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise ManifestError("routes must be an array")
+    if raw and not has_entry:
+        raise ManifestError("routes requires entry (the code that handles them)")
+    if len(raw) > _MAX_ROUTES:
+        raise ManifestError(f"routes: at most {_MAX_ROUTES} routes")
+    out: list[RouteDeclaration] = []
+    for index, item in enumerate(raw):
+        where = f"routes[{index}]"
+        entry = _object(item, where)
+        _known_keys(entry, _ROUTE_KEYS, where=where)
+        _require(entry, ("method", "path"), where=where)
+        method, path = entry["method"], entry["path"]
+        if method not in ROUTE_METHODS:
+            raise ManifestError(
+                f"{where}.method {method!r} must be one of {', '.join(sorted(ROUTE_METHODS))}"
+            )
+        if not isinstance(path, str) or not path or len(path) > _ROUTE_PATH_MAX:
+            raise ManifestError(f"{where}.path must be a non-empty string")
+        segments = path.split("/")
+        if not all(_ROUTE_SEGMENT_RE.match(s) for s in segments):
+            raise ManifestError(
+                f"{where}.path {path!r}: segments are lowercase [a-z0-9_.-] or {{param}}, "
+                "no leading / trailing slash"
+            )
+        names = [s[1:-1] for s in segments if s.startswith("{")]
+        if len(names) != len(set(names)):
+            raise ManifestError(f"{where}.path {path!r} repeats a parameter name")
+        decl = RouteDeclaration(method=method, path=path)
+        shape = tuple("{}" if s.startswith("{") else s for s in segments)
+        for other in out:
+            if (
+                other.method == method
+                and tuple("{}" if s.startswith("{") else s for s in other.segments) == shape
+            ):
+                raise ManifestError(
+                    f"{where}: {method} {path} clashes with {other.method} {other.path}"
+                )
+        out.append(decl)
+    return tuple(out)
 
 
 def _parse_ui(raw: Any) -> UiDeclaration | None:

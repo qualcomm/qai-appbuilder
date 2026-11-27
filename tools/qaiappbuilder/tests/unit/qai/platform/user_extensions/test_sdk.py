@@ -39,6 +39,7 @@ CTX_MEMBERS = {
     "ssl_verify",
     "register_tool",
     "register_action",
+    "register_route",
     "on_unload",
 }
 
@@ -50,6 +51,8 @@ def test_exports_are_exactly_the_documented_ones() -> None:
         "ExtensionContext",
         "ExtensionError",
         "ExtensionSecrets",
+        "RouteRequest",
+        "RouteResponse",
         "ToolCall",
     ]
     public = {n for n in vars(sdk) if not n.startswith("_") and n != "annotations"}

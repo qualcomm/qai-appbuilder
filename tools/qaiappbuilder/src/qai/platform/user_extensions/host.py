@@ -69,11 +69,14 @@ __all__ = [
     "PromptFragment",
     "RegisteredTool",
     "ResolvedMcpServer",
+    "RouteRequest",
+    "RouteResponse",
     "SecretStoreLike",
     "ToolCall",
     "ToolSink",
     "UnknownExtensionError",
     "UserExtensionHost",
+    "call_handler",
     "discover_extension_dirs",
     "module_name_for",
     "run_action",
@@ -178,6 +181,38 @@ class ActionResult:
     message: str = ""
     prompt: str = ""
     ok: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class RouteRequest:
+    """What a route handler receives. Public (``qai.ext``).
+
+    ``params``: ``{name}`` path parameters. ``query``: query string (last value
+    per key). ``body``: the decoded JSON body (``None`` when empty / not JSON).
+    ``headers``: lower-cased request headers, without cookies / authorization.
+    """
+
+    method: str
+    path: str
+    params: dict[str, str]
+    query: dict[str, str]
+    body: Any
+    headers: dict[str, str]
+
+
+@dataclass(frozen=True, slots=True)
+class RouteResponse:
+    """What a route handler may return for full control. Public (``qai.ext``).
+
+    Otherwise return any JSON-serialisable value (sent as ``200`` JSON), or
+    ``None`` (``204``). ``body`` here: JSON value, or ``str`` / ``bytes`` sent
+    as-is with ``content_type``.
+    """
+
+    body: Any = None
+    status: int = 200
+    content_type: str = "application/json"
+    headers: Mapping[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -341,6 +376,7 @@ class ExtensionContext:
         self._ssl_verify = ssl_verify or (lambda: True)
         self._pending: dict[str, _PendingTool] = {}
         self._actions: dict[str, Callable[[ActionCall], Any]] = {}
+        self._routes: dict[tuple[str, str], Callable[[RouteRequest], Any]] = {}
         self._unload: list[Callable[[], None]] = []
         self._config: Mapping[str, Any] | None = None
         self._active = True
@@ -487,6 +523,27 @@ class ExtensionContext:
             raise ExtensionError(f"register_action({action_id!r}): handler is not callable")
         self._actions[action_id] = handler
 
+    def register_route(
+        self, method: str, path: str, handler: Callable[[RouteRequest], Any]
+    ) -> None:
+        """Serve ``method /api/ext/<name>/<path>`` (declared in the manifest's ``routes``).
+
+        ``handler(req: RouteRequest)`` may be sync (worker thread) or async.
+        The route is behind the app's login and CSRF protection like every
+        other ``/api`` route, and disappears when the extension is unloaded.
+        """
+        self._require_active("register_route")
+        method = method.upper() if isinstance(method, str) else method
+        if self._manifest.route(method, path) is None:
+            raise ExtensionError(
+                f"register_route({method!r}, {path!r}): not declared in the manifest's routes"
+            )
+        if (method, path) in self._routes:
+            raise ExtensionError(f"register_route({method!r}, {path!r}): registered twice")
+        if not callable(handler):
+            raise ExtensionError(f"register_route({method!r}, {path!r}): handler is not callable")
+        self._routes[(method, path)] = handler
+
     def on_unload(self, callback: Callable[[], None]) -> None:
         """Run ``callback`` when the extension is unloaded or fails to load (newest first)."""
         self._require_active("on_unload")
@@ -508,6 +565,7 @@ class ExtensionContext:
         self._active = False
         self._pending.clear()
         self._actions.clear()
+        self._routes.clear()
         callbacks, self._unload = self._unload, []
         for callback in reversed(callbacks):
             try:
@@ -796,7 +854,7 @@ class UserExtensionHost:
                 error=f"host error: {type(exc).__name__}: {exc}",
             )
 
-    def _load(self, ext_dir: Path) -> ExtensionStatus:  # noqa: PLR0911, PLR0912 - one exit per outcome
+    def _load(self, ext_dir: Path) -> ExtensionStatus:  # noqa: PLR0911, PLR0912, PLR0915 - one exit per outcome
         if not ext_dir.is_dir():
             return ExtensionStatus(
                 name=ext_dir.name,
@@ -870,6 +928,11 @@ class UserExtensionHost:
         for name in sorted(manifest.tool_names - set(committed)):
             if not any(repr(name) in w for w in ctx._warnings):
                 ctx._warnings.append(f"tool {name!r} is declared but was never registered")
+        for route in manifest.routes:
+            if (route.method, route.path) not in ctx._routes:
+                ctx._warnings.append(
+                    f"route {route.method} {route.path} is declared but has no handler"
+                )
         for action in manifest.ui.actions if manifest.ui is not None else ():
             if action.id not in ctx._actions:
                 ctx._warnings.append(
@@ -922,6 +985,37 @@ class UserExtensionHost:
                 }
             )
         return out
+
+    def route_handler(
+        self, name: str, method: str, path: str
+    ) -> tuple[Callable[[RouteRequest], Any], dict[str, str]] | None:
+        """``(handler, path params)`` for a request to a loaded extension's
+        route; literal routes win over parameterised ones. ``None`` if none."""
+        status = self._statuses.get(name)
+        ctx = self._contexts.get(name)
+        if status is None or status.state != "loaded" or ctx is None:
+            return None
+        matches: list[tuple[int, Callable[[RouteRequest], Any], dict[str, str]]] = []
+        for decl in ctx._manifest.routes:
+            handler = ctx._routes.get((decl.method, decl.path))
+            params = decl.match(method, path) if handler is not None else None
+            if handler is not None and params is not None:
+                matches.append((len(params), handler, params))
+        if not matches:
+            return None
+        matches.sort(key=lambda m: m[0])
+        return matches[0][1], matches[0][2]
+
+    def route_methods(self, name: str, path: str) -> set[str]:
+        """Methods with a handler at ``path`` (for a 405 + ``Allow``)."""
+        ctx = self._contexts.get(name)
+        if ctx is None or name not in self._statuses:
+            return set()
+        return {
+            d.method
+            for d in ctx._manifest.routes
+            if (d.method, d.path) in ctx._routes and d.match(d.method, path) is not None
+        }
 
     def action_handler(
         self, name: str, action_id: str
@@ -1376,6 +1470,17 @@ async def run_action(
     raise ExtensionError(
         f"action {decl.id!r} returned {type(result).__name__}; return ActionResult, str or None"
     )
+
+
+async def call_handler(handler: Callable[[Any], Any], arg: Any) -> Any:
+    """Run an extension handler: async on the loop, sync in a worker thread."""
+    is_async = inspect.iscoroutinefunction(handler) or inspect.iscoroutinefunction(
+        getattr(handler, "__call__", None)  # noqa: B004
+    )
+    result = handler(arg) if is_async else await asyncio.to_thread(handler, arg)
+    if inspect.isawaitable(result):
+        result = await result
+    return result
 
 
 class ActionValidationError(ValueError):
