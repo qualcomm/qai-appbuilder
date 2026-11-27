@@ -129,7 +129,8 @@ describe("ComposerExtensionMenu", () => {
     await w.get('[data-testid="ext-menu-btn"]').trigger("click");
     await flushPromises();
     await w.get('[data-testid="ext-menu-item-remote-host"]').trigger("click");
-    await flushPromises();
+    // The module is imported asynchronously: wait for its panel, not for a tick count.
+    await vi.waitFor(() => expect(w.find('[data-testid="ext-panel-btn"]').exists()).toBe(true));
     expect(w.get('[data-testid="ext-panel-btn"]').text()).toBe("设置");
     ui.locale = "en";
     await flushPromises();

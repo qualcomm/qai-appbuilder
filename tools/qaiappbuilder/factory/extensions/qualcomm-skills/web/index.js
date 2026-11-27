@@ -125,6 +125,7 @@ export function activate(api) {
         async function install() {
           const current = staged.value;
           if (!current || current.preview.python_ok === false) return;
+          if (current.preview.change === "same") return; // the server refuses it too
           await run(tr("安装", "Install"), async () => {
             const response = await api.fetch("packages/install", {
               method: "POST",
@@ -242,6 +243,22 @@ export function activate(api) {
         function previewPanel() {
           if (!staged.value) return null;
           const p = staged.value.preview;
+          const same = p.change === "same";
+          const old = list(p.replaces).join(isEnglish.value ? ", " : "、");
+          const banner = {
+            same: tr(
+              `“${text(p.name)}” ${text(p.version)} 已安装，不能重复安装。如需重装，请先删除已安装的版本。`,
+              `${text(p.name)} ${text(p.version)} is already installed and cannot be installed again. To reinstall it, delete the installed version first.`,
+            ),
+            upgrade: tr(
+              `升级：已安装 ${old}，安装后将被 ${text(p.version)} 取代。`,
+              `Upgrade: ${old} is installed and will be replaced by ${text(p.version)}.`,
+            ),
+            downgrade: tr(
+              `降级：已安装 ${old}，安装后将被较旧的 ${text(p.version)} 取代。`,
+              `Downgrade: ${old} is installed and will be replaced by the older ${text(p.version)}.`,
+            ),
+          }[p.change];
           return h(
             "section",
             {
@@ -250,6 +267,25 @@ export function activate(api) {
             },
             [
               h("h3", tr("安装预览", "Installation preview")),
+              banner
+                ? h(
+                    "p",
+                    {
+                      role: same ? "alert" : "status",
+                      "data-testid": `qc-change-${p.change}`,
+                      style: {
+                        padding: "8px 10px",
+                        borderRadius: "6px",
+                        fontWeight: "bold",
+                        border: `1px solid ${same ? "var(--el-color-danger, #b42318)" : "var(--el-color-warning, #b54708)"}`,
+                        color: same
+                          ? "var(--el-color-danger, #b42318)"
+                          : "var(--el-color-warning, #b54708)",
+                      },
+                    },
+                    banner,
+                  )
+                : null,
               field(tr("名称", "Name"), p.name),
               field(tr("版本", "Version"), p.version),
               field(tr("技能数量", "Number of skills"), p.skill_count),
@@ -274,12 +310,6 @@ export function activate(api) {
                     ),
                   )
                 : h("p", tr("未提供", "Not provided")),
-              list(p.replaces).length
-                ? field(
-                    tr("将替换已装版本", "Installed versions to replace"),
-                    p.replaces.join(isEnglish.value ? ", " : "、"),
-                  )
-                : null,
               h(
                 "details",
                 { key: staged.value.token, style: { margin: "16px 0" } },
@@ -339,9 +369,19 @@ export function activate(api) {
                   )
                 : null,
               h("div", { style: { ...row, marginTop: "12px" } }, [
-                button(tr("确认安装", "Install"), install, {
-                  disabled: Boolean(busy.value) || p.python_ok === false,
-                }),
+                same
+                  ? null
+                  : button(
+                      p.change === "upgrade"
+                        ? tr("确认升级", "Upgrade")
+                        : p.change === "downgrade"
+                          ? tr("确认降级", "Downgrade")
+                          : tr("确认安装", "Install"),
+                      install,
+                      {
+                        disabled: Boolean(busy.value) || p.python_ok === false,
+                      },
+                    ),
                 button(tr("取消", "Cancel"), () => {
                   staged.value = null;
                   allowNetwork.value = false;

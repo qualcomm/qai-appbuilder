@@ -87,7 +87,10 @@ def activate(ctx: ExtensionContext) -> None:
             try:
                 meta = store.install(token, allow_network=bool(body.get("allow_network", True)))
             except PackageError as exc:
-                return _error(exc, 404 if exc.code == "qcskills.unknown_token" else 400)
+                status = {"qcskills.unknown_token": 404, "qcskills.already_installed": 409}.get(
+                    exc.code, 400
+                )
+                return _error(exc, status)
         # Reloading this extension re-registers the MCP servers (now including
         # the new one); the host brings the MCP registry in line afterwards.
         ctx.logger.info("installed %s %s", meta["name"], meta["version"])

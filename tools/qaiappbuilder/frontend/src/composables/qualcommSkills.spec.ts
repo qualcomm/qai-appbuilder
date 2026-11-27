@@ -14,7 +14,7 @@ const activate = new Function(
   `${source.replace("export function activate", "function activate")}; return activate;`,
 )();
 
-function panel() {
+function panel(preview: Record<string, unknown> = {}) {
   let component: any;
   let title: any;
   const locale = Vue.ref("zh-CN");
@@ -46,6 +46,9 @@ function panel() {
         nesting: ["outer.zip", "inner.zip"],
         readme: "<img src=x onerror=unsafe()>",
         python_ok: true,
+        change: "new",
+        replaces: [],
+        ...preview,
       },
     })),
     mcpStatus: vi.fn(async () => ({ enabled: false, servers: [] })),
@@ -90,6 +93,57 @@ describe("Qualcomm skills route-A panel", () => {
     await click(wrapper, "一键开启 MCP");
     expect(api.setMcpEnabled).toHaveBeenCalledWith(true);
     expect(api.fetch.mock.calls.some(([path]) => path.includes("reload"))).toBe(false);
+    wrapper.unmount();
+  });
+
+  async function stageUpload(wrapper: any) {
+    await flushPromises();
+    const input = wrapper.get('input[type="file"]');
+    Object.defineProperty(input.element, "files", {
+      value: [new File(["zip"], "demo.zip")],
+      configurable: true,
+    });
+    await input.trigger("change");
+    await flushPromises();
+  }
+
+  it("a same-version preview explains why and offers no install button", async () => {
+    const { api, locale, wrapper } = panel({ change: "same", replaces: ["1"] });
+    await stageUpload(wrapper);
+    expect(wrapper.get('[data-testid="qc-change-same"]').text()).toContain("已安装，不能重复安装");
+    const labels = wrapper.findAll("button").map((b: any) => b.text());
+    expect(labels).not.toContain("确认安装");
+    expect(labels).toContain("取消");
+    locale.value = "en";
+    await Vue.nextTick();
+    expect(wrapper.get('[data-testid="qc-change-same"]').text()).toContain("already installed");
+    expect(api.fetch).not.toHaveBeenCalledWith("packages/install", expect.anything());
+    wrapper.unmount();
+  });
+
+  it.each([
+    ["upgrade", "确认升级", "升级：已安装 1"],
+    ["downgrade", "确认降级", "降级：已安装 1"],
+  ])(
+    "a %s preview is announced at the top and the button says so",
+    async (change, button, text) => {
+      const { api, wrapper } = panel({ change, replaces: ["1"], version: "2" });
+      await stageUpload(wrapper);
+      expect(wrapper.get(`[data-testid="qc-change-${change}"]`).text()).toContain(text);
+      const section = wrapper.get('[aria-label="安装预览"]');
+      expect(section.findAll("h3, p")[1]?.attributes("data-testid")).toBe(`qc-change-${change}`);
+      expect(wrapper.findAll("button").map((b: any) => b.text())).not.toContain("确认安装");
+      await click(wrapper, button);
+      expect(api.fetch).toHaveBeenCalledWith("packages/install", expect.anything());
+      wrapper.unmount();
+    },
+  );
+
+  it("a new package keeps the plain install button and no banner", async () => {
+    const { wrapper } = panel();
+    await stageUpload(wrapper);
+    expect(wrapper.find('[data-testid^="qc-change-"]').exists()).toBe(false);
+    expect(wrapper.findAll("button").map((b: any) => b.text())).toContain("确认安装");
     wrapper.unmount();
   });
 

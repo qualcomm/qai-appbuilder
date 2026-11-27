@@ -253,6 +253,20 @@ def test_builtin_can_be_disabled_and_enabled_with_package_data_kept(env) -> None
     assert [s.config.name for s in env.client.portal.call(env.registry.list_servers)] == [SERVER]
 
 
+def test_installing_the_same_version_again_is_refused_with_a_reason(env) -> None:
+    meta = _install(env)
+    staged = _stage(env)
+    assert staged["preview"]["change"] == "same"
+    response = env.client.post(
+        f"{BASE}/packages/install", json={"token": staged["token"], "allow_network": False}
+    )
+    body = response.json()
+    assert response.status_code == 409 and body["code"] == "qcskills.already_installed"
+    assert body["type"] == "ExtensionRouteError" and "already installed" in body["message"]
+    assert env.client.get(f"{BASE}/packages").json() == {"packages": [meta]}
+    assert _status(env)["state"] == "loaded" and _status(env)["mcp_servers"] == [SERVER]
+
+
 def test_failed_install_restores_existing_mcp_via_runtime_reload(env) -> None:
     meta = _install(env)
     staged = _stage(env, version="1.3", requires=("demo-dependency>=2",))

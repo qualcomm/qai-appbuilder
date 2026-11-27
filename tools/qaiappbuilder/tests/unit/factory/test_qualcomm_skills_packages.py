@@ -299,12 +299,47 @@ def test_pip_failure_leaves_nothing_and_hides_the_proxy(tmp_path: Path, monkeypa
     assert store.installed() == [] and not list(store.packages_dir.glob(".installing-*"))
 
 
+def test_same_version_is_refused_in_the_preview_and_at_install(store) -> None:
+    first = store.stage(delivery(version="1.2"))
+    assert first["change"] == "new" and first["replaces"] == []
+    store.install(first["token"])
+    again = store.stage(delivery(version="1.2"))
+    assert again["change"] == "same"
+    with pytest.raises(pk.PackageError) as exc:
+        store.install(again["token"])
+    assert exc.value.code == "qcskills.already_installed" and "already installed" in str(exc.value)
+    # Nothing changed, the staged upload is kept, no leftovers.
+    assert [p["version"] for p in store.installed()] == ["1.2"]
+    assert (store.staging_dir / again["token"]).is_dir()
+    assert not list(store.packages_dir.glob(".installing-*"))
+    assert not list(store.packages_dir.glob(".backup-*"))
+
+
+@pytest.mark.parametrize(
+    ("installed", "new", "kind"),
+    [
+        ([], "1.0", "new"),
+        (["1.2"], "1.2", "same"),
+        (["1.2"], "1.3", "upgrade"),
+        (["1.2"], "1.10", "upgrade"),
+        (["1.2"], "1.1", "downgrade"),
+        (["1.0", "2.0"], "1.5", "downgrade"),
+    ],
+)
+def test_change_kind(installed, new, kind) -> None:
+    assert pk._change_kind(new, installed) == kind
+
+
 def test_a_new_version_replaces_the_old_one(store) -> None:
     store.install(store.stage(delivery(version="1.2"))["token"])
     preview = store.stage(delivery(version="1.3"))
-    assert preview["replaces"] == ["1.2"]
+    assert preview["replaces"] == ["1.2"] and preview["change"] == "upgrade"
     store.install(preview["token"])
     assert [p["version"] for p in store.installed()] == ["1.3"]
+    down = store.stage(delivery(version="1.1"))
+    assert down["change"] == "downgrade"
+    store.install(down["token"])
+    assert [p["version"] for p in store.installed()] == ["1.1"]
 
 
 def test_remove_and_unknown_ids(store) -> None:

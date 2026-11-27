@@ -350,6 +350,16 @@ def _version_key(version: str) -> tuple[Any, ...]:
     return tuple(int(p) if p.isdigit() else -1 for p in re.split(r"[.\-+]", version))
 
 
+def _change_kind(version: str, installed: list[str]) -> str:
+    """What installing ``version`` does to the installed ones of the same name."""
+    if not installed:
+        return "new"
+    key = _version_key(version)
+    if any(_version_key(v) == key for v in installed):
+        return "same"
+    return "upgrade" if key > max(_version_key(v) for v in installed) else "downgrade"
+
+
 # -- the package store -------------------------------------------------------------
 
 
@@ -459,6 +469,7 @@ class Packages:
         w = found.wheel
         installed = {p["id"]: p for p in self.installed()}
         same_name = [p for p in installed.values() if p["name"] == w.name]
+        change = _change_kind(w.version, [p["version"] for p in same_name])
         return {
             "source": filename,
             "nesting": found.nesting,
@@ -478,11 +489,13 @@ class Packages:
             "documents": found.documents,
             "readme": found.readme,
             "replaces": [p["version"] for p in same_name],
+            # new | same | upgrade | downgrade; "same" cannot be installed.
+            "change": change,
         }
 
     # -- install / remove -----------------------------------------------------
 
-    def install(  # noqa: PLR0915 - transactional pip install and rollback
+    def install(  # noqa: PLR0912, PLR0915 - transactional pip install and rollback
         self, token: str, *, allow_network: bool = True
     ) -> dict[str, Any]:
         """Install a staged package: ``pip install --target`` into its own
@@ -492,6 +505,13 @@ class Packages:
         staged = json.loads((work / "staged.json").read_text(encoding="utf-8"))
         wheel_path = work / staged["wheel"]
         info = read_wheel(wheel_path)
+        same_name = [p["version"] for p in self.installed() if p["name"] == info.name]
+        if _change_kind(info.version, same_name) == "same":
+            raise PackageError(
+                "qcskills.already_installed",
+                f"{info.name} {info.version} is already installed. Delete it first to "
+                "reinstall, or choose a different version.",
+            )
         if not _python_ok(info.requires_python):
             raise PackageError(
                 "qcskills.python",
