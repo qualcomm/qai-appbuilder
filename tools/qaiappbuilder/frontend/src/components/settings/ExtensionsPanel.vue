@@ -267,12 +267,23 @@ onMounted(refresh);
 </script>
 
 <template>
-  <div class="ext-panel" data-testid="extensions-panel">
+  <div
+    class="ext-panel"
+    data-testid="extensions-panel"
+  >
     <header class="ext-panel__head">
       <div>
-        <h3 class="ext-panel__title">{{ t("extensions.title") }}</h3>
-        <p class="ext-panel__subtitle">{{ t("extensions.subtitle") }}</p>
-        <p v-if="directory" class="ext-panel__dir" :title="directory">
+        <h3 class="ext-panel__title">
+          {{ t("extensions.title") }}
+        </h3>
+        <p class="ext-panel__subtitle">
+          {{ t("extensions.subtitle") }}
+        </p>
+        <p
+          v-if="directory"
+          class="ext-panel__dir"
+          :title="directory"
+        >
           {{ t("extensions.directory") }} <code>{{ directory }}</code>
         </p>
       </div>
@@ -285,37 +296,73 @@ onMounted(refresh);
           data-testid="ext-zip-input"
           @change="onPickZip"
         />
-        <button type="button" class="btn btn-primary btn-sm" :disabled="!!busy" @click="fileInput?.click()">
+        <button
+          type="button"
+          class="btn btn-primary btn-sm"
+          :disabled="!!busy"
+          @click="fileInput?.click()"
+        >
           {{ t("extensions.action.addZip") }}
         </button>
-        <button type="button" class="btn btn-ghost btn-sm" :disabled="!!busy" @click="showFolder = !showFolder">
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm"
+          :disabled="!!busy"
+          @click="showFolder = !showFolder"
+        >
           {{ t("extensions.action.addFolder") }}
         </button>
-        <button type="button" class="btn btn-ghost btn-sm" :disabled="!!busy" @click="onReloadAll">
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm"
+          :disabled="!!busy"
+          @click="onReloadAll"
+        >
           {{ t("extensions.action.reloadAll") }}
         </button>
       </div>
     </header>
 
-    <form v-if="showFolder" class="ext-folder" @submit.prevent="onStageFolder">
+    <form
+      v-if="showFolder"
+      class="ext-folder"
+      @submit.prevent="onStageFolder"
+    >
       <input
         v-model="folderPath"
         class="input"
         :placeholder="t('extensions.folderPlaceholder')"
         data-testid="ext-folder-input"
       />
-      <button type="submit" class="btn btn-primary btn-sm" :disabled="!folderPath.trim() || !!busy">
+      <button
+        type="submit"
+        class="btn btn-primary btn-sm"
+        :disabled="!folderPath.trim() || !!busy"
+      >
         {{ t("extensions.action.next") }}
       </button>
     </form>
 
-    <p v-if="loading && extensions.length === 0" class="ext-panel__muted">{{ t("common.loading") }}</p>
-    <div v-else-if="empty" class="ext-panel__empty">
+    <p
+      v-if="loading && extensions.length === 0"
+      class="ext-panel__muted"
+    >
+      {{ t("common.loading") }}
+    </p>
+    <div
+      v-else-if="empty"
+      class="ext-panel__empty"
+    >
       <p>{{ t("extensions.empty.title") }}</p>
-      <p class="ext-panel__muted">{{ t("extensions.empty.hint") }}</p>
+      <p class="ext-panel__muted">
+        {{ t("extensions.empty.hint") }}
+      </p>
     </div>
 
-    <ul v-else class="ext-list">
+    <ul
+      v-else
+      class="ext-list"
+    >
       <li
         v-for="ext in extensions"
         :key="ext.name"
@@ -324,12 +371,21 @@ onMounted(refresh);
         :data-testid="`ext-card-${ext.name}`"
       >
         <div class="ext-card__main">
-          <span class="ext-dot" :class="stateClass(ext)" />
+          <span
+            class="ext-dot"
+            :class="stateClass(ext)"
+          />
           <div class="ext-card__info">
             <div class="ext-card__name-row">
               <span class="ext-card__name">{{ ext.name }}</span>
-              <span v-if="ext.version" class="ext-badge">v{{ ext.version }}</span>
-              <span class="ext-badge" :class="`ext-badge--${ext.state}`">{{ stateLabel(ext) }}</span>
+              <span
+                v-if="ext.version"
+                class="ext-badge"
+              >v{{ ext.version }}</span>
+              <span
+                class="ext-badge"
+                :class="`ext-badge--${ext.state}`"
+              >{{ stateLabel(ext) }}</span>
             </div>
             <div class="ext-card__summary">
               <span v-if="ext.tools.length">{{ t("extensions.count.tools", { n: ext.tools.length }) }}</span>
@@ -337,19 +393,45 @@ onMounted(refresh);
               <span v-if="ext.mcp_servers.length">{{ t("extensions.count.mcp", { n: ext.mcp_servers.length }) }}</span>
               <span v-if="Object.keys(ext.prompts).length">{{ t("extensions.count.prompts") }}</span>
             </div>
-            <p v-if="ext.error" class="ext-card__error">{{ ext.error }}</p>
-            <div v-if="expanded.has(ext.name)" class="ext-card__details">
-              <div v-if="ext.tools.length"><b>{{ t("extensions.detail.tools") }}</b> {{ ext.tools.join(", ") }}</div>
-              <div v-if="ext.skills.length"><b>{{ t("extensions.detail.skills") }}</b> {{ ext.skills.join(", ") }}</div>
-              <div v-if="ext.mcp_servers.length"><b>{{ t("extensions.detail.mcp") }}</b> {{ ext.mcp_servers.join(", ") }}</div>
-              <ul v-if="ext.warnings.length" class="ext-card__warnings">
-                <li v-for="(w, i) in ext.warnings" :key="i">{{ w }}</li>
+            <p
+              v-if="ext.error"
+              class="ext-card__error"
+            >
+              {{ ext.error }}
+            </p>
+            <div
+              v-if="expanded.has(ext.name)"
+              class="ext-card__details"
+            >
+              <div v-if="ext.tools.length">
+                <b>{{ t("extensions.detail.tools") }}</b> {{ ext.tools.join(", ") }}
+              </div>
+              <div v-if="ext.skills.length">
+                <b>{{ t("extensions.detail.skills") }}</b> {{ ext.skills.join(", ") }}
+              </div>
+              <div v-if="ext.mcp_servers.length">
+                <b>{{ t("extensions.detail.mcp") }}</b> {{ ext.mcp_servers.join(", ") }}
+              </div>
+              <ul
+                v-if="ext.warnings.length"
+                class="ext-card__warnings"
+              >
+                <li
+                  v-for="(w, i) in ext.warnings"
+                  :key="i"
+                >
+                  {{ w }}
+                </li>
               </ul>
             </div>
           </div>
         </div>
         <div class="ext-card__actions">
-          <button type="button" class="btn btn-ghost btn-sm" @click="toggleDetails(ext.name)">
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm"
+            @click="toggleDetails(ext.name)"
+          >
             {{ expanded.has(ext.name) ? t("extensions.action.less") : t("extensions.action.details") }}
           </button>
           <button
@@ -393,8 +475,17 @@ onMounted(refresh);
 
     <!-- Install confirmation: what the extension adds (nothing ran yet). -->
     <Teleport to="body">
-      <div v-if="staged" class="ext-modal-overlay" @click.self="cancelInstall">
-        <div class="ext-modal" role="dialog" aria-modal="true" data-testid="ext-install-dialog">
+      <div
+        v-if="staged"
+        class="ext-modal-overlay"
+        @click.self="cancelInstall"
+      >
+        <div
+          class="ext-modal"
+          role="dialog"
+          aria-modal="true"
+          data-testid="ext-install-dialog"
+        >
           <h3 class="ext-modal__title">
             {{ staged.replaces ? t("extensions.install.titleUpdate") : t("extensions.install.title") }}
           </h3>
@@ -402,13 +493,24 @@ onMounted(refresh);
             <b>{{ staged.name }}</b> v{{ staged.version }}
             <span v-if="staged.installed_version"> ({{ t("extensions.install.replaces", { v: staged.installed_version }) }})</span>
           </p>
-          <p class="ext-panel__muted">{{ staged.description }}</p>
-          <p v-if="staged.runs_code" class="ext-modal__warn">{{ t("extensions.install.runsCode") }}</p>
+          <p class="ext-panel__muted">
+            {{ staged.description }}
+          </p>
+          <p
+            v-if="staged.runs_code"
+            class="ext-modal__warn"
+          >
+            {{ t("extensions.install.runsCode") }}
+          </p>
           <dl class="ext-modal__caps">
             <template v-if="staged.tools.length">
               <dt>{{ t("extensions.detail.tools") }}</dt>
               <dd>
-                <span v-for="tool in staged.tools" :key="tool.name" class="ext-chip">
+                <span
+                  v-for="tool in staged.tools"
+                  :key="tool.name"
+                  class="ext-chip"
+                >
                   {{ tool.name }} · {{ groupLabel(tool.group) }}
                 </span>
               </dd>
@@ -420,7 +522,10 @@ onMounted(refresh);
             <template v-if="staged.mcp_servers.length">
               <dt>{{ t("extensions.detail.mcp") }}</dt>
               <dd>
-                <div v-for="m in staged.mcp_servers" :key="m.name">
+                <div
+                  v-for="m in staged.mcp_servers"
+                  :key="m.name"
+                >
                   {{ m.name }} — <code>{{ m.command || m.url }}</code>
                 </div>
               </dd>
@@ -434,12 +539,28 @@ onMounted(refresh);
               <dd>{{ staged.settings.map((s) => s.label).join(", ") }}</dd>
             </template>
           </dl>
-          <ul v-if="staged.warnings.length" class="ext-card__warnings">
-            <li v-for="(w, i) in staged.warnings" :key="i">{{ w }}</li>
+          <ul
+            v-if="staged.warnings.length"
+            class="ext-card__warnings"
+          >
+            <li
+              v-for="(w, i) in staged.warnings"
+              :key="i"
+            >
+              {{ w }}
+            </li>
           </ul>
-          <p class="ext-panel__muted">{{ t("extensions.install.trust") }}</p>
+          <p class="ext-panel__muted">
+            {{ t("extensions.install.trust") }}
+          </p>
           <div class="ext-modal__buttons">
-            <button type="button" class="btn btn-ghost btn-sm" @click="cancelInstall">{{ t("common.cancel") }}</button>
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              @click="cancelInstall"
+            >
+              {{ t("common.cancel") }}
+            </button>
             <button
               type="button"
               class="btn btn-primary btn-sm"
@@ -454,18 +575,54 @@ onMounted(refresh);
       </div>
 
       <!-- Settings card -->
-      <div v-if="configuring" class="ext-modal-overlay" @click.self="configuring = null">
-        <form class="ext-modal" role="dialog" aria-modal="true" data-testid="ext-settings-dialog" @submit.prevent="saveSettings">
-          <h3 class="ext-modal__title">{{ t("extensions.settings.title", { name: configuring }) }}</h3>
-          <p v-if="fields.length === 0" class="ext-panel__muted">{{ t("extensions.settings.none") }}</p>
-          <label v-for="f in fields" :key="f.key" class="ext-field">
+      <div
+        v-if="configuring"
+        class="ext-modal-overlay"
+        @click.self="configuring = null"
+      >
+        <form
+          class="ext-modal"
+          role="dialog"
+          aria-modal="true"
+          data-testid="ext-settings-dialog"
+          @submit.prevent="saveSettings"
+        >
+          <h3 class="ext-modal__title">
+            {{ t("extensions.settings.title", { name: configuring }) }}
+          </h3>
+          <p
+            v-if="fields.length === 0"
+            class="ext-panel__muted"
+          >
+            {{ t("extensions.settings.none") }}
+          </p>
+          <label
+            v-for="f in fields"
+            :key="f.key"
+            class="ext-field"
+          >
             <span class="ext-field__label">
-              {{ f.label }}<span v-if="f.required" class="ext-field__req">*</span>
+              {{ f.label }}<span
+                v-if="f.required"
+                class="ext-field__req"
+              >*</span>
             </span>
-            <input v-if="f.type === 'bool'" v-model="draft[f.key]" type="checkbox" />
-            <select v-else-if="f.type === 'select'" v-model="draft[f.key]" class="input">
+            <input
+              v-if="f.type === 'bool'"
+              v-model="draft[f.key]"
+              type="checkbox"
+            />
+            <select
+              v-else-if="f.type === 'select'"
+              v-model="draft[f.key]"
+              class="input"
+            >
               <option value="">—</option>
-              <option v-for="o in f.options" :key="o" :value="o">{{ o }}</option>
+              <option
+                v-for="o in f.options"
+                :key="o"
+                :value="o"
+              >{{ o }}</option>
             </select>
             <input
               v-else-if="f.type === 'number'"
@@ -494,12 +651,32 @@ onMounted(refresh);
                 {{ clearSecrets.has(f.key) ? t("extensions.settings.keep") : t("extensions.settings.clear") }}
               </button>
             </template>
-            <input v-else v-model="draft[f.key]" type="text" class="input" />
-            <span v-if="f.description" class="ext-field__hint">{{ f.description }}</span>
+            <input
+              v-else
+              v-model="draft[f.key]"
+              type="text"
+              class="input"
+            />
+            <span
+              v-if="f.description"
+              class="ext-field__hint"
+            >{{ f.description }}</span>
           </label>
           <div class="ext-modal__buttons">
-            <button type="button" class="btn btn-ghost btn-sm" @click="configuring = null">{{ t("common.cancel") }}</button>
-            <button v-if="fields.length" type="submit" class="btn btn-primary btn-sm" :disabled="!!busy" data-testid="ext-settings-save">
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              @click="configuring = null"
+            >
+              {{ t("common.cancel") }}
+            </button>
+            <button
+              v-if="fields.length"
+              type="submit"
+              class="btn btn-primary btn-sm"
+              :disabled="!!busy"
+              data-testid="ext-settings-save"
+            >
               {{ t("common.save") }}
             </button>
           </div>
@@ -507,17 +684,44 @@ onMounted(refresh);
       </div>
 
       <!-- Uninstall -->
-      <div v-if="removing" class="ext-modal-overlay" @click.self="removing = null">
-        <div class="ext-modal" role="dialog" aria-modal="true" data-testid="ext-uninstall-dialog">
-          <h3 class="ext-modal__title">{{ t("extensions.uninstall.title", { name: removing.name }) }}</h3>
+      <div
+        v-if="removing"
+        class="ext-modal-overlay"
+        @click.self="removing = null"
+      >
+        <div
+          class="ext-modal"
+          role="dialog"
+          aria-modal="true"
+          data-testid="ext-uninstall-dialog"
+        >
+          <h3 class="ext-modal__title">
+            {{ t("extensions.uninstall.title", { name: removing.name }) }}
+          </h3>
           <p>{{ t("extensions.uninstall.message") }}</p>
           <label class="ext-check">
-            <input v-model="purgeData" type="checkbox" data-testid="ext-purge" />
+            <input
+              v-model="purgeData"
+              type="checkbox"
+              data-testid="ext-purge"
+            />
             {{ t("extensions.uninstall.purge") }}
           </label>
           <div class="ext-modal__buttons">
-            <button type="button" class="btn btn-ghost btn-sm" @click="removing = null">{{ t("common.cancel") }}</button>
-            <button type="button" class="btn btn-danger btn-sm" :disabled="!!busy" data-testid="ext-uninstall-confirm" @click="confirmUninstall">
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              @click="removing = null"
+            >
+              {{ t("common.cancel") }}
+            </button>
+            <button
+              type="button"
+              class="btn btn-danger btn-sm"
+              :disabled="!!busy"
+              data-testid="ext-uninstall-confirm"
+              @click="confirmUninstall"
+            >
               {{ t("extensions.action.uninstall") }}
             </button>
           </div>

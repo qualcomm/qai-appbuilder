@@ -39,6 +39,7 @@
     "vue-router": "^4.4.0"
   },
   "devDependencies": {
+    "@eslint/js": "9.39.4",
     "@playwright/test": "^1.47.0",
     "@types/dompurify": "^3.0.0",
     "@types/marked": "^6.0.0",
@@ -62,6 +63,7 @@
     "typescript": "~5.6.0",
     "vite": "^5.4.0",
     "vitest": "^2.1.0",
+    "vue-eslint-parser": "9.4.3",
     "vue-tsc": "^2.1.0"
   },
   "// notes": "openapi-typescript generates frontend/src/types/api.ts from tools/openapi/api-snapshot.json (PR-050 §11.4 type sync). marked / highlight.js / dompurify are imported via npm; the legacy frontend/vendor/ runtime mounts are NOT used by this Vite app and will be deleted in S8 PR-081. Pinia replaces the scattered reactive stores in legacy frontend/js/. vue-router replaces the manual hash-route logic in legacy frontend/js/app.js. pnpm settings (overrides/patchedDependencies) live in pnpm-workspace.yaml since pnpm 10+ no longer reads the package.json \"pnpm\" key."

@@ -130,7 +130,11 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <div ref="root" class="ext-mode" data-testid="ext-mode">
+  <div
+    ref="root"
+    class="ext-mode"
+    data-testid="ext-mode"
+  >
     <template v-if="current">
       <button
         type="button"
@@ -139,11 +143,20 @@ async function submit(): Promise<void> {
         :title="t('extensions.mode.exit')"
         @click="exitMode"
       >
-        <span v-if="current.icon" aria-hidden="true">{{ current.icon }}</span>
+        <span
+          v-if="current.icon"
+          aria-hidden="true"
+        >{{ current.icon }}</span>
         <span>{{ current.label }}</span>
-        <span class="ext-mode__x" aria-hidden="true">✕</span>
+        <span
+          class="ext-mode__x"
+          aria-hidden="true"
+        >✕</span>
       </button>
-      <span v-if="current.actions.length" class="rit-sep"></span>
+      <span
+        v-if="current.actions.length"
+        class="rit-sep"
+      ></span>
       <button
         v-for="a in current.actions"
         :key="a.id"
@@ -169,7 +182,12 @@ async function submit(): Promise<void> {
         <span>{{ t("extensions.mode.button") }}</span>
         <span aria-hidden="true">▾</span>
       </button>
-      <div v-if="open" class="ext-mode__menu" role="menu" data-testid="ext-menu">
+      <div
+        v-if="open"
+        class="ext-mode__menu"
+        role="menu"
+        data-testid="ext-menu"
+      >
         <button
           v-for="e in modes.entries.value"
           :key="e.name"
@@ -180,21 +198,36 @@ async function submit(): Promise<void> {
           :data-testid="`ext-menu-item-${e.name}`"
           @click="pick(e.name)"
         >
-          <span class="ext-mode__icon" aria-hidden="true">{{ e.icon || "🧩" }}</span>
+          <span
+            class="ext-mode__icon"
+            aria-hidden="true"
+          >{{ e.icon || "🧩" }}</span>
           <span>{{ e.label }}</span>
         </button>
-        <p v-if="modes.entries.value.length === 0" class="ext-mode__empty">
+        <p
+          v-if="modes.entries.value.length === 0"
+          class="ext-mode__empty"
+        >
           {{ t("extensions.mode.none") }}
         </p>
         <hr class="ext-mode__sep" />
-        <button type="button" role="menuitem" class="ext-mode__item" @click="openSettings">
+        <button
+          type="button"
+          role="menuitem"
+          class="ext-mode__item"
+          @click="openSettings"
+        >
           {{ t("extensions.mode.settings") }}
         </button>
       </div>
     </template>
 
     <Teleport to="body">
-      <div v-if="action && current" class="ext-modal-overlay" @click.self="action = null">
+      <div
+        v-if="action && current"
+        class="ext-modal-overlay"
+        @click.self="action = null"
+      >
         <form
           class="ext-modal"
           role="dialog"
@@ -203,16 +236,42 @@ async function submit(): Promise<void> {
           @submit.prevent="submit"
           @keydown.esc="action = null"
         >
-          <h3 class="ext-modal__title">{{ current.label }} — {{ action.label }}</h3>
-          <p v-if="action.description" class="ext-panel__muted">{{ action.description }}</p>
-          <label v-for="f in action.fields" :key="f.key" class="ext-field">
+          <h3 class="ext-modal__title">
+            {{ current.label }} — {{ action.label }}
+          </h3>
+          <p
+            v-if="action.description"
+            class="ext-panel__muted"
+          >
+            {{ action.description }}
+          </p>
+          <label
+            v-for="f in action.fields"
+            :key="f.key"
+            class="ext-field"
+          >
             <span class="ext-field__label">
-              {{ f.label }}<span v-if="f.required" class="ext-field__req">*</span>
+              {{ f.label }}<span
+                v-if="f.required"
+                class="ext-field__req"
+              >*</span>
             </span>
-            <input v-if="f.type === 'bool'" v-model="values[f.key]" type="checkbox" />
-            <select v-else-if="f.type === 'select'" v-model="values[f.key]" class="input">
+            <input
+              v-if="f.type === 'bool'"
+              v-model="values[f.key]"
+              type="checkbox"
+            />
+            <select
+              v-else-if="f.type === 'select'"
+              v-model="values[f.key]"
+              class="input"
+            >
               <option value="">—</option>
-              <option v-for="o in f.options" :key="o" :value="o">{{ o }}</option>
+              <option
+                v-for="o in f.options"
+                :key="o"
+                :value="o"
+              >{{ o }}</option>
             </select>
             <input
               v-else-if="f.type === 'number'"
@@ -230,12 +289,29 @@ async function submit(): Promise<void> {
               class="input"
               :data-testid="`ext-action-field-${f.key}`"
             />
-            <span v-if="f.description" class="ext-field__hint">{{ f.description }}</span>
-            <span v-if="fieldErrors[f.key]" class="ext-field__error">{{ fieldErrors[f.key] }}</span>
+            <span
+              v-if="f.description"
+              class="ext-field__hint"
+            >{{ f.description }}</span>
+            <span
+              v-if="fieldErrors[f.key]"
+              class="ext-field__error"
+            >{{ fieldErrors[f.key] }}</span>
           </label>
           <div class="ext-modal__buttons">
-            <button type="button" class="btn btn-ghost btn-sm" @click="action = null">{{ t("common.cancel") }}</button>
-            <button type="submit" class="btn btn-primary btn-sm" :disabled="running" data-testid="ext-action-submit">
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              @click="action = null"
+            >
+              {{ t("common.cancel") }}
+            </button>
+            <button
+              type="submit"
+              class="btn btn-primary btn-sm"
+              :disabled="running"
+              data-testid="ext-action-submit"
+            >
               {{ running ? t("extensions.action.working") : t("extensions.mode.run") }}
             </button>
           </div>
